@@ -1,0 +1,65 @@
+:root {
+  --bg: #0a0a0c;
+  --surface: #111116;
+  --surface-raised: #18181f;
+  --surface-hover: #1e1e26;
+  --border: #232330;
+  --border-subtle: #1a1a24;
+  --text: #d4d4d8;
+  --text-dim: #636370;
+  --text-faint: #3e3e4a;
+  --accent: #3db8a9;
+  --accent-dim: #1a2e2b;
+  --accent-text: #5cd4c4;
+  --danger: #d4634f;
+  --warning: #e09a3c;
+  --key-bg: #1e1e26;
+  --key-border: #2a2a35;
+  --key-text: #a0a0ac;
+  --key-active: #3db8a9;
+  --sidebar-width: 240px;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  /* Pull-to-refresh or rubber-banding would reload or shift a live terminal. */
+  overscroll-behavior: none;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  /* Side insets only (landscape notch). Top and bottom insets are handled by
+     the bars that touch those edges, so their background fills to the edge. */
+  padding: 0 env(safe-area-inset-right) 0 env(safe-area-inset-left);
+}
+
+#root {
+  /* Set from the visual viewport by useAppHeight so the layout ends where the
+     soft keyboard begins. 100dvh is the fallback before the hook runs. */
+  height: var(--app-height, 100dvh);
+}
+
+button, input {
+  /* No 300ms tap delay, no double-tap zoom, no long-press callout on controls. */
+  touch-action: manipulation;
+  -webkit-touch-callout: none;
+}
+
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
