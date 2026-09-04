@@ -3,6 +3,7 @@ import type { TouchEvent as ReactTouchEvent } from 'react'
 import { Sidebar } from './Sidebar'
 import { Terminal } from './Terminal'
 import { KeyToolbar } from './KeyToolbar'
+import { Composer } from './Composer'
 import { FilePanel } from './FilePanel'
 import { useSocket } from './hooks/useSocket'
 import { useAppHeight } from './hooks/useAppHeight'
@@ -119,6 +120,11 @@ export function App() {
       }
       if (msg.type === 'session:created') {
         setSessions(prev => applySessionMessage(prev, msg))
+        // Every client hears about the new session; only the one that asked
+        // for it switches to it. Without this, creating a session on one
+        // device yanks every other device into it.
+        if (!pendingCreate.current) return
+        pendingCreate.current = false
         setActiveSession(msg.window.id)
         // A new session's terminal must be visible when it mounts so xterm
         // can measure its font; and you created it to look at it anyway.
@@ -147,6 +153,9 @@ export function App() {
   const uploadFiles = useCallback((files: File[]) => {
     window.dispatchEvent(new CustomEvent('nest:upload', { detail: files }))
   }, [])
+  const submitText = useCallback((text: string) => {
+    window.dispatchEvent(new CustomEvent('nest:submit', { detail: text }))
+  }, [])
 
   // Sticky Ctrl/Alt from the toolbar. Armed here, applied by the active
   // terminal to its next input, then cleared.
@@ -164,7 +173,9 @@ export function App() {
     }
   }, [isMobile])
 
+  const pendingCreate = useRef(false)
   const createSession = useCallback(() => {
+    pendingCreate.current = true
     send({ type: 'session:create' })
   }, [send])
 
@@ -416,6 +427,11 @@ export function App() {
             />
           )}
         </div>
+
+        {/* Mobile input bar: see Composer.tsx for why typing goes here. */}
+        {isMobile && mobileView === 'terminal' && (
+          <Composer onSubmit={submitText} />
+        )}
 
         {/* Key toolbar */}
         <KeyToolbar

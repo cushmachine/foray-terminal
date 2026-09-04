@@ -241,8 +241,24 @@ export function Terminal({
       term.focus()
       term.paste((e as CustomEvent).detail as string)
     }
+    // The mobile input bar: paste the message, then Enter. No term.focus()
+    // here, so the bar keeps the keyboard up. Enter goes a beat later as
+    // its own write, so the app reads it as a keypress rather than as the
+    // tail of the paste.
+    let submitTimer: ReturnType<typeof setTimeout> | null = null
+    const handleSubmit = (e: Event) => {
+      if (!isActiveRef.current) return
+      const text = (e as CustomEvent).detail as string
+      if (text) term.paste(text)
+      if (submitTimer) clearTimeout(submitTimer)
+      submitTimer = setTimeout(() => {
+        submitTimer = null
+        send({ type: 'terminal:input', windowId, data: '\r' })
+      }, text ? 40 : 0)
+    }
     window.addEventListener('nest:sendkeys', handleSendKeys)
     window.addEventListener('nest:paste', handlePaste)
+    window.addEventListener('nest:submit', handleSubmit)
 
     // Touch scrolling. xterm.js 6 ships VS Code's gesture code but never
     // wires it up, so a drag on a phone scrolls nothing; and with tmux out
@@ -331,6 +347,8 @@ export function Terminal({
       fitRef.current = null
       window.removeEventListener('nest:sendkeys', handleSendKeys)
       window.removeEventListener('nest:paste', handlePaste)
+      window.removeEventListener('nest:submit', handleSubmit)
+      if (submitTimer) clearTimeout(submitTimer)
       container.removeEventListener('touchstart', handleTouchStart)
       container.removeEventListener('touchmove', handleTouchMove)
       container.removeEventListener('touchend', handleTouchEnd)
