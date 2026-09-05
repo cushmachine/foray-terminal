@@ -69,8 +69,8 @@ export function Composer({ onSubmit }: ComposerProps) {
         rows={1}
         placeholder="Message"
         enterKeyHint="send"
-        autoCapitalize="sentences"
-        autoCorrect="on"
+        autoCapitalize="off"
+        autoCorrect="off"
         spellCheck
         aria-label="Message to send to the terminal"
         style={{

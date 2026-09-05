@@ -264,9 +264,13 @@ export function Terminal({
     window.addEventListener('nest:paste', handlePaste)
     window.addEventListener('nest:submit', handleSubmit)
 
-    // Wheel over the xterm canvas scrolls the outer container instead of
-    // xterm's own (now empty) scrollback.
+    // Wheel over the xterm canvas must scroll the outer container, not
+    // xterm's own (now empty) scrollback. Placed on the scroll container
+    // itself so it fires for the whole area (history + xterm); only
+    // intercepted when the event originated inside the xterm canvas,
+    // otherwise let the browser scroll normally.
     const handleWheel = (e: WheelEvent) => {
+      if (!container.contains(e.target as Node)) return
       let dy = e.deltaY
       if (e.deltaMode === 1) {
         const screen = term.element?.querySelector<HTMLElement>('.xterm-screen')
@@ -275,9 +279,8 @@ export function Terminal({
       }
       scrollEl.scrollTop += dy
       e.preventDefault()
-      e.stopPropagation()
     }
-    container.addEventListener('wheel', handleWheel, { capture: true, passive: false })
+    scrollEl.addEventListener('wheel', handleWheel, { passive: false })
 
     termRef.current = term
 
@@ -288,7 +291,7 @@ export function Terminal({
       window.removeEventListener('nest:submit', handleSubmit)
       if (submitTimer) clearTimeout(submitTimer)
       scrollEl.removeEventListener('scroll', handleScroll)
-      container.removeEventListener('wheel', handleWheel, { capture: true })
+      scrollEl.removeEventListener('wheel', handleWheel)
       dataSub.dispose()
       unsubscribe()
       observer.disconnect()
