@@ -18,6 +18,8 @@
     "test:chunkD": "tsx src/__tests__/chunkD.test.ts",
     "test:chunkE": "tsx src/server/__tests__/chunkE.test.ts",
     "test:chunkF": "tsx src/__tests__/chunkF.test.ts",
+    "test:chunkH": "tsx src/server/__tests__/chunkH.test.ts",
+    "test:chunkI": "tsx src/__tests__/chunkI.test.ts",
     "test:chunkM": "tsx src/__tests__/chunkM.test.ts",
     "test:e2e": "tsx src/e2e/e2e.test.ts"
   },

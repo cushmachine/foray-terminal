@@ -13,7 +13,8 @@ import { existsSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import { WebSocketServer, type WebSocket } from 'ws'
 import type { ClientMessage, ServerMessage } from '../shared/protocol.ts'
-import { listWindows, createWindow, killWindow, renameWindow, captureHistory } from './tmux.ts'
+import { listWindows, createWindow, killWindow, renameWindow, paneHistoryState, captureHistoryLines } from './tmux.ts'
+import { planHistoryUpdate, alignHistory, nextTail } from './history.ts'
 import { attachToPane, type PtyHandle, type PtySpawner } from './pty-bridge.ts'
 import { getTree, readFile, writeFile, watchDir, type Watcher } from './files.ts'
 import {
@@ -47,6 +48,42 @@ export const DEFAULT_POLL_INTERVAL_MS = 2000
  * would linger until the OS gives up on the TCP connection.
  */
 export const DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000
+
+/**
+ * Scrollback comes from tmux's history, not from the byte stream (see
+ * history.ts). Once pty output has been quiet for this long the server asks
+ * tmux whether the history grew and ships the new lines, so a burst costs
+ * one tmux call rather than one per chunk.
+ */
+const HISTORY_CHECK_MS = 80
+
+/**
+ * Lines remembered from what was last sent. At the history limit the size
+ * stops moving while lines rotate through, so new lines are found by
+ * overlap with these.
+ */
+const HISTORY_TAIL = 50
+
+/**
+ * How long after a resize to wait before sending the whole history again.
+ * tmux reflows history to the new width, which moves the line boundaries
+ * the client already has.
+ */
+const HISTORY_REFLOW_MS = 150
+
+/** What one connection has told a client about one window's history. */
+interface HistoryTracker {
+  /** History size the client has; null when nothing has been sent. */
+  known: number | null
+  /** Last HISTORY_TAIL lines sent, for alignment. */
+  sentTail: string[]
+  timer: ReturnType<typeof setTimeout> | null
+  running: boolean
+  /** Output arrived while a sync was running, so another check is due. */
+  dirty: boolean
+  /** A forced sync could not run (one was in flight, or the alternate screen was on); the next run resets. */
+  resetNext: boolean
+}
 
 export interface ServerOptions {
   /** Override the tmux poll interval (tests use a short one). */
@@ -300,6 +337,88 @@ export function startServer(
     // Track pty handles for this connection, keyed by windowId.
     const ptys = new Map<number, PtyHandle>()
 
+    // History sent to this client, keyed by windowId. A tracker lives as
+    // long as the pty it shadows; killing the pty drops it.
+    const trackers = new Map<number, HistoryTracker>()
+
+    const dropTracker = (windowId: number): void => {
+      const tracker = trackers.get(windowId)
+      if (!tracker) return
+      if (tracker.timer) clearTimeout(tracker.timer)
+      trackers.delete(windowId)
+    }
+
+    /** Check the history once output has settled; a burst becomes one check. */
+    const scheduleHistory = (windowId: number): void => {
+      const tracker = trackers.get(windowId)
+      if (!tracker) return
+      tracker.dirty = true
+      if (tracker.timer || tracker.running) return
+      tracker.timer = setTimeout(() => {
+        tracker.timer = null
+        void syncHistory(windowId)
+      }, HISTORY_CHECK_MS)
+    }
+
+    /**
+     * Bring the client's history up to date with the pane's. `force` sends
+     * the whole history again (attach, resize reflow). One sync per window
+     * runs at a time; a request that lands mid-run is folded into a rerun so
+     * messages reach the client in order.
+     */
+    const syncHistory = async (windowId: number, force = false): Promise<void> => {
+      const tracker = trackers.get(windowId)
+      if (!tracker) return
+      if (tracker.running) {
+        tracker.dirty = true
+        if (force) tracker.resetNext = true
+        return
+      }
+      const reset = force || tracker.resetNext
+      tracker.running = true
+      tracker.dirty = false
+      tracker.resetNext = false
+      // The tracker can be dropped or replaced (re-attach, close) while tmux
+      // answers; what came back then describes a client state that is gone.
+      const stale = (): boolean => trackers.get(windowId) !== tracker
+      try {
+        const state = await paneHistoryState(windowId)
+        if (stale()) return
+        const plan = planHistoryUpdate(reset ? null : tracker.known, state)
+        if (plan.kind === 'none') {
+          // Only the alternate screen turns a reset into nothing: history is
+          // frozen behind it, so the reset waits until it comes back.
+          if (reset) tracker.resetNext = true
+          return
+        }
+        if (plan.kind === 'sync') {
+          const captured = await captureHistoryLines(windowId, Math.min(state.size, plan.count + HISTORY_TAIL))
+          if (stale()) return
+          const fresh = alignHistory(tracker.sentTail, captured)
+          if (fresh !== null) {
+            if (fresh.length > 0) {
+              tracker.sentTail = nextTail(tracker.sentTail, fresh, HISTORY_TAIL)
+              send(ws, { type: 'terminal:history', windowId, lines: fresh, reset: false })
+            }
+            tracker.known = state.size
+            return
+          }
+          // No overlap with what was sent: the client is too far behind to
+          // append, so fall through and start it over.
+        }
+        const lines = await captureHistoryLines(windowId, state.size)
+        if (stale()) return
+        tracker.sentTail = nextTail([], lines, HISTORY_TAIL)
+        tracker.known = state.size
+        send(ws, { type: 'terminal:history', windowId, lines, reset: true })
+      } catch (err) {
+        console.error('[ws] history sync error:', err)
+      } finally {
+        tracker.running = false
+        if (tracker.dirty && !stale()) scheduleHistory(windowId)
+      }
+    }
+
     // Track file-panel state for this connection: the cwd most recently
     // established via files:tree/files:watch, and the active directory
     // watcher (if any), so files:read/files:write know where to resolve
@@ -351,10 +470,25 @@ export function startServer(
             break
           }
           case 'terminal:attach': {
+            // Kill any existing pty for this window on this connection.
+            const existing = ptys.get(msg.windowId)
+            if (existing) existing.kill()
+            dropTracker(msg.windowId)
+
+            // The client's scrollback is the pane's history; send all of it
+            // before the pty spawns so it sits above the live screen from
+            // the first paint.
+            trackers.set(msg.windowId, {
+              known: null, sentTail: [], timer: null, running: false, dirty: false, resetNext: false,
+            })
+            await syncHistory(msg.windowId, true)
+
             // Single-owner handoff: whoever last attached to this window
             // "owns" it. Notify any previously attached clients (other
             // connections) that they've been taken over, then replace the
-            // window's client set with just this one.
+            // window's client set with just this one. This comes after the
+            // history round-trip so the handoff and the spawn below happen
+            // together, with nothing awaited in between.
             const previousClients = windowClients.get(msg.windowId)
             if (previousClients) {
               for (const client of previousClients) {
@@ -366,26 +500,6 @@ export function startServer(
             windowClients.set(msg.windowId, new Set([ws]))
             broadcastOwnership()
 
-            // Kill any existing pty for this window on this connection.
-            const existing = ptys.get(msg.windowId)
-            if (existing) existing.kill()
-
-            // Hand a brand-new terminal the lines that already scrolled off
-            // the top (scrollback lives in the browser, see captureHistory).
-            // Padded with a screenful of newlines so the whole replay sits
-            // above the viewport before tmux paints the live screen into it;
-            // otherwise the repaint would overwrite the newest history lines.
-            if (msg.history) {
-              const history = await captureHistory(msg.windowId).catch((err) => {
-                console.error('[ws] history replay error:', err)
-                return ''
-              })
-              if (history) {
-                const pad = '\r\n'.repeat(Math.max((msg.rows ?? 24) - 1, 0))
-                send(ws, { type: 'terminal:output', windowId: msg.windowId, data: history + pad })
-              }
-            }
-
             // pty spawn can throw synchronously (e.g. no tmux binary, or no
             // real tmux session in a test/dev environment) — ownership
             // tracking above should still hold even when this fails.
@@ -394,6 +508,7 @@ export function startServer(
                 msg.windowId,
                 (data) => {
                   send(ws, { type: 'terminal:output', windowId: msg.windowId, data })
+                  scheduleHistory(msg.windowId)
                 },
                 { cols: msg.cols, rows: msg.rows },
                 options.ptySpawner,
@@ -415,7 +530,15 @@ export function startServer(
           }
           case 'terminal:resize': {
             const handle = ptys.get(msg.windowId)
-            if (handle) handle.resize(msg.cols, msg.rows)
+            if (handle) {
+              handle.resize(msg.cols, msg.rows)
+              // tmux reflows the history to the new width, so the lines the
+              // client has no longer match; send the whole set again once
+              // the reflow has landed.
+              setTimeout(() => {
+                void syncHistory(msg.windowId, true)
+              }, HISTORY_REFLOW_MS)
+            }
             break
           }
           case 'files:tree': {
@@ -480,6 +603,10 @@ export function startServer(
         handle.kill()
       }
       ptys.clear()
+      for (const tracker of trackers.values()) {
+        if (tracker.timer) clearTimeout(tracker.timer)
+      }
+      trackers.clear()
 
       // Clean up any active file watcher for this connection.
       if (currentWatcher) {

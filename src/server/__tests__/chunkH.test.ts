@@ -1,0 +1,124 @@
+// Chunk H tests: the pure decisions behind scrollback from tmux history.
+// What to fetch given what the client already has (planHistoryUpdate), how
+// to find the new lines in a fresh capture (alignHistory), and what to
+// remember for the next alignment (nextTail). No tmux involved; the CLI
+// wrapper is covered in chunkA.
+//
+// Run with: npm run test:chunkH
+
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+
+import {
+  planHistoryUpdate,
+  alignHistory,
+  nextTail,
+  SATURATED_WINDOW,
+  type PaneHistoryState,
+} from '../history.ts'
+
+/** A pane well below its limit, on the main screen, unless overridden. */
+function state(size: number, overrides: Partial<PaneHistoryState> = {}): PaneHistoryState {
+  return { size, limit: 2000, alternate: false, ...overrides }
+}
+
+/** Lines l<from>..l<to>, oldest first. */
+function lines(from: number, to: number): string[] {
+  const out: string[] = []
+  for (let i = from; i <= to; i++) out.push(`l${i}`)
+  return out
+}
+
+// ---------------------------------------------------------------------------
+// planHistoryUpdate
+// ---------------------------------------------------------------------------
+
+test('planHistoryUpdate does nothing while the alternate screen is on', () => {
+  // History is frozen behind a full-screen app, whatever the client has.
+  assert.deepEqual(planHistoryUpdate(10, state(20, { alternate: true })), { kind: 'none' })
+  assert.deepEqual(planHistoryUpdate(null, state(20, { alternate: true })), { kind: 'none' })
+})
+
+test('planHistoryUpdate resets when nothing has been sent', () => {
+  assert.deepEqual(planHistoryUpdate(null, state(120)), { kind: 'reset' })
+  // Even an empty history: the client may hold lines from a previous attach.
+  assert.deepEqual(planHistoryUpdate(null, state(0)), { kind: 'reset' })
+})
+
+test('planHistoryUpdate resets when the history shrank', () => {
+  // A resize reflow or a cleared history: the client's lines are stale.
+  assert.deepEqual(planHistoryUpdate(120, state(90)), { kind: 'reset' })
+})
+
+test('planHistoryUpdate checks a window of the tail once the history is at its limit', () => {
+  assert.deepEqual(planHistoryUpdate(2000, state(2000)), { kind: 'sync', count: SATURATED_WINDOW })
+  // The size never moves again, so growth can no longer be read off it.
+  assert.deepEqual(planHistoryUpdate(2000, state(2010)), { kind: 'sync', count: SATURATED_WINDOW })
+  // A limit smaller than the window: never ask for more than exists.
+  assert.deepEqual(planHistoryUpdate(50, state(50, { limit: 50 })), { kind: 'sync', count: 50 })
+  assert.deepEqual(planHistoryUpdate(2000, state(2000), 10), { kind: 'sync', count: 10 })
+})
+
+test('planHistoryUpdate does nothing when the size has not moved', () => {
+  assert.deepEqual(planHistoryUpdate(120, state(120)), { kind: 'none' })
+})
+
+test('planHistoryUpdate syncs the delta when the history grew', () => {
+  assert.deepEqual(planHistoryUpdate(100, state(130)), { kind: 'sync', count: 30 })
+  // An unknown limit (0) is not saturation.
+  assert.deepEqual(planHistoryUpdate(100, state(130, { limit: 0 })), { kind: 'sync', count: 30 })
+})
+
+// ---------------------------------------------------------------------------
+// alignHistory
+// ---------------------------------------------------------------------------
+
+test('alignHistory returns only the lines after what was already sent', () => {
+  assert.deepEqual(alignHistory(lines(1, 5), lines(1, 7)), ['l6', 'l7'])
+  // The capture need not start where the sent tail starts.
+  assert.deepEqual(alignHistory(lines(1, 5), lines(3, 7)), ['l6', 'l7'])
+})
+
+test('alignHistory returns [] when nothing new has arrived', () => {
+  assert.deepEqual(alignHistory(lines(1, 5), lines(3, 5)), [])
+})
+
+test('alignHistory returns null when the captured tail is entirely new', () => {
+  // Too much arrived since the last check to know where to append.
+  assert.equal(alignHistory(lines(1, 5), lines(20, 30)), null)
+})
+
+test('alignHistory returns null when nothing was ever sent', () => {
+  assert.equal(alignHistory([], lines(1, 5)), null)
+})
+
+test('alignHistory finds the sent tail mid-window when history rotates at its limit', () => {
+  // At the limit the size stops moving; the last sent lines sit somewhere
+  // inside the captured window with the new lines after them.
+  assert.deepEqual(alignHistory(lines(1, 10), lines(8, 17)), lines(11, 17))
+})
+
+test('alignHistory prefers the longest run when lines repeat', () => {
+  // The last sent line also ends the capture. Matching only that line from
+  // the newest end would report nothing new; the full run shows two lines
+  // arrived.
+  assert.deepEqual(alignHistory(['p', 'q', 'r'], ['p', 'q', 'r', 's', 'r']), ['s', 'r'])
+})
+
+test('alignHistory needs more than a one-line overlap when it has more to compare', () => {
+  // Blank lines and prompts repeat; one matching line is no evidence.
+  assert.equal(alignHistory(['a', 'b', 'c'], ['c', 'd', 'e']), null)
+  // A short sent tail is all there is, so one line has to do.
+  assert.deepEqual(alignHistory(['a'], ['a', 'b']), ['b'])
+})
+
+// ---------------------------------------------------------------------------
+// nextTail
+// ---------------------------------------------------------------------------
+
+test('nextTail keeps only the newest lines up to the cap', () => {
+  assert.deepEqual(nextTail(['a', 'b', 'c'], ['d', 'e'], 4), ['b', 'c', 'd', 'e'])
+  assert.deepEqual(nextTail([], ['a', 'b'], 50), ['a', 'b'])
+  assert.deepEqual(nextTail(lines(1, 60), [], 50), lines(11, 60))
+  assert.deepEqual(nextTail(['a'], ['b'], 5), ['a', 'b'])
+})

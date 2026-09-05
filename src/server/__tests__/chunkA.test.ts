@@ -11,7 +11,8 @@ import {
   createWindow,
   killWindow,
   renameWindow,
-  captureHistory,
+  paneHistoryState,
+  captureHistoryLines,
   SEP,
   type TmuxExecutor,
 } from '../tmux.ts'
@@ -224,36 +225,52 @@ test('createWindow defaults name to bash when not provided and leaves it unnamed
 })
 
 // ---------------------------------------------------------------------------
-// Test 2b: tmux.captureHistory (scrollback replay for a fresh terminal)
+// Test 2b: tmux.paneHistoryState and tmux.captureHistoryLines (scrollback
+// comes from tmux history; history.ts decides what to do with these)
 // ---------------------------------------------------------------------------
 
-test('captureHistory returns only the lines above the visible screen', async () => {
+test('paneHistoryState parses size, limit and the alternate-screen flag', async () => {
   const calls: string[][] = []
   const mockExec: TmuxExecutor = async (_cmd, args) => {
     calls.push(args)
-    if (args[0] === 'display-message') return { stdout: '120\n', stderr: '' }
-    if (args[0] === 'capture-pane') return { stdout: 'old 1\nold 2\n', stderr: '' }
-    return { stdout: '', stderr: '' }
+    return { stdout: '120 2000 0\n', stderr: '' }
   }
 
-  const out = await captureHistory(7, mockExec)
-  assert.equal(out, 'old 1\nold 2\n')
-  const cap = calls.find((a) => a[0] === 'capture-pane')
-  assert.ok(cap, 'capture-pane must be called')
-  assert.ok(cap.includes('$7'))
-  const s = cap.indexOf('-S')
-  assert.deepEqual(cap.slice(s, s + 4), ['-S', '-120', '-E', '-1'], 'history lines only, not the visible rows')
+  assert.deepEqual(await paneHistoryState(7, mockExec), { size: 120, limit: 2000, alternate: false })
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0][0], 'display-message')
+  assert.ok(calls[0].includes('$7'))
+  assert.equal(calls[0][calls[0].indexOf('-F') + 1], '#{history_size} #{history_limit} #{alternate_on}')
 })
 
-test('captureHistory skips capture-pane when the pane has no history', async () => {
+test('paneHistoryState reports the alternate screen', async () => {
+  const state = await paneHistoryState(7, execReturning('5 2000 1\n'))
+  assert.deepEqual(state, { size: 5, limit: 2000, alternate: true })
+})
+
+test('captureHistoryLines asks for the last N history rows and splits them', async () => {
   const calls: string[][] = []
   const mockExec: TmuxExecutor = async (_cmd, args) => {
     calls.push(args)
-    return { stdout: '0\n', stderr: '' }
+    return { stdout: 'old 1\n\nold 3\n', stderr: '' }
   }
 
-  assert.equal(await captureHistory(7, mockExec), '')
-  assert.ok(!calls.some((a) => a[0] === 'capture-pane'))
+  // Only the trailing newline goes; a blank row mid-history is a real row.
+  assert.deepEqual(await captureHistoryLines(7, 3, mockExec), ['old 1', '', 'old 3'])
+  assert.equal(calls.length, 1)
+  const cap = calls[0]
+  assert.equal(cap[0], 'capture-pane')
+  assert.ok(cap.includes('$7'))
+  assert.ok(cap.includes('-e'), 'colour escapes must survive')
+  const s = cap.indexOf('-S')
+  assert.deepEqual(cap.slice(s, s + 4), ['-S', '-3', '-E', '-1'], 'history rows only, not the visible screen')
+})
+
+test('captureHistoryLines returns [] for a count of 0 without calling tmux', async () => {
+  const mockExec: TmuxExecutor = async () => {
+    throw new Error('tmux must not be called')
+  }
+  assert.deepEqual(await captureHistoryLines(7, 0, mockExec), [])
 })
 
 // ---------------------------------------------------------------------------

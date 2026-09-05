@@ -58,12 +58,6 @@ export interface TerminalAttachMessage {
    */
   cols?: number
   rows?: number
-  /**
-   * Replay the pane's scrolled-off history before the live stream. Set by a
-   * brand-new terminal only: a reconnecting one already holds its history,
-   * and replaying again would duplicate it.
-   */
-  history?: boolean
 }
 
 export interface SessionListRequest {
@@ -201,6 +195,19 @@ export interface ErrorMessage {
  * `terminal:attach` for the same window — the new client "took over" and
  * this client's terminal session is no longer receiving output.
  */
+/**
+ * Lines from the pane's tmux history, oldest first, with colour escapes.
+ * The client shows these above the live screen as its scrollback. `reset`
+ * means "replace everything you have" (attach, resize reflow, or the
+ * client fell too far behind); otherwise append.
+ */
+export interface TerminalHistoryMessage {
+  type: 'terminal:history'
+  windowId: number
+  lines: string[]
+  reset: boolean
+}
+
 export interface TerminalDetachedMessage {
   type: 'terminal:detached'
   windowId: number
@@ -225,6 +232,7 @@ export interface PongMessage {
 /** Union of every message the server may send to the client. */
 export type ServerMessage =
   | TerminalOutputMessage
+  | TerminalHistoryMessage
   | SessionListMessage
   | SessionCreatedMessage
   | SessionKilledMessage

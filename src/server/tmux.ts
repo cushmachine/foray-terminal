@@ -8,6 +8,7 @@ import { execFile as _execFile } from 'node:child_process'
 import os from 'node:os'
 import { promisify } from 'node:util'
 import type { TmuxWindow } from '../shared/protocol.ts'
+import type { PaneHistoryState } from './history.ts'
 
 const promisedExecFile = promisify(_execFile)
 
@@ -148,30 +149,47 @@ export async function createWindow(
 }
 
 /**
- * Lines that have scrolled off the top of a session's pane, oldest first,
- * with colour escapes intact. Empty when there is no history yet.
- *
- * Scrollback lives in the browser: tmux runs on the outer terminal's main
- * screen (see ~/.tmux.conf), so xterm.js keeps its own history and the wheel
- * scrolls locally. A freshly attached client therefore has to be handed
- * whatever scrolled off before it arrived. Visible rows are excluded because
- * tmux repaints those itself on attach.
+ * Where a session's pane history stands: how many lines it holds, where it
+ * stops growing, and whether a full-screen app has frozen it. See
+ * history.ts for how the server turns this into scrollback for the client.
  */
-export async function captureHistory(
+export async function paneHistoryState(
   sessionId: number,
   exec: TmuxExecutor = defaultExec,
-): Promise<string> {
-  const target = `$${sessionId}`
-  const { stdout: sizeOut } = await exec('tmux', ['display-message', '-p', '-t', target, '#{history_size}'])
-  const size = parseInt(sizeOut.trim(), 10)
-  if (!size) return ''
-  // -e keeps colours, -J re-joins lines tmux wrapped so xterm can wrap them
-  // for its own width; -S/-E select history lines only (negative = above
-  // the visible screen, -1 = the line just above it).
+): Promise<PaneHistoryState> {
   const { stdout } = await exec('tmux', [
-    'capture-pane', '-p', '-e', '-J', '-t', target, '-S', `-${size}`, '-E', '-1',
+    'display-message', '-p', '-t', `$${sessionId}`, '-F', '#{history_size} #{history_limit} #{alternate_on}',
   ])
-  return stdout
+  const [size = '0', limit = '0', alternate = '0'] = stdout.trim().split(/\s+/)
+  return {
+    size: parseInt(size, 10) || 0,
+    limit: parseInt(limit, 10) || 0,
+    alternate: alternate === '1',
+  }
+}
+
+/**
+ * The last `count` lines of a session's pane history, oldest first, with
+ * colour escapes intact. Rows are returned as tmux displayed them (no
+ * re-joining of wrapped lines): a wrapped line that straddles the boundary
+ * between history and the visible screen would otherwise come back joined
+ * later and look like a new line. Returns [] for count 0; capture-pane
+ * would hand back the top visible row instead.
+ */
+export async function captureHistoryLines(
+  sessionId: number,
+  count: number,
+  exec: TmuxExecutor = defaultExec,
+): Promise<string[]> {
+  if (count <= 0) return []
+  // -S/-E select history rows only: negative rows sit above the visible
+  // screen, and -1 is the row just above it.
+  const { stdout } = await exec('tmux', [
+    'capture-pane', '-p', '-e', '-t', `$${sessionId}`, '-S', `-${count}`, '-E', '-1',
+  ])
+  const lines = stdout.split('\n')
+  if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop()
+  return lines
 }
 
 /**
