@@ -265,12 +265,13 @@ export function Terminal({
     window.addEventListener('nest:submit', handleSubmit)
 
     // Wheel over the xterm canvas must scroll the outer container instead
-    // of being consumed by xterm. xterm.js checks defaultPrevented before
-    // processing a wheel event, so a capture-phase preventDefault on the
-    // container (which fires before xterm's bubble-phase handler on its
-    // screen element) is enough. The scroll container is updated manually.
+    // of being consumed by xterm (which would convert it to arrow keys on
+    // the alternate screen). Capture + stopImmediatePropagation prevents
+    // the event from reaching any handler registered later on this element
+    // or any descendant, so xterm never sees it.
     const handleWheel = (e: WheelEvent) => {
       e.preventDefault()
+      e.stopImmediatePropagation()
       let dy = e.deltaY
       if (e.deltaMode === 1) {
         const screen = term.element?.querySelector<HTMLElement>('.xterm-screen')
