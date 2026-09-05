@@ -264,13 +264,13 @@ export function Terminal({
     window.addEventListener('nest:paste', handlePaste)
     window.addEventListener('nest:submit', handleSubmit)
 
-    // Wheel over the xterm canvas must scroll the outer container, not
-    // xterm's own (now empty) scrollback. Placed on the scroll container
-    // itself so it fires for the whole area (history + xterm); only
-    // intercepted when the event originated inside the xterm canvas,
-    // otherwise let the browser scroll normally.
+    // Wheel over the xterm canvas must scroll the outer container instead
+    // of being consumed by xterm. xterm.js checks defaultPrevented before
+    // processing a wheel event, so a capture-phase preventDefault on the
+    // container (which fires before xterm's bubble-phase handler on its
+    // screen element) is enough. The scroll container is updated manually.
     const handleWheel = (e: WheelEvent) => {
-      if (!container.contains(e.target as Node)) return
+      e.preventDefault()
       let dy = e.deltaY
       if (e.deltaMode === 1) {
         const screen = term.element?.querySelector<HTMLElement>('.xterm-screen')
@@ -278,9 +278,8 @@ export function Terminal({
         dy *= h / Math.max(term.rows, 1)
       }
       scrollEl.scrollTop += dy
-      e.preventDefault()
     }
-    scrollEl.addEventListener('wheel', handleWheel, { passive: false })
+    container.addEventListener('wheel', handleWheel, { capture: true, passive: false })
 
     termRef.current = term
 
@@ -291,7 +290,7 @@ export function Terminal({
       window.removeEventListener('nest:submit', handleSubmit)
       if (submitTimer) clearTimeout(submitTimer)
       scrollEl.removeEventListener('scroll', handleScroll)
-      scrollEl.removeEventListener('wheel', handleWheel)
+      container.removeEventListener('wheel', handleWheel, { capture: true })
       dataSub.dispose()
       unsubscribe()
       observer.disconnect()
