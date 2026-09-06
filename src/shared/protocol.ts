@@ -191,11 +191,6 @@ export interface ErrorMessage {
 }
 
 /**
- * Sent to a client that was attached to a window when another client sends
- * `terminal:attach` for the same window — the new client "took over" and
- * this client's terminal session is no longer receiving output.
- */
-/**
  * Lines from the pane's tmux history, oldest first, with colour escapes.
  * The client shows these above the live screen as its scrollback. `reset`
  * means "replace everything you have" (attach, resize reflow, or the
@@ -208,6 +203,11 @@ export interface TerminalHistoryMessage {
   reset: boolean
 }
 
+/**
+ * Sent to a client that was attached to a window when another client sends
+ * `terminal:attach` for the same window — the new client "took over" and
+ * this client's terminal session is no longer receiving output.
+ */
 export interface TerminalDetachedMessage {
   type: 'terminal:detached'
   windowId: number

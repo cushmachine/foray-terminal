@@ -211,6 +211,9 @@ export async function renameWindow(
   name: string,
   exec: TmuxExecutor = defaultExec,
 ): Promise<void> {
-  await exec('tmux', ['rename-session', '-t', `$${sessionId}`, `${PREFIX}${name}`])
+  // tmux session names cannot contain periods or colons
+  const safeName = name.replace(/[.:]/g, '-')
+  if (!safeName) throw new Error('Invalid session name')
+  await exec('tmux', ['rename-session', '-t', `$${sessionId}`, `${PREFIX}${safeName}`])
   await exec('tmux', ['set', '-t', `$${sessionId}`, NAMED_OPTION, '1'])
 }

@@ -1,6 +1,6 @@
-// Chunk E tests: session handoff (multi-client ownership) + deployment config.
+// Session handoff (multi-client ownership) + deployment config tests.
 //
-// Run with: npm run test:chunkE
+// Run with: npm run test:handoff
 // (executed directly via `tsx`, using node's built-in test runner)
 //
 // Covers:

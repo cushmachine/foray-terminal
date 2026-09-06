@@ -8,6 +8,7 @@ import {
   type KeyDef,
   type Modifiers,
 } from './keys'
+import { MONO_FONT } from './theme'
 
 interface KeyToolbarProps {
   /** Send raw bytes to the active terminal. */
@@ -20,8 +21,6 @@ interface KeyToolbarProps {
   onToggleModifier: (which: 'ctrl' | 'alt') => void
   isMobile: boolean
 }
-
-const MONO = "'JetBrains Mono', 'SF Mono', monospace"
 
 /** A short buzz on devices that support it (Android). iOS ignores it. */
 function haptic(): void {
@@ -195,7 +194,7 @@ export function KeyToolbar({
           minWidth: isMobile ? 40 : 44,
           minHeight: isMobile ? 40 : 32,
           fontSize: 13,
-          fontFamily: MONO,
+          fontFamily: MONO_FONT,
           fontWeight: 500,
           cursor: 'pointer',
           whiteSpace: 'nowrap',

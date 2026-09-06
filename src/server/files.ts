@@ -160,7 +160,7 @@ export async function getTree(cwd: string, maxDepth: number = DEFAULT_MAX_DEPTH)
  * Resolve `relativePath` against `cwd`, rejecting anything that looks like a
  * path traversal or escapes `cwd` once resolved (including via symlinks).
  */
-function resolveSafePath(cwd: string, relativePath: string): string {
+async function resolveSafePath(cwd: string, relativePath: string): Promise<string> {
   if (relativePath.startsWith('/')) {
     throw new Error(`Invalid path (absolute paths are not allowed): ${relativePath}`)
   }
@@ -176,18 +176,56 @@ function resolveSafePath(cwd: string, relativePath: string): string {
     throw new Error(`Invalid path (escapes cwd): ${relativePath}`)
   }
 
+  // Follow symlinks to prevent a symlink inside cwd pointing outside it
+  // from bypassing the textual containment check above.
+  const realRoot = await fs.realpath(root)
+  try {
+    const realResolved = await fs.realpath(resolved)
+    const realRel = path.relative(realRoot, realResolved)
+    if (realRel.startsWith('..') || path.isAbsolute(realRel)) {
+      throw new Error(`Invalid path (escapes cwd via symlink): ${relativePath}`)
+    }
+  } catch (err) {
+    // File or parent dirs might not exist yet (writes to new nested paths).
+    // Walk up to the nearest existing ancestor and verify it's inside cwd.
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      let check = path.dirname(resolved)
+      while (check !== root && check !== path.dirname(check)) {
+        try {
+          const realCheck = await fs.realpath(check)
+          const checkRel = path.relative(realRoot, realCheck)
+          if (checkRel.startsWith('..') || path.isAbsolute(checkRel)) {
+            throw new Error(`Invalid path (escapes cwd via symlink): ${relativePath}`)
+          }
+          break
+        } catch (inner) {
+          if ((inner as NodeJS.ErrnoException).code !== 'ENOENT') throw inner
+          check = path.dirname(check)
+        }
+      }
+    } else {
+      throw err
+    }
+  }
+
   return resolved
 }
 
+const MAX_FILE_SIZE = 1024 * 1024 // 1MB
+
 /** Read a file's contents as utf-8. `relativePath` is resolved against, and must stay within, `cwd`. */
 export async function readFile(cwd: string, relativePath: string): Promise<string> {
-  const resolved = resolveSafePath(cwd, relativePath)
+  const resolved = await resolveSafePath(cwd, relativePath)
+  const { size } = await fs.stat(resolved)
+  if (size > MAX_FILE_SIZE) {
+    throw new Error(`File too large (${(size / 1024 / 1024).toFixed(1)}MB, max 1MB)`)
+  }
   return fs.readFile(resolved, 'utf-8')
 }
 
 /** Write a file's contents as utf-8, creating parent directories as needed. Same safety checks as readFile. */
 export async function writeFile(cwd: string, relativePath: string, content: string): Promise<void> {
-  const resolved = resolveSafePath(cwd, relativePath)
+  const resolved = await resolveSafePath(cwd, relativePath)
   await fs.mkdir(path.dirname(resolved), { recursive: true })
   await fs.writeFile(resolved, content, 'utf-8')
 }

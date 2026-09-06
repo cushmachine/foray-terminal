@@ -1,6 +1,8 @@
 import { useState, useCallback, useRef, useEffect, lazy, Suspense } from 'react'
 import type { ClientMessage, ServerMessage, FileNode } from './shared/protocol'
 import type { SocketStatus } from './hooks/useSocket'
+import { MarkdownRenderer } from './MarkdownRenderer'
+import { MONO_FONT } from './theme'
 
 interface FilePanelProps {
   openFile: string | null
@@ -35,7 +37,7 @@ function EditorFallback() {
       padding: 16,
       fontSize: 12,
       color: 'var(--text-dim)',
-      fontFamily: "'JetBrains Mono', monospace",
+      fontFamily: MONO_FONT,
     }}>
       loading editor…
     </div>
@@ -81,7 +83,7 @@ function FileTree({ nodes, depth, onSelect, selectedPath, isMobile }: {
                      node.type === 'dir' ? 'var(--text)' :
                      node.name.endsWith('.md') ? 'var(--accent-text)' : 'var(--text-dim)',
               fontSize: isMobile ? 13 : 12,
-              fontFamily: "'JetBrains Mono', monospace",
+              fontFamily: MONO_FONT,
               cursor: 'pointer',
               textAlign: 'left',
               borderRadius: 3,
@@ -128,11 +130,16 @@ function ResizeHandle({ onResize }: { onResize: (delta: number) => void }) {
     dragging.current = false
   }, [])
 
+  const handlePointerCancel = useCallback(() => {
+    dragging.current = false
+  }, [])
+
   return (
     <div
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerCancel}
       style={{
         width: 5,
         cursor: 'col-resize',
@@ -168,6 +175,12 @@ export function FilePanel({ openFile, onOpenFile, onClose, isMobile, width, onRe
   const sendRef = useRef(send)
   sendRef.current = send
 
+  const openFileRef = useRef(openFile)
+  openFileRef.current = openFile
+
+  const loadingPathRef = useRef(loadingPath)
+  loadingPathRef.current = loadingPath
+
   // Subscribe once to the shared socket's incoming messages and route the
   // file-related ones into local state.
   useEffect(() => {
@@ -192,8 +205,11 @@ export function FilePanel({ openFile, onOpenFile, onClose, isMobile, width, onRe
           setEditing(false)
           break
         case 'error':
-          setTreeError(msg.message)
-          setFileError(msg.message)
+          if (loadingPathRef.current) {
+            setFileError(msg.message)
+          } else {
+            setTreeError(msg.message)
+          }
           setLoadingPath(null)
           setSaving(false)
           break
@@ -216,6 +232,12 @@ export function FilePanel({ openFile, onOpenFile, onClose, isMobile, width, onRe
     setFileContents({})
     sendRef.current({ type: 'files:tree', cwd })
     sendRef.current({ type: 'files:watch', cwd })
+    // Re-fetch the currently open file after reconnect
+    const currentFile = openFileRef.current
+    if (currentFile) {
+      setLoadingPath(currentFile)
+      sendRef.current({ type: 'files:read', path: currentFile })
+    }
     return () => {
       sendRef.current({ type: 'files:unwatch' })
     }
@@ -291,7 +313,7 @@ export function FilePanel({ openFile, onOpenFile, onClose, isMobile, width, onRe
                   color: 'var(--text-dim)',
                   fontSize: 12,
                   cursor: 'pointer',
-                  fontFamily: "'JetBrains Mono', monospace",
+                  fontFamily: MONO_FONT,
                   padding: '2px 6px',
                   minHeight: isMobile ? 44 : undefined,
                 }}
@@ -301,7 +323,7 @@ export function FilePanel({ openFile, onOpenFile, onClose, isMobile, width, onRe
               <span style={{
                 flex: 1,
                 fontSize: 12,
-                fontFamily: "'JetBrains Mono', monospace",
+                fontFamily: MONO_FONT,
                 color: 'var(--accent-text)',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
@@ -320,7 +342,7 @@ export function FilePanel({ openFile, onOpenFile, onClose, isMobile, width, onRe
                     padding: isMobile ? '8px 12px' : '3px 8px',
                     borderRadius: 4,
                     cursor: 'pointer',
-                    fontFamily: "'JetBrains Mono', monospace",
+                    fontFamily: MONO_FONT,
                   }}
                 >
                   {editing ? 'preview' : 'edit'}
@@ -351,7 +373,7 @@ export function FilePanel({ openFile, onOpenFile, onClose, isMobile, width, onRe
                   padding: 16,
                   fontSize: 12,
                   color: 'var(--warning)',
-                  fontFamily: "'JetBrains Mono', monospace",
+                  fontFamily: MONO_FONT,
                 }}>
                   {fileError}
                 </div>
@@ -360,14 +382,14 @@ export function FilePanel({ openFile, onOpenFile, onClose, isMobile, width, onRe
                   padding: 16,
                   fontSize: 12,
                   color: 'var(--text-dim)',
-                  fontFamily: "'JetBrains Mono', monospace",
+                  fontFamily: MONO_FONT,
                 }}>
                   loading…
                 </div>
               ) : editing ? (
                 <Suspense fallback={<EditorFallback />}>
                   <MarkdownEditor
-                    content={editContent || fileContent || ''}
+                    content={editing ? editContent : (fileContent ?? '')}
                     onChange={setEditContent}
                     onSave={handleSave}
                   />
@@ -404,7 +426,7 @@ export function FilePanel({ openFile, onOpenFile, onClose, isMobile, width, onRe
                     fontSize: 12,
                     cursor: saving ? 'default' : 'pointer',
                     opacity: saving ? 0.5 : 1,
-                    fontFamily: "'JetBrains Mono', monospace",
+                    fontFamily: MONO_FONT,
                   }}
                 >
                   discard
@@ -422,7 +444,7 @@ export function FilePanel({ openFile, onOpenFile, onClose, isMobile, width, onRe
                     cursor: saving ? 'default' : 'pointer',
                     opacity: saving ? 0.7 : 1,
                     fontWeight: 600,
-                    fontFamily: "'JetBrains Mono', monospace",
+                    fontFamily: MONO_FONT,
                   }}
                 >
                   {saving ? 'saving…' : 'save'}
@@ -451,7 +473,7 @@ export function FilePanel({ openFile, onOpenFile, onClose, isMobile, width, onRe
               <span style={{
                 fontSize: 11,
                 color: 'var(--text-dim)',
-                fontFamily: "'JetBrains Mono', monospace",
+                fontFamily: MONO_FONT,
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
@@ -465,7 +487,7 @@ export function FilePanel({ openFile, onOpenFile, onClose, isMobile, width, onRe
                   padding: 16,
                   fontSize: 12,
                   color: 'var(--warning)',
-                  fontFamily: "'JetBrains Mono', monospace",
+                  fontFamily: MONO_FONT,
                 }}>
                   {treeError}
                 </div>
@@ -474,7 +496,7 @@ export function FilePanel({ openFile, onOpenFile, onClose, isMobile, width, onRe
                   padding: 16,
                   fontSize: 12,
                   color: 'var(--text-dim)',
-                  fontFamily: "'JetBrains Mono', monospace",
+                  fontFamily: MONO_FONT,
                 }}>
                   loading files…
                 </div>
@@ -495,66 +517,3 @@ export function FilePanel({ openFile, onOpenFile, onClose, isMobile, width, onRe
   )
 }
 
-function MarkdownRenderer({ content }: { content: string }) {
-  return (
-    <div style={{
-      fontSize: 13,
-      lineHeight: 1.7,
-      fontFamily: "'JetBrains Mono', monospace",
-      color: 'var(--text)',
-    }}>
-      {content.split('\n').map((line, i) => {
-        if (line.startsWith('# ')) return (
-          <div key={i} style={{ fontSize: 18, fontWeight: 700, color: 'var(--text)', marginBottom: 12, marginTop: i > 0 ? 20 : 0 }}>
-            {line.slice(2)}
-          </div>
-        )
-        if (line.startsWith('## ')) return (
-          <div key={i} style={{ fontSize: 15, fontWeight: 600, color: 'var(--accent)', marginBottom: 8, marginTop: 16 }}>
-            {line.slice(3)}
-          </div>
-        )
-        if (line.startsWith('- [x] ')) return (
-          <div key={i} style={{ paddingLeft: 8, marginBottom: 4 }}>
-            <span style={{ color: 'var(--accent)', marginRight: 8 }}>✓</span>
-            <span style={{ textDecoration: 'line-through', color: 'var(--text-dim)' }}>{line.slice(6)}</span>
-          </div>
-        )
-        if (line.startsWith('- [ ] ')) return (
-          <div key={i} style={{ paddingLeft: 8, marginBottom: 4 }}>
-            <span style={{ color: 'var(--text-faint)', marginRight: 8 }}>○</span>
-            {line.slice(6)}
-          </div>
-        )
-        if (line.startsWith('- ')) return (
-          <div key={i} style={{ paddingLeft: 8, marginBottom: 4 }}>
-            <span style={{ color: 'var(--text-faint)', marginRight: 8 }}>·</span>
-            {renderInline(line.slice(2))}
-          </div>
-        )
-        if (line.trim() === '') return <div key={i} style={{ height: 8 }} />
-        return <div key={i} style={{ marginBottom: 4 }}>{renderInline(line)}</div>
-      })}
-    </div>
-  )
-}
-
-function renderInline(text: string) {
-  const parts = text.split(/(`[^`]+`)/)
-  return parts.map((part, i) => {
-    if (part.startsWith('`') && part.endsWith('`')) {
-      return (
-        <code key={i} style={{
-          background: 'var(--surface-raised)',
-          color: 'var(--warning)',
-          padding: '1px 5px',
-          borderRadius: 3,
-          fontSize: '0.9em',
-        }}>
-          {part.slice(1, -1)}
-        </code>
-      )
-    }
-    return part
-  })
-}

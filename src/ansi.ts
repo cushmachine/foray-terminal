@@ -12,7 +12,7 @@ export interface Palette {
   background: string
 }
 
-/** The shape of THEME in Terminal.tsx; extra keys such as `cursor` are fine. */
+/** The shape of THEME in theme.ts; extra keys such as `cursor` are fine. */
 export interface ThemeColors {
   foreground: string
   background: string
@@ -204,10 +204,10 @@ function skipEscape(line: string, at: number, s: Style): number {
   return Math.min(j + 1, line.length)
 }
 
-const HTML_ESCAPES: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }
+const HTML_ESCAPES: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }
 
 function escapeHtml(text: string): string {
-  return text.replace(/[&<>"]/g, (c) => HTML_ESCAPES[c])
+  return text.replace(/[&<>"']/g, (c) => HTML_ESCAPES[c])
 }
 
 /**

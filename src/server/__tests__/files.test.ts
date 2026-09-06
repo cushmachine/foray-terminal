@@ -1,6 +1,6 @@
-// Chunk B tests: filesystem API (getTree, readFile, writeFile, watchDir).
+// Filesystem API (getTree, readFile, writeFile, watchDir) tests.
 //
-// Run with: npm run test:chunkB
+// Run with: npm run test:files
 // (executed directly via `tsx`, using node's built-in test runner)
 //
 // These tests use real filesystem operations on temp directories — no

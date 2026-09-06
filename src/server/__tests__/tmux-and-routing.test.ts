@@ -1,6 +1,6 @@
-// Chunk A tests: tmux CLI wrapper, pty bridge, and server message routing.
+// Tmux CLI wrapper, pty bridge, and server message routing tests.
 //
-// Run with: npm run test:chunkA
+// Run with: npm run test:tmux-and-routing
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'

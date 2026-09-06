@@ -1,6 +1,6 @@
-// Chunk 0 tests: shared protocol types + server scaffolding.
+// Shared protocol types + server scaffolding tests.
 //
-// Run with: npm run test:chunk0
+// Run with: npm run test:protocol
 // (executed directly via `tsx`, using node's built-in test runner)
 
 import { test } from 'node:test'

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { displayName, type Session } from './sessionState'
 import { MAX_FONT_SIZE, MIN_FONT_SIZE } from './mobile'
+import { MONO_FONT } from './theme'
 
 interface SidebarProps {
   sessions: Session[]
@@ -19,8 +20,6 @@ interface SidebarProps {
   fontSize: number
   onFontSizeChange: (size: number) => void
 }
-
-const MONO = "'JetBrains Mono', monospace"
 
 /** How long the "kill?" confirmation stays armed before reverting. */
 const KILL_CONFIRM_MS = 3000
@@ -107,7 +106,7 @@ export function Sidebar({
     justifyContent: 'center',
     flexShrink: 0,
     borderRadius: 6,
-    fontFamily: MONO,
+    fontFamily: MONO_FONT,
     ...extra,
   })
 
@@ -146,7 +145,7 @@ export function Sidebar({
             fontWeight: 700,
             letterSpacing: '0.04em',
             color: 'var(--accent)',
-            fontFamily: MONO,
+            fontFamily: MONO_FONT,
           }}>
             nest
           </div>
@@ -154,7 +153,7 @@ export function Sidebar({
             fontSize: 11,
             color: 'var(--text-faint)',
             marginTop: 2,
-            fontFamily: MONO,
+            fontFamily: MONO_FONT,
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
@@ -218,7 +217,7 @@ export function Sidebar({
                     borderRadius: 6,
                     color: 'var(--text)',
                     fontSize: 13,
-                    fontFamily: MONO,
+                    fontFamily: MONO_FONT,
                     outline: 'none',
                   }}
                 />
@@ -247,7 +246,7 @@ export function Sidebar({
                       alignItems: 'center',
                       gap: 6,
                       fontSize: 13,
-                      fontFamily: MONO,
+                      fontFamily: MONO_FONT,
                       color: active ? 'var(--accent)' : 'var(--text)',
                       fontWeight: active ? 600 : 400,
                       overflow: 'hidden',
@@ -275,7 +274,7 @@ export function Sidebar({
                     <div style={{
                       fontSize: 11,
                       color: 'var(--text-dim)',
-                      fontFamily: MONO,
+                      fontFamily: MONO_FONT,
                       marginTop: 1,
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
@@ -360,7 +359,7 @@ export function Sidebar({
             color: 'var(--text-dim)',
             fontSize: 12,
             cursor: 'pointer',
-            fontFamily: MONO,
+            fontFamily: MONO_FONT,
           }}
         >
           + new session
@@ -373,7 +372,7 @@ export function Sidebar({
         alignItems: 'center',
         gap: 4,
         padding: '4px 8px 8px',
-        fontFamily: MONO,
+        fontFamily: MONO_FONT,
         fontSize: 11,
         color: 'var(--text-faint)',
       }}>

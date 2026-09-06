@@ -7,7 +7,7 @@ import { Composer } from './Composer'
 import { FilePanel } from './FilePanel'
 import { useSocket } from './hooks/useSocket'
 import { useAppHeight } from './hooks/useAppHeight'
-import { applySessionMessage, displayName, openedWith, type Session } from './sessionState'
+import { applySessionMessage, openedWith, type Session } from './sessionState'
 import { NO_MODIFIERS, type Modifiers } from './keys'
 import {
   FONT_SIZE_KEY,
@@ -19,11 +19,9 @@ import {
   swipeAction,
   type Point,
 } from './mobile'
+import { TopBar } from './TopBar'
 
-export type { Session }
 export type MobileView = 'terminal' | 'files'
-
-const MONO = "'JetBrains Mono', monospace"
 
 function detectMobile(): boolean {
   if (typeof window === 'undefined') return false
@@ -263,124 +261,16 @@ export function App() {
         flexDirection: 'column',
         minWidth: 0,
       }}>
-        {/* Top bar. Owns the top safe-area inset so its surface runs up
-            under the status bar / notch instead of leaving a black band. */}
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: isMobile ? 4 : 8,
-          padding: isMobile ? '4px 8px 4px 4px' : '8px 12px',
-          paddingTop: `calc(${isMobile ? 4 : 8}px + env(safe-area-inset-top))`,
-          background: 'var(--surface)',
-          borderBottom: '1px solid var(--border)',
-          minHeight: 44,
-        }}>
-          {/* Sidebar toggle: hamburger on mobile, collapse arrow on desktop */}
-          <button
-            onClick={() => setSidebarOpen(v => !v)}
-            aria-label={sidebarOpen ? 'Close sidebar' : 'Open sidebar'}
-            style={{
-              background: 'none',
-              border: 'none',
-              color: 'var(--text-dim)',
-              fontSize: isMobile ? 20 : 14,
-              cursor: 'pointer',
-              padding: isMobile ? 0 : '4px 6px',
-              minWidth: isMobile ? 44 : undefined,
-              minHeight: isMobile ? 44 : undefined,
-              fontFamily: MONO,
-            }}
-            title={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
-          >
-            {isMobile ? '☰' : (sidebarOpen ? '◂' : '▸')}
-          </button>
-
-          <div style={{
-            flex: 1,
-            minWidth: 0,
-            display: 'flex',
-            flexDirection: isMobile ? 'column' : 'row',
-            alignItems: isMobile ? 'flex-start' : 'baseline',
-            gap: isMobile ? 0 : 8,
-            overflow: 'hidden',
-          }}>
-            <span style={{
-              fontFamily: MONO,
-              fontSize: 13,
-              color: 'var(--accent)',
-              fontWeight: 600,
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              maxWidth: '100%',
-            }}>
-              › {activeSessionData ? displayName(activeSessionData) : ''}
-            </span>
-            <span style={{
-              fontFamily: MONO,
-              fontSize: isMobile ? 10 : 12,
-              color: 'var(--text-dim)',
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              maxWidth: '100%',
-              minWidth: 0,
-            }}>
-              {activeSessionData?.cwd}
-            </span>
-          </div>
-
-          {/* Mobile view toggle */}
-          {isMobile && (
-            <div style={{
-              display: 'flex',
-              gap: 2,
-              background: 'var(--surface-raised)',
-              borderRadius: 8,
-              padding: 2,
-              flexShrink: 0,
-            }}>
-              {(['terminal', 'files'] as const).map(view => (
-                <button
-                  key={view}
-                  onClick={() => setMobileView(view)}
-                  style={{
-                    background: mobileView === view ? 'var(--accent-dim)' : 'transparent',
-                    border: 'none',
-                    color: mobileView === view ? 'var(--accent)' : 'var(--text-dim)',
-                    fontSize: 12,
-                    padding: '0 12px',
-                    minHeight: 36,
-                    borderRadius: 6,
-                    cursor: 'pointer',
-                    fontFamily: MONO,
-                  }}
-                >
-                  {view === 'terminal' ? 'term' : 'files'}
-                </button>
-              ))}
-            </div>
-          )}
-
-          {/* Desktop file panel toggle */}
-          {!isMobile && (
-            <button
-              onClick={() => setFilePanelOpen(v => !v)}
-              style={{
-                background: filePanelOpen ? 'var(--accent-dim)' : 'transparent',
-                border: `1px solid ${filePanelOpen ? 'var(--accent)' : 'var(--border)'}`,
-                color: filePanelOpen ? 'var(--accent)' : 'var(--text-dim)',
-                fontSize: 12,
-                padding: '4px 10px',
-                borderRadius: 4,
-                cursor: 'pointer',
-                fontFamily: MONO,
-              }}
-            >
-              files
-            </button>
-          )}
-        </div>
+        <TopBar
+          isMobile={isMobile}
+          sidebarOpen={sidebarOpen}
+          onToggleSidebar={() => setSidebarOpen(v => !v)}
+          activeSessionData={activeSessionData}
+          mobileView={mobileView}
+          onSetMobileView={setMobileView}
+          filePanelOpen={filePanelOpen}
+          onToggleFilePanel={() => setFilePanelOpen(v => !v)}
+        />
 
         {/* Main content area */}
         <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>

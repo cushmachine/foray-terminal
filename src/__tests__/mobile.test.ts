@@ -1,6 +1,6 @@
-// Chunk M tests: mobile optimization (see MOBILE-PLAN.md).
+// Mobile optimization tests (see MOBILE-PLAN.md).
 //
-// Run with: npm run test:chunkM
+// Run with: npm run test:mobile
 // (executed directly via `tsx`, using node's built-in test runner)
 //
 // Covers the pure, DOM-free pieces of the mobile work:

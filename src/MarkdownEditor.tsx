@@ -5,24 +5,25 @@ import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirro
 import { markdown } from '@codemirror/lang-markdown'
 import { syntaxHighlighting, HighlightStyle } from '@codemirror/language'
 import { tags } from '@lezer/highlight'
+import { MONO_FONT, THEME } from './theme'
 
 const theme = EditorView.theme({
   '&': {
     height: '100%',
     fontSize: '13px',
-    background: '#0a0a0c',
+    background: THEME.background,
   },
   '.cm-content': {
-    fontFamily: "'JetBrains Mono', 'SF Mono', monospace",
+    fontFamily: MONO_FONT,
     padding: '12px 0',
-    caretColor: '#3db8a9',
+    caretColor: THEME.cursor,
     lineHeight: '1.7',
   },
   '.cm-line': {
     padding: '0 16px',
   },
   '.cm-gutters': {
-    background: '#0a0a0c',
+    background: THEME.background,
     border: 'none',
     color: '#3e3e4a',
   },
@@ -34,13 +35,13 @@ const theme = EditorView.theme({
     background: '#111116',
   },
   '.cm-cursor': {
-    borderColor: '#3db8a9',
+    borderColor: THEME.cursor,
   },
   '.cm-selectionBackground': {
-    background: '#3db8a933 !important',
+    background: `${THEME.cursor}33 !important`,
   },
   '&.cm-focused .cm-selectionBackground': {
-    background: '#3db8a944 !important',
+    background: `${THEME.cursor}44 !important`,
   },
   '.cm-scroller': {
     overflow: 'auto',
@@ -135,7 +136,7 @@ export function MarkdownEditor({ content, onChange, onSave, readOnly }: Markdown
     }
     // Only recreate when switching between files or read-only mode
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [readOnly])
+  }, [readOnly, content])
 
   return (
     <div ref={containerRef} style={{ height: '100%', width: '100%' }} />

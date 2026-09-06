@@ -1,10 +1,10 @@
-// Chunk H tests: the pure decisions behind scrollback from tmux history.
+// Scrollback from tmux history: the pure decisions behind fetching history.
 // What to fetch given what the client already has (planHistoryUpdate), how
 // to find the new lines in a fresh capture (alignHistory), and what to
 // remember for the next alignment (nextTail). No tmux involved; the CLI
-// wrapper is covered in chunkA.
+// wrapper is covered in tmux-and-routing.test.ts.
 //
-// Run with: npm run test:chunkH
+// Run with: npm run test:history
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'

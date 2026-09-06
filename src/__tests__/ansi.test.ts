@@ -1,6 +1,6 @@
-// Chunk I tests: ANSI colour renderer for history rows.
+// ANSI colour renderer for history rows tests.
 //
-// Run with: npm run test:chunkI
+// Run with: npm run test:ansi
 // (executed directly via `tsx`, using node's built-in test runner)
 //
 // Covers:

@@ -1,6 +1,6 @@
-// Chunk F tests: image upload (drag-and-drop / paste -> ~/uploads -> shell).
+// Image upload (drag-and-drop / paste -> ~/uploads -> shell) tests.
 //
-// Run with: npm run test:chunkF
+// Run with: npm run test:uploads
 // (executed directly via `tsx`, using node's built-in test runner)
 //
 // Covers:
@@ -54,7 +54,7 @@ function fakeImage(magic: number[], size = 64): Uint8Array<ArrayBuffer> {
 }
 
 async function makeTmpDir(): Promise<string> {
-  return fs.mkdtemp(path.join(os.tmpdir(), 'nest-chunkf-'))
+  return fs.mkdtemp(path.join(os.tmpdir(), 'nest-uploads-'))
 }
 
 /** POST bytes to /api/upload as multipart/form-data, the way the browser does. */

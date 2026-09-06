@@ -1,6 +1,6 @@
-// Chunk D tests: file panel <-> WebSocket backend wiring.
+// File panel <-> WebSocket backend wiring tests.
 //
-// Run with: npm run test:chunkD
+// Run with: npm run test:file-panel
 // (executed directly via `tsx`, using node's built-in test runner)
 //
 // Covers:
@@ -21,7 +21,7 @@ import { startServer } from '../server/index.ts'
 import { createSaveKeymap } from '../MarkdownEditor.tsx'
 
 async function makeTmpDir(): Promise<string> {
-  return fs.mkdtemp(path.join(os.tmpdir(), 'nest-chunkd-'))
+  return fs.mkdtemp(path.join(os.tmpdir(), 'nest-file-panel-'))
 }
 
 /** Connect a WebSocket to the given server and resolve once the welcome message arrives. */
@@ -210,7 +210,7 @@ test('server handles files:watch and pushes files:changed on external file chang
     try {
       ws.send(JSON.stringify({ type: 'files:watch', cwd: tmpDir }))
       // Give chokidar a moment to complete its initial scan (matches the
-      // pattern used in chunkB's watchDir test) before mutating the file.
+      // pattern used in files.test.ts's watchDir test) before mutating the file.
       await new Promise((resolve) => setTimeout(resolve, 500))
 
       const changedPromise = waitForType(ws, 'files:changed')
