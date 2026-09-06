@@ -309,22 +309,24 @@ test('renameWindow renames the session and marks it as explicitly named', async 
 // ---------------------------------------------------------------------------
 
 test('attachToPane spawns tmux with correct attach command', () => {
-  let spawnCalledWith: { file: string; args: string[]; options: Record<string, unknown> } | null =
-    null
+  // A holder object rather than a `let`: TypeScript cannot see the closure
+  // assign a plain variable, so it would narrow it to null and then, after
+  // the assert, to never.
+  const spawn = { calledWith: null as { file: string; args: string[]; options: Record<string, unknown> } | null }
 
   const mockSpawn: PtySpawner = (file, args, options) => {
-    spawnCalledWith = { file, args, options }
+    spawn.calledWith = { file, args, options }
     return createMockPtyProcess()
   }
 
   attachToPane(5, () => {}, undefined, mockSpawn)
 
-  assert.ok(spawnCalledWith, 'spawn should have been called')
-  assert.equal(spawnCalledWith!.file, 'tmux')
-  assert.deepEqual(spawnCalledWith!.args, ['attach-session', '-t', '$5'])
-  assert.equal(spawnCalledWith!.options.name, 'xterm-256color')
-  assert.equal(spawnCalledWith!.options.cols, 80)
-  assert.equal(spawnCalledWith!.options.rows, 24)
+  assert.ok(spawn.calledWith, 'spawn should have been called')
+  assert.equal(spawn.calledWith.file, 'tmux')
+  assert.deepEqual(spawn.calledWith.args, ['attach-session', '-t', '$5'])
+  assert.equal(spawn.calledWith.options.name, 'xterm-256color')
+  assert.equal(spawn.calledWith.options.cols, 80)
+  assert.equal(spawn.calledWith.options.rows, 24)
 })
 
 test('attachToPane respects custom cols/rows', () => {
@@ -343,13 +345,14 @@ test('attachToPane respects custom cols/rows', () => {
 
 test('attachToPane forwards pty data to onData callback', () => {
   const received: string[] = []
-  let dataCallback: ((data: string) => void) | null = null
+  // Holder object for the same narrowing reason as in the spawn test above.
+  const pty = { dataCallback: null as ((data: string) => void) | null }
 
   const mockSpawn: PtySpawner = () => {
     const proc = createMockPtyProcess()
     const origOnData = proc.onData.bind(proc)
     proc.onData = (cb: (data: string) => void) => {
-      dataCallback = cb
+      pty.dataCallback = cb
       return origOnData(cb)
     }
     return proc
@@ -357,9 +360,9 @@ test('attachToPane forwards pty data to onData callback', () => {
 
   attachToPane(1, (data) => received.push(data), undefined, mockSpawn)
 
-  assert.ok(dataCallback, 'onData should have been called')
-  dataCallback!('hello')
-  dataCallback!('world')
+  assert.ok(pty.dataCallback, 'onData should have been called')
+  pty.dataCallback('hello')
+  pty.dataCallback('world')
   assert.deepEqual(received, ['hello', 'world'])
 })
 
