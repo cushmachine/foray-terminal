@@ -16,11 +16,13 @@
     "test:file-panel": "npx tsx src/__tests__/file-panel.test.ts",
     "test:uploads": "npx tsx src/__tests__/uploads.test.ts",
     "test:ansi": "npx tsx src/__tests__/ansi.test.ts",
+    "test:version": "npx tsx src/__tests__/version.test.ts",
     "test:mobile": "npx tsx src/__tests__/mobile.test.ts",
     "test:protocol": "npx tsx src/server/__tests__/protocol.test.ts",
     "test:tmux-and-routing": "npx tsx src/server/__tests__/tmux-and-routing.test.ts",
     "test:files": "npx tsx src/server/__tests__/files.test.ts",
     "test:handoff": "npx tsx src/server/__tests__/handoff.test.ts",
+    "test:handshake": "npx tsx src/server/__tests__/handshake.test.ts",
     "test:history": "npx tsx src/server/__tests__/history.test.ts",
     "test:e2e": "npx tsx src/e2e/e2e.test.ts"
   },

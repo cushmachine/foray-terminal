@@ -16,6 +16,7 @@ import type { ServerMessage } from '../shared/protocol.ts'
 import { listWindows } from './tmux.ts'
 import type { PtySpawner } from './pty-bridge.ts'
 import { handleConnection } from './ws-handler.ts'
+import { describeCheckout, readServedClientBuild } from './build.ts'
 import {
   DAY_MS,
   DEFAULT_MAX_UPLOAD_AGE_DAYS,
@@ -142,12 +143,7 @@ export function createApp(options: ServerOptions = {}): express.Express {
 
   app.post('/api/upload', createUploadHandler(options.uploadDir ?? DEFAULT_UPLOAD_DIR))
 
-  // The server always runs from the project root (`tsx src/server/index.ts`,
-  // whether via `npm run dev:server` or `npm start`), and `vite build`
-  // writes the client bundle to `<project-root>/dist`. Resolve against
-  // process.cwd() rather than __dirname so this doesn't depend on whether
-  // the server itself is compiled or run in place.
-  const clientDist = path.resolve(process.cwd(), 'dist')
+  const clientDist = clientDistDir()
   if (process.env.NODE_ENV === 'production' && existsSync(clientDist)) {
     app.use(express.static(clientDist))
     // SPA fallback: any unmatched route serves index.html. Registered as
@@ -177,11 +173,24 @@ export interface StartedServer {
  * Start the Nest server. Pass port 0 to let the OS assign a free port
  * (used by tests so multiple suites can run without colliding).
  */
+/**
+ * Where the built client lives. The server always runs from the project
+ * root (`tsx src/server/index.ts`, via `npm run dev:server` or `npm start`),
+ * and `vite build` writes to `<project-root>/dist`. Resolved against
+ * process.cwd() rather than __dirname so this doesn't depend on whether the
+ * server itself is compiled or run in place.
+ */
+function clientDistDir(): string {
+  return path.resolve(process.cwd(), 'dist')
+}
+
 export function startServer(
   port: number = DEFAULT_PORT,
   options: ServerOptions = {},
 ): Promise<StartedServer> {
   const app = createApp(options)
+  // Read once: tsx runs the source as of now, until the next restart.
+  const serverBuild = describeCheckout()
   const server = http.createServer(app)
   const wss = new WebSocketServer({ server, path: '/ws' })
 
@@ -293,7 +302,8 @@ export function startServer(
 
   wss.on('connection', async (ws, req) => {
     const remote = req.socket.remoteAddress ?? 'unknown'
-    console.log(`[ws] client connected from ${remote}`)
+    const userAgent = String(req.headers['user-agent'] ?? '').slice(0, 160)
+    console.log(`[ws] client connected from ${remote} ua="${userAgent}"`)
     alive.set(ws, true)
     ws.on('pong', () => alive.set(ws, true))
 
@@ -333,6 +343,9 @@ export function startServer(
         removeClientFromAllWindows(ws)
         broadcastOwnership()
       },
+      userAgent,
+      serverBuild,
+      servedClientBuild: () => readServedClientBuild(clientDistDir()),
     })
   })
 

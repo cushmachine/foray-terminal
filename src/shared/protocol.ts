@@ -116,6 +116,16 @@ export interface PingMessage {
   type: 'ping'
 }
 
+/**
+ * Sent by the client once per connection, after the welcome. `build` is the
+ * id stamped into the page it is running (null for a page without one, such
+ * as the vite dev server). The server logs it and answers with `server:hello`.
+ */
+export interface ClientHelloMessage {
+  type: 'client:hello'
+  build: string | null
+}
+
 /** Union of every message the client may send to the server. */
 export type ClientMessage =
   | TerminalInputMessage
@@ -131,6 +141,7 @@ export type ClientMessage =
   | FilesWatchMessage
   | FilesUnwatchMessage
   | PingMessage
+  | ClientHelloMessage
 
 // ---------------------------------------------------------------------------
 // Server → Client messages
@@ -229,6 +240,18 @@ export interface PongMessage {
   type: 'pong'
 }
 
+/**
+ * Reply to `client:hello`. `serverBuild` is the commit the server process
+ * was started from (`<short-sha>[-dirty]`, or 'unknown'); `clientBuild` is
+ * the id of the client bundle on disk right now, or null when none is built.
+ * The page compares both with its own build (src/version.ts).
+ */
+export interface ServerHelloMessage {
+  type: 'server:hello'
+  serverBuild: string
+  clientBuild: string | null
+}
+
 /** Union of every message the server may send to the client. */
 export type ServerMessage =
   | TerminalOutputMessage
@@ -245,3 +268,4 @@ export type ServerMessage =
   | TerminalDetachedMessage
   | SessionOwnershipMessage
   | PongMessage
+  | ServerHelloMessage

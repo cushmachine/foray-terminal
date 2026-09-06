@@ -73,6 +73,12 @@ export interface ConnectionDeps {
   claimWindow: (windowId: number) => void
   /** Remove this client from all window ownership and broadcast the change. */
   releaseAllWindows: () => void
+  /** User-Agent of the upgrade request, for the connection log. */
+  userAgent: string
+  /** Commit the server process was started from (server/build.ts). */
+  serverBuild: string
+  /** Build id of the client bundle on disk right now, or null. */
+  servedClientBuild: () => Promise<string | null>
 }
 
 // ---------------------------------------------------------------------------
@@ -103,6 +109,12 @@ function validateMessage(msg: unknown): ClientMessage {
       if (typeof (msg as any).windowId !== 'number')
         throw new Error(`Invalid ${type}: requires numeric windowId`)
       break
+    case 'client:hello': {
+      const { build } = msg as { build?: unknown }
+      if (build !== null && typeof build !== 'string')
+        throw new Error('Invalid message: client:hello requires build to be a string or null')
+      break
+    }
     // ping, session:list, session:create, files:* -- minimal validation
     default:
       break
@@ -142,7 +154,10 @@ function safeErrorMessage(err: unknown): string {
  * welcome messages have been sent.
  */
 export function handleConnection(ws: WebSocket, deps: ConnectionDeps): void {
-  const { remoteAddress, send, broadcast, ptySpawner, claimWindow, releaseAllWindows } = deps
+  const {
+    remoteAddress, send, broadcast, ptySpawner, claimWindow, releaseAllWindows,
+    userAgent, serverBuild, servedClientBuild,
+  } = deps
 
   // Track pty handles for this connection, keyed by windowId.
   const ptys = new Map<number, PtyHandle>()
@@ -242,6 +257,12 @@ export function handleConnection(ws: WebSocket, deps: ConnectionDeps): void {
       switch (msg.type) {
         case 'ping': {
           send({ type: 'pong' })
+          break
+        }
+        case 'client:hello': {
+          // The one log line that says which bundle a device is running.
+          console.log(`[ws] hello from ${remoteAddress} build=${msg.build ?? 'none'} ua="${userAgent}"`)
+          send({ type: 'server:hello', serverBuild, clientBuild: await servedClientBuild() })
           break
         }
         case 'session:list': {

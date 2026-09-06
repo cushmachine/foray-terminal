@@ -20,6 +20,8 @@ import {
   type Point,
 } from './mobile'
 import { TopBar } from './TopBar'
+import { VersionBanner } from './VersionBanner'
+import { readPageBuild, versionNotice, type VersionNotice } from './version'
 
 export type MobileView = 'terminal' | 'files'
 
@@ -88,6 +90,10 @@ export function App() {
   const [opened, setOpened] = useState<number[]>([])
   // windowId -> number of attached clients, from session:ownership broadcasts.
   const [ownership, setOwnership] = useState<Record<number, number>>({})
+  // Version drift reported by the server (src/version.ts). Dismissing hides
+  // a given notice text until the server reports something different.
+  const [notice, setNotice] = useState<VersionNotice | null>(null)
+  const dismissedNotice = useRef<string | null>(null)
   // Desktop starts with the sidebar in view; a phone starts on the terminal.
   const [sidebarOpen, setSidebarOpen] = useState(() => !detectMobile())
   const [filePanelOpen, setFilePanelOpen] = useState(false)
@@ -104,10 +110,23 @@ export function App() {
     setOpened(prev => openedWith(prev, activeSession))
   }, [activeSession])
 
+  // Every connection introduces this page to the server, which answers
+  // with server:hello (handled below). Re-sent on reconnect because the
+  // server may have been rebuilt or restarted in between.
+  useEffect(() => {
+    if (status !== 'connected') return
+    send({ type: 'client:hello', build: readPageBuild() })
+  }, [status, send])
+
   // Route incoming session:* messages into local state via the pure
   // applySessionMessage reducer.
   useEffect(() => {
     return onMessage((msg) => {
+      if (msg.type === 'server:hello') {
+        const next = versionNotice(readPageBuild(), msg, import.meta.env.PROD)
+        setNotice(next && next.text === dismissedNotice.current ? null : next)
+        return
+      }
       if (msg.type === 'session:list') {
         setSessions(msg.windows)
         setActiveSession(prev => {
@@ -227,6 +246,15 @@ export function App() {
       onTouchStart={isMobile ? handleTouchStart : undefined}
       onTouchEnd={isMobile ? handleTouchEnd : undefined}
     >
+      <VersionBanner
+        notice={notice}
+        onReload={() => window.location.reload()}
+        onDismiss={() => {
+          dismissedNotice.current = notice?.text ?? null
+          setNotice(null)
+        }}
+      />
+
       {/* Sidebar overlay on mobile */}
       {sidebarOpen && isMobile && (
         <div
