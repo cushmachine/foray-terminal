@@ -383,6 +383,7 @@ export function Terminal({
 
   return (
     <div
+      data-testid="terminal"
       style={{ position: 'relative', width: '100%', height: '100%' }}
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}

@@ -37,6 +37,7 @@ export function TopBar({
     }}>
       {/* Sidebar toggle: hamburger on mobile, collapse arrow on desktop */}
       <button
+        data-testid="sidebar-toggle"
         onClick={onToggleSidebar}
         aria-label={sidebarOpen ? 'Close sidebar' : 'Open sidebar'}
         style={{
@@ -125,6 +126,7 @@ export function TopBar({
       {/* Desktop file panel toggle */}
       {!isMobile && (
         <button
+          data-testid="files-toggle"
           onClick={onToggleFilePanel}
           style={{
             background: filePanelOpen ? 'var(--accent-dim)' : 'transparent',

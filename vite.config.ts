@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
-import { BUILD_META_NAME } from './src/shared/build'
+import { BUILD_META_NAME } from './src/shared/build.ts'
 
 /** `<short-sha>[-dirty]` for the checkout vite runs in, or 'unknown'. */
 function describeCheckout(): string {

@@ -1,0 +1,52 @@
+// Visual and interaction regression suite (see AUDIT.md).
+//
+// Run with: npm run test:visual
+//
+// The webServer command builds the client into .playwright/root-<port>/dist and
+// runs the real Nest server from that root, so production code paths
+// (static dist, SPA fallback, version handshake) are what gets tested.
+// vite is invoked directly rather than `npm run build`: the build script
+// type-checks first, and a red unit test (an import of a helper that does
+// not exist yet) must not stop the visual suite from running.
+// Sessions the tests create are real tmux sessions on this machine's
+// default tmux server, named nest_visual-*; global-teardown removes any
+// that a failed test left behind.
+
+import { defineConfig } from '@playwright/test'
+
+// Override with VISUAL_PORT=<n> to run two copies of the suite side by side
+// (each gets its own build root and results directory).
+export const VISUAL_PORT = Number(process.env.VISUAL_PORT) || 3456
+const ROOT = `.playwright/root-${VISUAL_PORT}`
+
+export default defineConfig({
+  testDir: 'src/visual',
+  testMatch: '**/*.spec.ts',
+  globalTeardown: './src/visual/global-teardown.ts',
+  outputDir: `.playwright/results-${VISUAL_PORT}`,
+  timeout: 30_000,
+  expect: { timeout: 5_000 },
+  // One worker: every test shares one tmux server and one Nest server.
+  workers: 1,
+  retries: 0,
+  reporter: [['list']],
+  use: {
+    baseURL: `http://127.0.0.1:${VISUAL_PORT}`,
+    trace: 'retain-on-failure',
+    screenshot: 'only-on-failure',
+    // Software WebGL so the xterm WebGL renderer can load headless.
+    launchOptions: {
+      args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'],
+    },
+  },
+  webServer: {
+    command: [
+      `mkdir -p ${ROOT}`,
+      `npx vite build --outDir ${ROOT}/dist --emptyOutDir`,
+      `cd ${ROOT} && NODE_ENV=production PORT=${VISUAL_PORT} ../../node_modules/.bin/tsx ../../src/server/index.ts`,
+    ].join(' && '),
+    port: VISUAL_PORT,
+    reuseExistingServer: false,
+    timeout: 90_000,
+  },
+})

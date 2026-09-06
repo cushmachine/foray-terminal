@@ -258,6 +258,7 @@ export function App() {
       {/* Sidebar overlay on mobile */}
       {sidebarOpen && isMobile && (
         <div
+          data-testid="sidebar-backdrop"
           onClick={() => setSidebarOpen(false)}
           style={{
             position: 'fixed',
@@ -303,7 +304,7 @@ export function App() {
         {/* Main content area */}
         <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
           {/* Terminal */}
-          <div style={{
+          <div data-testid="terminal-area" style={{
             flex: 1,
             minWidth: 0,
             display: (isMobile && mobileView !== 'terminal') ? 'none' : 'block',

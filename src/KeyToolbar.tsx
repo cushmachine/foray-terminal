@@ -227,7 +227,7 @@ export function KeyToolbar({
   }
 
   return (
-    <div style={{
+    <div data-testid="key-toolbar" style={{
       background: 'var(--surface)',
       borderTop: '1px solid var(--border)',
       // Owns the bottom safe-area inset so the bar's surface fills down to
@@ -240,7 +240,7 @@ export function KeyToolbar({
           {SECONDARY_KEYS.map(renderKey)}
         </div>
       )}
-      <div style={rowStyle}>
+      <div data-testid="key-toolbar-row" style={rowStyle}>
         {PRIMARY_KEYS.map(renderKey)}
       </div>
       <input

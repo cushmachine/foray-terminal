@@ -285,7 +285,7 @@ export function FilePanel({ openFile, onOpenFile, onClose, isMobile, width, onRe
   }, [onClose])
 
   return (
-    <div style={{ display: 'flex', height: '100%', flexShrink: 0 }}>
+    <div data-testid="file-panel" style={{ display: 'flex', height: '100%', flexShrink: 0 }}>
       {!isMobile && <ResizeHandle onResize={handleResize} />}
       <div style={{
         width: isMobile ? '100%' : width,

@@ -24,6 +24,7 @@ export function VersionBanner({ notice, onReload, onDismiss }: VersionBannerProp
   if (!notice) return null
   return (
     <div
+      data-testid="version-banner"
       role="status"
       style={{
         position: 'fixed',

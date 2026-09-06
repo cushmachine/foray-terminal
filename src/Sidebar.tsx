@@ -111,7 +111,7 @@ export function Sidebar({
   })
 
   return (
-    <div style={{
+    <div data-testid="sidebar" style={{
       width: isMobile ? 'min(300px, 85vw)' : 'var(--sidebar-width)',
       background: 'var(--surface)',
       borderRight: '1px solid var(--border)',
@@ -162,7 +162,7 @@ export function Sidebar({
           </div>
         </div>
         {isMobile && (
-          <button onClick={onClose} aria-label="Close sidebar" style={iconButton({ fontSize: 18 })}>
+          <button data-testid="sidebar-close" onClick={onClose} aria-label="Close sidebar" style={iconButton({ fontSize: 18 })}>
             ‹
           </button>
         )}
@@ -181,7 +181,7 @@ export function Sidebar({
       </div>
 
       {/* Session list */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '0 8px', overscrollBehavior: 'contain' }}>
+      <div data-testid="session-list" style={{ flex: 1, overflowY: 'auto', padding: '0 8px', overscrollBehavior: 'contain' }}>
         {sessions.map(session => {
           const active = session.id === activeSession
           const renaming = renamingId === session.id
@@ -189,6 +189,7 @@ export function Sidebar({
           return (
             <div
               key={session.id}
+              data-testid="session-row"
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -199,6 +200,7 @@ export function Sidebar({
               {renaming ? (
                 <input
                   autoFocus
+                  data-testid="session-name-input"
                   value={draft}
                   onChange={e => setDraft(e.target.value)}
                   onKeyDown={handleRenameKey}
@@ -223,6 +225,9 @@ export function Sidebar({
                 />
               ) : (
                 <button
+                  data-testid="session-item"
+                  data-session-id={session.id}
+                  data-active={active ? 'true' : 'false'}
                   onClick={() => onSelect(session.id)}
                   style={{
                     flex: 1,
@@ -310,6 +315,7 @@ export function Sidebar({
               ) : (
                 <>
                   <button
+                    data-testid="session-rename"
                     onClick={() => startRename(session)}
                     title="rename session"
                     aria-label="Rename session"
@@ -318,6 +324,7 @@ export function Sidebar({
                     ✎
                   </button>
                   <button
+                    data-testid="session-kill"
                     onClick={() => handleKill(session)}
                     title={armed ? 'tap again to kill' : 'kill session'}
                     aria-label={armed ? 'Confirm kill session' : 'Kill session'}
@@ -344,6 +351,7 @@ export function Sidebar({
         borderTop: '1px solid var(--border-subtle)',
       }}>
         <button
+          data-testid="new-session"
           onClick={onCreate}
           style={{
             width: '100%',
