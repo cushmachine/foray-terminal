@@ -7,10 +7,13 @@
 //  1. terminal:attach ownership handoff — a second client attaching to a
 //     window that already has a client detaches the first
 //  2. session:ownership broadcasts to all clients on attach and on disconnect
-//  3. `npm run build` produces dist/ with client files (index.html + assets)
+//  3. `npm run build` produces client files (index.html + assets). Built
+//     into a temp directory, never <project-root>/dist: production serves
+//     dist/ straight from the checkout, so a test build there would deploy
+//     the working tree.
 //  4. the production server (NODE_ENV=production) serves the built client
-//     from dist/ at the project root — the fix for the __dirname-based path
-//     bug, plus a health-check sanity check
+//     from dist/ under the current working directory — the fix for the
+//     __dirname-based path bug, plus a health-check sanity check
 //  5. connection liveness: `ping` gets a `pong`, a client that never answers
 //     protocol pings is terminated, and terminal:attach passes its cols/rows
 //     through to the pty spawner
@@ -20,6 +23,7 @@ import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import fs from 'node:fs/promises'
+import os from 'node:os'
 import path from 'node:path'
 import { WebSocket as WsClient } from 'ws'
 import { startServer } from '../index.ts'
@@ -131,32 +135,51 @@ test('session:ownership broadcasts to all clients on attach and on disconnect', 
 })
 
 // ---------------------------------------------------------------------------
-// Test 3: `npm run build` produces dist/ with client files
+// Test 3: `npm run build` produces client files (in a temp dir)
 // ---------------------------------------------------------------------------
 
-test('npm run build produces dist/ with index.html and JS/CSS assets', async () => {
-  const projectRoot = process.cwd()
+/**
+ * Root of the temp build from test 3, holding a `dist/` for test 4 to serve.
+ * Never <project-root>/dist: the production server serves that directory
+ * straight from the checkout, so building there from a test silently
+ * deploys whatever is in the working tree (it did, on 2026-09-06).
+ */
+let builtRoot: string | null = null
 
-  await execFileAsync('npm', ['run', 'build'], {
+test('npm run build produces index.html and JS/CSS assets', async () => {
+  const projectRoot = process.cwd()
+  builtRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'nest-build-'))
+  const distDir = path.join(builtRoot, 'dist')
+
+  // `npm run build -- <args>` appends the args to the script, so they land
+  // on `vite build` and redirect its output away from the live dist/.
+  await execFileAsync('npm', ['run', 'build', '--', '--outDir', distDir, '--emptyOutDir'], {
     cwd: projectRoot,
     maxBuffer: 20 * 1024 * 1024,
   })
 
-  const distDir = path.join(projectRoot, 'dist')
   const indexHtml = await fs.readFile(path.join(distDir, 'index.html'), 'utf-8')
-  assert.ok(indexHtml.includes('<div id="root">'), 'dist/index.html should contain the app root element')
+  assert.ok(indexHtml.includes('<div id="root">'), 'index.html should contain the app root element')
 
   const assetFiles = await fs.readdir(path.join(distDir, 'assets'))
-  assert.ok(assetFiles.some((f) => f.endsWith('.js')), 'dist/assets should contain a .js bundle')
-  assert.ok(assetFiles.some((f) => f.endsWith('.css')), 'dist/assets should contain a .css bundle')
+  assert.ok(assetFiles.some((f) => f.endsWith('.js')), 'assets should contain a .js bundle')
+  assert.ok(assetFiles.some((f) => f.endsWith('.css')), 'assets should contain a .css bundle')
 })
 
 // ---------------------------------------------------------------------------
-// Test 4: production server serves the built client from <project-root>/dist
+// Test 4: production server serves the built client from <cwd>/dist
 // ---------------------------------------------------------------------------
 
-test('production server serves the built client and responds to health checks', async () => {
+test('production server serves the built client and responds to health checks', async (t) => {
+  if (!builtRoot) {
+    t.skip('needs the temp build from the previous test')
+    return
+  }
+  // The server resolves dist/ against process.cwd(), so serve the temp
+  // build by running from its root for the duration of this test.
+  const originalCwd = process.cwd()
   const originalNodeEnv = process.env.NODE_ENV
+  process.chdir(builtRoot)
   process.env.NODE_ENV = 'production'
   try {
     const { url, close } = await startServer(0)
@@ -174,6 +197,9 @@ test('production server serves the built client and responds to health checks', 
     }
   } finally {
     process.env.NODE_ENV = originalNodeEnv
+    process.chdir(originalCwd)
+    await fs.rm(builtRoot, { recursive: true, force: true })
+    builtRoot = null
   }
 })
 
