@@ -38,30 +38,36 @@ export function useAppHeight(): { keyboardVisible: boolean } {
   useEffect(() => {
     const vv = window.visualViewport
     const root = document.documentElement
+    // Baseline: the viewport height at mount (before any keyboard). On
+    // Android window.innerHeight shrinks WITH the keyboard, so comparing
+    // against a live value never detects it. Captured once; reset only on
+    // orientation change.
+    let fullHeight = window.innerHeight
 
     const apply = () => {
-      root.style.setProperty(APP_HEIGHT_VAR, `${appHeight(vv, window.innerHeight)}px`)
-      // iOS may scroll the page to reveal the focused element when the
-      // keyboard appears. Nothing here is meant to scroll, so pin it back.
+      const h = appHeight(vv, window.innerHeight)
+      root.style.setProperty(APP_HEIGHT_VAR, `${h}px`)
       if (window.scrollY !== 0) window.scrollTo(0, 0)
-      // Keyboard is open when the visual viewport is significantly shorter
-      // than the layout viewport (pinch-zoom excluded by the scale check
-      // inside appHeight).
-      setKeyboardVisible(
-        !!vv && vv.scale <= 1.01 && vv.height < window.innerHeight * 0.75,
-      )
+      setKeyboardVisible(h < fullHeight * 0.75)
+    }
+
+    const onOrientationChange = () => {
+      setTimeout(() => {
+        fullHeight = window.innerHeight
+        apply()
+      }, 300)
     }
 
     apply()
     vv?.addEventListener('resize', apply)
     vv?.addEventListener('scroll', apply)
     window.addEventListener('resize', apply)
-    window.addEventListener('orientationchange', apply)
+    window.addEventListener('orientationchange', onOrientationChange)
     return () => {
       vv?.removeEventListener('resize', apply)
       vv?.removeEventListener('scroll', apply)
       window.removeEventListener('resize', apply)
-      window.removeEventListener('orientationchange', apply)
+      window.removeEventListener('orientationchange', onOrientationChange)
       root.style.removeProperty(APP_HEIGHT_VAR)
     }
   }, [])

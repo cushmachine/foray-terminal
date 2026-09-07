@@ -78,6 +78,9 @@ export function KeyToolbar({
       case 'photo':
         fileInput.current?.click()
         break
+      case 'copy-screen':
+        window.dispatchEvent(new CustomEvent('nest:copy-screen'))
+        break
       case 'paste': {
         // Must run inside the user gesture; browsers refuse otherwise.
         const clipboard = navigator.clipboard

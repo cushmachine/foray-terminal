@@ -145,16 +145,19 @@ export function Terminal({
     term.loadAddon(fitAddon)
     term.loadAddon(new ClipboardAddon())
     term.open(containerRef.current)
-    // WebGL renderer (must load after open). The DOM renderer left row
-    // artifacts under Claude Code's redraws; without WebGL, or once the
-    // context is lost, the DOM renderer stays in charge.
+    // WebGL on desktop only. The DOM renderer leaves text in the DOM so
+    // native long-press selection works on phones. WebGL paints to a canvas
+    // where the browser can't select text at all.
+    const coarsePointer = window.matchMedia?.('(pointer: coarse)').matches
     let webgl: WebglAddon | null = null
-    try {
-      webgl = new WebglAddon()
-      webgl.onContextLoss(() => { webgl?.dispose(); webgl = null })
-      term.loadAddon(webgl)
-    } catch {
-      webgl = null
+    if (!coarsePointer) {
+      try {
+        webgl = new WebglAddon()
+        webgl.onContextLoss(() => { webgl?.dispose(); webgl = null })
+        term.loadAddon(webgl)
+      } catch {
+        webgl = null
+      }
     }
     requestAnimationFrame(() => term.focus())
 
@@ -289,9 +292,21 @@ export function Terminal({
         send({ type: 'terminal:input', windowId, data: '\r' })
       }, text ? 40 : 0)
     }
+    const handleCopyScreen = () => {
+      if (!isActiveRef.current) return
+      const buffer = term.buffer.active
+      const lines: string[] = []
+      for (let i = 0; i < term.rows; i++) {
+        const line = buffer.getLine(i)
+        if (line) lines.push(line.translateToString(true))
+      }
+      const text = lines.join('\n').trimEnd()
+      if (text) navigator.clipboard?.writeText(text).catch(() => {})
+    }
     window.addEventListener('nest:sendkeys', handleSendKeys)
     window.addEventListener('nest:paste', handlePaste)
     window.addEventListener('nest:submit', handleSubmit)
+    window.addEventListener('nest:copy-screen', handleCopyScreen)
 
     // Wheel over the xterm canvas must scroll the outer container instead
     // of being consumed by xterm (which would convert it to arrow keys on
@@ -331,6 +346,7 @@ export function Terminal({
       window.removeEventListener('nest:sendkeys', handleSendKeys)
       window.removeEventListener('nest:paste', handlePaste)
       window.removeEventListener('nest:submit', handleSubmit)
+      window.removeEventListener('nest:copy-screen', handleCopyScreen)
       if (submitTimer) clearTimeout(submitTimer)
       if (copyTimer) clearTimeout(copyTimer)
       scrollEl.removeEventListener('scroll', handleScroll)

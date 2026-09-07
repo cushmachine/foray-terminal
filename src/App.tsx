@@ -103,7 +103,7 @@ export function App() {
 
   const isMobile = useIsMobile()
   const [fontSize, setFontSize] = useFontSize(isMobile)
-  const { keyboardVisible } = useAppHeight()
+  useAppHeight()
 
   // Mount a terminal for whichever session becomes active.
   useEffect(() => {
@@ -284,7 +284,7 @@ export function App() {
         onFontSizeChange={setFontSize}
       />
 
-      <div style={{
+      <div data-main-column style={{
         flex: 1,
         display: 'flex',
         flexDirection: 'column',
@@ -352,17 +352,16 @@ export function App() {
           <Composer onSubmit={submitText} />
         )}
 
-        {/* Key toolbar — hidden when the soft keyboard is up on mobile */}
-        {!(isMobile && keyboardVisible) && (
-          <KeyToolbar
-            onSend={sendKeys}
-            onPaste={pasteText}
-            onUpload={uploadFiles}
-            modifiers={modifiers}
-            onToggleModifier={toggleModifier}
-            isMobile={isMobile}
-          />
-        )}
+        {/* Key toolbar — CSS container query hides it when the keyboard
+            shrinks the layout on mobile (see styles.css). */}
+        <KeyToolbar
+          onSend={sendKeys}
+          onPaste={pasteText}
+          onUpload={uploadFiles}
+          modifiers={modifiers}
+          onToggleModifier={toggleModifier}
+          isMobile={isMobile}
+        />
       </div>
     </div>
   )

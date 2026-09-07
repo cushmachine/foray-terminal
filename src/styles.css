@@ -65,3 +65,16 @@ button, input {
 }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+/* Hide the key toolbar when the soft keyboard shrinks the layout.
+   The main column (data-main-column) establishes a size container;
+   when useAppHeight shrinks --app-height, the column shrinks, and the
+   container query fires. Scoped to mobile viewports so the desktop
+   toggle is untouched. */
+[data-main-column] { container-type: size; }
+
+@media (max-width: 767px), ((pointer: coarse) and (max-height: 500px)) {
+  @container (max-height: 550px) {
+    [data-testid="key-toolbar"] { display: none !important; }
+  }
+}
