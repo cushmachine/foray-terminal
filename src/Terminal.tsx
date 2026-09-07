@@ -340,11 +340,69 @@ export function Terminal({
     }
     container.addEventListener('touchend', handleTouchCopy)
 
-    const handleTransitionEnd = () => {
+    // Snapshot the xterm screen into the history HTML when the xterm
+    // slides away (Composer focused). The last N lines of terminal output
+    // live only in the xterm buffer, not in history, so without this they
+    // vanish when the xterm container is hidden. The snapshot is removed
+    // when the xterm slides back.
+    let snapshotActive = false
+
+    const isStatusLine = (line: string): boolean => {
+      const t = line.trim()
+      if (!t) return true
+      if (/^[─━═\s]+$/.test(t)) return true
+      if (t.startsWith('❯') || t.startsWith('>') || t.startsWith('$')) return true
+      if (t.startsWith('▸') || t.startsWith('▹')) return true
+      if (/context/i.test(t) && /\d+%/.test(t)) return true
+      if (/auto mode/i.test(t)) return true
+      return false
+    }
+
+    const addSnapshot = () => {
+      if (snapshotActive) return
+      const buffer = term.buffer.active
+      const lines: string[] = []
+      for (let i = 0; i < term.rows; i++) {
+        const line = buffer.getLine(i)
+        if (line) lines.push(line.translateToString(true))
+      }
+      while (lines.length > 0 && isStatusLine(lines[lines.length - 1])) lines.pop()
+      if (lines.length === 0) return
+      const frag = document.createDocumentFragment()
+      for (const text of lines) {
+        const row = document.createElement('div')
+        row.setAttribute('data-snapshot', '')
+        row.textContent = text || ' '
+        frag.appendChild(row)
+      }
+      historyEl.appendChild(frag)
+      snapshotActive = true
+    }
+
+    const removeSnapshot = () => {
+      if (!snapshotActive) return
+      historyEl.querySelectorAll('[data-snapshot]').forEach(el => el.remove())
+      snapshotActive = false
+    }
+
+    const handleTransitionEnd = (e: TransitionEvent) => {
+      if ((e as TransitionEvent).propertyName === 'margin-top' &&
+          document.querySelector('[data-composer]:focus-within')) {
+        addSnapshot()
+      }
       maybeScrollToBottom()
       setTimeout(maybeScrollToBottom, 50)
     }
+
+    const handleTransitionStart = (e: TransitionEvent) => {
+      if ((e as TransitionEvent).propertyName === 'margin-top' &&
+          !document.querySelector('[data-composer]:focus-within')) {
+        removeSnapshot()
+      }
+    }
+
     container.addEventListener('transitionend', handleTransitionEnd)
+    container.addEventListener('transitionstart', handleTransitionStart)
 
     termRef.current = term
 
@@ -362,6 +420,8 @@ export function Terminal({
       container.removeEventListener('wheel', handleWheel, { capture: true })
       container.removeEventListener('touchend', handleTouchCopy)
       container.removeEventListener('transitionend', handleTransitionEnd)
+      container.removeEventListener('transitionstart', handleTransitionStart)
+      removeSnapshot()
       selectionSub.dispose()
       dataSub.dispose()
       unsubscribe()
