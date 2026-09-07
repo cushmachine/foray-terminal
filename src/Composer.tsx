@@ -7,19 +7,48 @@
 // text field: it autocorrects and echoes locally, and the finished text
 // reaches the terminal once, as a paste, followed by Enter. Tapping the
 // terminal still types directly for quick y/n answers.
-import { useCallback, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+//
+// The unsent text is saved per session (draftKey) so switching sessions —
+// or backgrounding the app — never loses what you were typing.
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 
 interface ComposerProps {
   /** Paste text into the active terminal and press Enter. Empty text just presses Enter. */
   onSubmit: (text: string) => void
+  /** localStorage key for this session's unsent draft; null when no session is active. */
+  draftKey?: string | null
 }
 
 /** Grow with the text up to about four lines, then scroll. */
 const MAX_HEIGHT = 96
 
-export function Composer({ onSubmit }: ComposerProps) {
-  const [text, setText] = useState('')
+// localStorage throws in some private-browsing and embedded contexts; a lost
+// draft is not worth crashing the input bar over, so treat it as absent.
+function draftGet(key: string | null | undefined): string {
+  if (!key) return ''
+  try {
+    return window.localStorage.getItem(key) ?? ''
+  } catch {
+    return ''
+  }
+}
+
+function draftSet(key: string | null | undefined, value: string): void {
+  if (!key) return
+  try {
+    if (value) window.localStorage.setItem(key, value)
+    else window.localStorage.removeItem(key)
+  } catch {
+    // The draft just won't persist.
+  }
+}
+
+export function Composer({ onSubmit, draftKey = null }: ComposerProps) {
+  const [text, setText] = useState(() => draftGet(draftKey))
   const ref = useRef<HTMLTextAreaElement>(null)
+  // The draftKey this component last saved under, so a session switch can
+  // stash the old draft before loading the new one.
+  const prevKeyRef = useRef(draftKey)
 
   const fit = useCallback(() => {
     const el = ref.current
@@ -28,9 +57,24 @@ export function Composer({ onSubmit }: ComposerProps) {
     el.style.height = `${Math.min(el.scrollHeight, MAX_HEIGHT)}px`
   }, [])
 
+  // Size the field to any draft restored on first mount.
+  useEffect(() => {
+    fit()
+  }, [fit])
+
+  // Session switch: save the current draft under the old key, load the new.
+  useEffect(() => {
+    if (prevKeyRef.current === draftKey) return
+    draftSet(prevKeyRef.current, text)
+    prevKeyRef.current = draftKey
+    setText(draftGet(draftKey))
+    requestAnimationFrame(fit)
+  }, [draftKey, text, fit])
+
   const submit = useCallback(() => {
     onSubmit(text.trim())
     setText('')
+    draftSet(draftKey, '')
     // Keep the field focused so the keyboard stays up between messages.
     requestAnimationFrame(() => {
       const el = ref.current
@@ -38,7 +82,7 @@ export function Composer({ onSubmit }: ComposerProps) {
       el.style.height = 'auto'
       el.focus()
     })
-  }, [text, onSubmit])
+  }, [text, onSubmit, draftKey])
 
   const handleKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
     // Enter sends; Shift+Enter (a hardware keyboard) inserts a newline.
@@ -62,7 +106,9 @@ export function Composer({ onSubmit }: ComposerProps) {
         ref={ref}
         value={text}
         onChange={(e) => {
-          setText(e.target.value)
+          const value = e.target.value
+          setText(value)
+          draftSet(draftKey, value)
           fit()
         }}
         onKeyDown={handleKeyDown}

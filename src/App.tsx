@@ -80,12 +80,23 @@ function useFontSize(isMobile: boolean): [number, (size: number) => void] {
   return [fontSize, setFontSize]
 }
 
+const LAST_SESSION_KEY = 'nest:lastSession'
+const DRAFT_KEY_PREFIX = 'nest:draft:'
+
 export function App() {
   const socket = useSocket()
   const { onMessage, send, status } = socket
 
   const [sessions, setSessions] = useState<Session[]>([])
-  const [activeSession, setActiveSession] = useState<number | null>(null)
+  const [activeSession, setActiveSessionRaw] = useState<number | null>(null)
+
+  const setActiveSession = useCallback((idOrFn: number | null | ((prev: number | null) => number | null)) => {
+    setActiveSessionRaw(prev => {
+      const next = typeof idOrFn === 'function' ? idOrFn(prev) : idOrFn
+      if (next !== null) storageSet(LAST_SESSION_KEY, String(next))
+      return next
+    })
+  }, [])
   // Sessions whose terminal has been mounted (see openedWith).
   const [opened, setOpened] = useState<number[]>([])
   // windowId -> number of attached clients, from session:ownership broadcasts.
@@ -102,6 +113,10 @@ export function App() {
   const [filePanelWidth, setFilePanelWidth] = useState(320)
 
   const isMobile = useIsMobile()
+  // The session:* message handler is installed once (deps: [onMessage]); a ref
+  // keeps the current mobile state visible to it without re-subscribing.
+  const isMobileRef = useRef(isMobile)
+  isMobileRef.current = isMobile
   const [fontSize, setFontSize] = useFontSize(isMobile)
   useAppHeight()
 
@@ -131,6 +146,11 @@ export function App() {
         setSessions(msg.windows)
         setActiveSession(prev => {
           if (prev !== null && msg.windows.some(w => w.id === prev)) return prev
+          // First list on this page load: reopen whichever session this device
+          // was last looking at, if it still exists.
+          const savedRaw = storageGet(LAST_SESSION_KEY)
+          const saved = savedRaw !== null ? Number(savedRaw) : NaN
+          if (Number.isInteger(saved) && msg.windows.some(w => w.id === saved)) return saved
           return msg.windows[0]?.id ?? null
         })
         return
@@ -146,6 +166,9 @@ export function App() {
         // A new session's terminal must be visible when it mounts so xterm
         // can measure its font; and you created it to look at it anyway.
         setMobileView('terminal')
+        // The "+ new session" button lives in the drawer; on a phone, close it
+        // so the new terminal isn't hidden behind it.
+        if (isMobileRef.current) setSidebarOpen(false)
         return
       }
       if (msg.type === 'session:killed' || msg.type === 'session:renamed') {
@@ -349,7 +372,10 @@ export function App() {
 
         {/* Mobile input bar: see Composer.tsx for why typing goes here. */}
         {isMobile && mobileView === 'terminal' && (
-          <Composer onSubmit={submitText} />
+          <Composer
+            onSubmit={submitText}
+            draftKey={activeSession !== null ? `${DRAFT_KEY_PREFIX}${activeSession}` : null}
+          />
         )}
 
         {/* Key toolbar — CSS container query hides it when the keyboard

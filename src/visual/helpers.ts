@@ -45,6 +45,12 @@ export async function createSession(page: Page, name: string): Promise<void> {
   const before = await page.getByTestId('session-item').count()
   await page.getByTestId('new-session').click()
   await expect(page.getByTestId('session-item')).toHaveCount(before + 1)
+  // On a phone, creating a session auto-closes the drawer (the new terminal
+  // takes over); reopen it so the rename controls are reachable.
+  if (await page.getByTestId('sidebar').isHidden().catch(() => false)) {
+    await page.getByTestId('sidebar-toggle').click()
+    await expect(page.getByTestId('sidebar')).toBeVisible()
+  }
   // The new session is the active one; its row carries the rename button.
   const row = page.getByTestId('session-row').filter({ has: page.locator('[data-active="true"]') }).last()
   await row.getByTestId('session-rename').click()

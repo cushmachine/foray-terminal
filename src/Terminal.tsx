@@ -141,7 +141,12 @@ export function Terminal({
   }, [status, windowId, send])
 
   useEffect(() => {
-    if (isActive && termRef.current) termRef.current.focus()
+    if (!isActive || !termRef.current) return
+    if (COARSE) {
+      const ta = document.querySelector<HTMLTextAreaElement>('[data-composer] textarea')
+      if (ta) { ta.focus(); return }
+    }
+    termRef.current.focus()
   }, [isActive])
 
   useEffect(() => {
@@ -195,7 +200,13 @@ export function Terminal({
         webgl = null
       }
     }
-    requestAnimationFrame(() => term.focus())
+    requestAnimationFrame(() => {
+      if (COARSE) {
+        const ta = document.querySelector<HTMLTextAreaElement>('[data-composer] textarea')
+        if (ta) { ta.focus(); return }
+      }
+      term.focus()
+    })
 
     const container = containerRef.current
     const scrollEl = scrollRef.current
