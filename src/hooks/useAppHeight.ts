@@ -8,7 +8,7 @@
 // a CSS variable lets the root size itself to the visible area, and the
 // flex layout plus xterm's ResizeObserver do the rest.
 
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 
 /** The bit of VisualViewport we read, so the pure helper is testable. */
 export interface ViewportLike {
@@ -32,7 +32,9 @@ export function appHeight(viewport: ViewportLike | null | undefined, fallback: n
   return Math.round(viewport.height)
 }
 
-export function useAppHeight(): void {
+export function useAppHeight(): { keyboardVisible: boolean } {
+  const [keyboardVisible, setKeyboardVisible] = useState(false)
+
   useEffect(() => {
     const vv = window.visualViewport
     const root = document.documentElement
@@ -42,6 +44,12 @@ export function useAppHeight(): void {
       // iOS may scroll the page to reveal the focused element when the
       // keyboard appears. Nothing here is meant to scroll, so pin it back.
       if (window.scrollY !== 0) window.scrollTo(0, 0)
+      // Keyboard is open when the visual viewport is significantly shorter
+      // than the layout viewport (pinch-zoom excluded by the scale check
+      // inside appHeight).
+      setKeyboardVisible(
+        !!vv && vv.scale <= 1.01 && vv.height < window.innerHeight * 0.75,
+      )
     }
 
     apply()
@@ -57,4 +65,6 @@ export function useAppHeight(): void {
       root.style.removeProperty(APP_HEIGHT_VAR)
     }
   }, [])
+
+  return { keyboardVisible }
 }

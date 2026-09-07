@@ -3,6 +3,7 @@ import type { DragEvent as ReactDragEvent } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { ClipboardAddon } from '@xterm/addon-clipboard'
+import { WebglAddon } from '@xterm/addon-webgl'
 import '@xterm/xterm/css/xterm.css'
 import type { UseSocketReturn } from './hooks/useSocket'
 import { imageFilesFromClipboard, pathToTerminalInput, pickImageFiles, uploadImage } from './imageUpload'
@@ -29,6 +30,21 @@ interface UploadStatus {
 }
 
 const UPLOAD_ERROR_FLASH_MS = 4000
+// onSelectionChange fires continuously during a drag; copy once it settles.
+const COPY_ON_SELECT_MS = 120
+
+/**
+ * Test hook: the active terminal's xterm instance as window.__nest.term, so
+ * the visual suite can read the screen buffer (the WebGL renderer paints to
+ * a canvas, so the text is not in the DOM). Returns the matching unpublish.
+ */
+function publishTerm(term: XTerm): () => void {
+  const w = window as unknown as { __nest?: { term: XTerm } }
+  w.__nest = { term }
+  return () => {
+    if (w.__nest?.term === term) delete w.__nest
+  }
+}
 
 function isFileDrag(e: ReactDragEvent): boolean {
   return e.dataTransfer.types.includes('Files')
@@ -129,6 +145,17 @@ export function Terminal({
     term.loadAddon(fitAddon)
     term.loadAddon(new ClipboardAddon())
     term.open(containerRef.current)
+    // WebGL renderer (must load after open). The DOM renderer left row
+    // artifacts under Claude Code's redraws; without WebGL, or once the
+    // context is lost, the DOM renderer stays in charge.
+    let webgl: WebglAddon | null = null
+    try {
+      webgl = new WebglAddon()
+      webgl.onContextLoss(() => { webgl?.dispose(); webgl = null })
+      term.loadAddon(webgl)
+    } catch {
+      webgl = null
+    }
     requestAnimationFrame(() => term.focus())
 
     const container = containerRef.current
@@ -226,6 +253,20 @@ export function Terminal({
       send({ type: 'terminal:input', windowId, data: withModifiers(data) })
     })
 
+    // Copy on select: a drag or long-press selection lands on the system
+    // clipboard without a further keystroke. OSC 52 (ClipboardAddon) and
+    // Cmd/Ctrl+C keep working as before.
+    let copyTimer: ReturnType<typeof setTimeout> | null = null
+    const selectionSub = term.onSelectionChange(() => {
+      if (copyTimer) clearTimeout(copyTimer)
+      copyTimer = setTimeout(() => {
+        copyTimer = null
+        const text = term.getSelection()
+        if (!text || typeof navigator.clipboard?.writeText !== 'function') return
+        navigator.clipboard.writeText(text).catch(() => {})
+      }, COPY_ON_SELECT_MS)
+    })
+
     const handleSendKeys = (e: Event) => {
       if (!isActiveRef.current) return
       const detail = (e as CustomEvent).detail as string
@@ -270,22 +311,47 @@ export function Terminal({
     }
     container.addEventListener('wheel', handleWheel, { capture: true, passive: false })
 
+    // Mobile: copy xterm selection on touchend. The existing onSelectionChange
+    // debounce fires from a setTimeout which loses the user-gesture context
+    // that iOS Safari requires for clipboard.writeText. touchend is a real
+    // gesture, so the write succeeds.
+    const handleTouchCopy = () => {
+      const text = term.getSelection()
+      if (!text) return
+      navigator.clipboard?.writeText(text).catch(() => {})
+    }
+    container.addEventListener('touchend', handleTouchCopy)
+
     termRef.current = term
 
     return () => {
+      webgl?.dispose()
+      webgl = null
       fitRef.current = null
       window.removeEventListener('nest:sendkeys', handleSendKeys)
       window.removeEventListener('nest:paste', handlePaste)
       window.removeEventListener('nest:submit', handleSubmit)
       if (submitTimer) clearTimeout(submitTimer)
+      if (copyTimer) clearTimeout(copyTimer)
       scrollEl.removeEventListener('scroll', handleScroll)
       container.removeEventListener('wheel', handleWheel, { capture: true })
+      container.removeEventListener('touchend', handleTouchCopy)
+      selectionSub.dispose()
       dataSub.dispose()
       unsubscribe()
       observer.disconnect()
       term.dispose()
     }
   }, [windowId, send, onMessage])
+
+  // Declared after the main effect so the term exists when both run on
+  // mount; on a switch the outgoing terminal's cleanup runs before the
+  // incoming one publishes.
+  useEffect(() => {
+    const term = termRef.current
+    if (!isActive || !term) return
+    return publishTerm(term)
+  }, [isActive])
 
   const flashUploadError = useCallback((message: string) => {
     setUploadStatus({ kind: 'error', message })
@@ -384,6 +450,10 @@ export function Terminal({
   return (
     <div
       data-testid="terminal"
+      // Every opened session keeps its terminal mounted (hidden when not
+      // active); only the active one answers to the "terminal" test id, so
+      // the visual suite's getByTestId('terminal') is unique.
+      {...(isActive ? {} : { 'data-testid': 'terminal-inactive' })}
       style={{ position: 'relative', width: '100%', height: '100%' }}
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
@@ -410,6 +480,8 @@ export function Terminal({
             wordBreak: 'break-all',
             padding: '0 8px',
             color: THEME.foreground,
+            userSelect: 'text',
+            WebkitUserSelect: 'text',
           }}
         />
         <div

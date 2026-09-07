@@ -103,7 +103,7 @@ export function App() {
 
   const isMobile = useIsMobile()
   const [fontSize, setFontSize] = useFontSize(isMobile)
-  useAppHeight()
+  const { keyboardVisible } = useAppHeight()
 
   // Mount a terminal for whichever session becomes active.
   useEffect(() => {
@@ -263,7 +263,7 @@ export function App() {
           style={{
             position: 'fixed',
             inset: 0,
-            background: 'rgba(0,0,0,0.6)',
+            background: 'rgba(0,0,0,0.75)',
             zIndex: 90,
           }}
         />
@@ -352,15 +352,17 @@ export function App() {
           <Composer onSubmit={submitText} />
         )}
 
-        {/* Key toolbar */}
-        <KeyToolbar
-          onSend={sendKeys}
-          onPaste={pasteText}
-          onUpload={uploadFiles}
-          modifiers={modifiers}
-          onToggleModifier={toggleModifier}
-          isMobile={isMobile}
-        />
+        {/* Key toolbar — hidden when the soft keyboard is up on mobile */}
+        {!(isMobile && keyboardVisible) && (
+          <KeyToolbar
+            onSend={sendKeys}
+            onPaste={pasteText}
+            onUpload={uploadFiles}
+            modifiers={modifiers}
+            onToggleModifier={toggleModifier}
+            isMobile={isMobile}
+          />
+        )}
       </div>
     </div>
   )
