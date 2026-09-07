@@ -87,6 +87,14 @@ button, input {
   }
 }
 
+/* Breathing room at the bottom of history when the xterm screen is
+   hidden, so the last line isn't flush against the Composer. */
+@media (pointer: coarse) {
+  [data-main-column]:has([data-composer]:focus-within) [data-history] {
+    padding-bottom: 12px !important;
+  }
+}
+
 /* On touch devices using the DOM renderer, override xterm's
    user-select: none so native long-press selection works. */
 @media (pointer: coarse) {

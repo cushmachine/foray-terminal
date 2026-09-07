@@ -340,6 +340,9 @@ export function Terminal({
     }
     container.addEventListener('touchend', handleTouchCopy)
 
+    const handleTransitionEnd = () => maybeScrollToBottom()
+    container.addEventListener('transitionend', handleTransitionEnd)
+
     termRef.current = term
 
     return () => {
@@ -355,6 +358,7 @@ export function Terminal({
       scrollEl.removeEventListener('scroll', handleScroll)
       container.removeEventListener('wheel', handleWheel, { capture: true })
       container.removeEventListener('touchend', handleTouchCopy)
+      container.removeEventListener('transitionend', handleTransitionEnd)
       selectionSub.dispose()
       dataSub.dispose()
       unsubscribe()
@@ -491,6 +495,7 @@ export function Terminal({
       >
         <div
           ref={historyRef}
+          data-history
           style={{
             fontFamily: MONO_FONT,
             fontSize,
