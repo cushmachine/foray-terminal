@@ -191,6 +191,8 @@ export function Terminal({
     })
 
     const observer = new ResizeObserver(() => {
+      const h = container.offsetHeight
+      if (h > 0) container.style.setProperty('--xterm-h', `${h}px`)
       requestAnimationFrame(fitAndReportSize)
     })
     observer.observe(container)

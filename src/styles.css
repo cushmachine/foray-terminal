@@ -66,18 +66,24 @@ button, input {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
-/* The main column establishes a size container so we can react to the
-   soft keyboard shrinking the layout via @container queries. */
-[data-main-column] { container-type: size; }
-
-/* When the Composer has focus on mobile, collapse the xterm live screen
-   (prompt + status bars) to zero height. The history HTML above it stays
-   visible. The terminal's ResizeObserver sees 0 height and skips resize,
-   so no server-side rows change. Tapping the terminal restores it. */
+/* When the Composer has focus on mobile, slide the xterm live screen
+   upward via negative margin-top. Margins don't trigger ResizeObserver,
+   so xterm never resizes, the running program (Claude Code) never
+   redraws, and no status-bar duplicates land in history.
+   --xterm-h is set from JS in the ResizeObserver callback. */
 @media (pointer: coarse) {
+  [data-xterm-screen] {
+    /* "Showing" transition: 50ms delay absorbs iOS focus flicker */
+    transition: margin-top 0.2s ease-out 50ms, opacity 0.15s ease-out 50ms;
+    will-change: margin-top, opacity;
+  }
   [data-main-column]:has([data-composer]:focus-within) [data-xterm-screen] {
-    height: 0 !important;
-    overflow: hidden !important;
+    /* "Hiding" transition: no delay */
+    transition: margin-top 0.2s ease-out, opacity 0.15s ease-out;
+    margin-top: calc(-1 * var(--xterm-h, 600px)) !important;
+    opacity: 0 !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
   }
 }
 
