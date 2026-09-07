@@ -9,5 +9,7 @@ module.exports = {
     },
     watch: false,
     max_memory_restart: '200M',
+    // Stamp every log line so connect/disconnect gaps can be measured.
+    log_date_format: 'YYYY-MM-DD HH:mm:ss',
   }],
 }
