@@ -70,14 +70,14 @@ button, input {
    soft keyboard shrinking the layout via @container queries. */
 [data-main-column] { container-type: size; }
 
-/* Hide the Composer (mobile text-input bar) when the keyboard shrinks
-   the layout AND the Composer itself is not focused. This fires when
-   the user taps the terminal directly (keyboard opens, Composer is not
-   focused → hidden, giving the terminal more room). When the Composer
-   IS focused (:focus-within), it stays visible so the user can type. */
-@media (max-width: 767px), ((pointer: coarse) and (max-height: 500px)) {
-  @container (max-height: 550px) {
-    [data-composer]:not(:focus-within) { display: none !important; }
+/* When the Composer has focus on mobile, collapse the xterm live screen
+   (prompt + status bars) to zero height. The history HTML above it stays
+   visible. The terminal's ResizeObserver sees 0 height and skips resize,
+   so no server-side rows change. Tapping the terminal restores it. */
+@media (pointer: coarse) {
+  [data-main-column]:has([data-composer]:focus-within) [data-xterm-screen] {
+    height: 0 !important;
+    overflow: hidden !important;
   }
 }
 

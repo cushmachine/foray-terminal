@@ -503,6 +503,7 @@ export function Terminal({
         />
         <div
           ref={containerRef}
+          data-xterm-screen
           style={{
             width: '100%',
             height: '100%',
