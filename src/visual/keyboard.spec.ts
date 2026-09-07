@@ -1,51 +1,65 @@
-// Verify the key toolbar hides when the soft keyboard shrinks the layout.
+// Verify mobile keyboard behavior: the Composer hides when the terminal
+// is focused and the layout shrinks, but stays when the Composer itself
+// has focus. The KeyToolbar stays visible in all cases.
 //
 // A real keyboard isn't available in Playwright, so we simulate by shrinking
 // the viewport (which changes visualViewport.height, triggers useAppHeight,
 // and reduces --app-height — the same chain the real keyboard triggers).
 import { test, expect } from '@playwright/test'
-import { MOBILE, expectTerminalReady, terminalScreen } from './helpers.ts'
+import { MOBILE, expectTerminalReady } from './helpers.ts'
 
-test.describe('keyboard hides key toolbar on mobile', () => {
+test.describe('keyboard behavior on mobile', () => {
   test.use({ viewport: MOBILE, isMobile: true, hasTouch: true })
 
-  test('toolbar visible at full height, hidden when viewport shrinks', async ({ page }) => {
+  test('Composer hides when layout shrinks and it is not focused', async ({ page }) => {
     await page.goto('/')
+    const composer = page.locator('[data-composer]')
     const toolbar = page.getByTestId('key-toolbar')
 
-    // Full mobile viewport: toolbar should be visible.
+    // Full viewport: both Composer and toolbar visible.
+    await expect(composer).toBeVisible()
     await expect(toolbar).toBeVisible()
 
-    // Simulate the keyboard opening by shrinking the viewport to roughly
-    // what a phone looks like with the keyboard up (~400px).
+    // Simulate keyboard opening (terminal focused, not Composer).
     await page.setViewportSize({ width: MOBILE.width, height: 400 })
-    // Give useAppHeight a tick to fire and CSS to recalculate.
     await page.waitForTimeout(200)
-    await expect(toolbar).toBeHidden()
+
+    // Composer hides, toolbar stays.
+    await expect(composer).toBeHidden()
+    await expect(toolbar).toBeVisible()
 
     // Simulate keyboard closing.
     await page.setViewportSize(MOBILE)
     await page.waitForTimeout(200)
-    await expect(toolbar).toBeVisible()
+    await expect(composer).toBeVisible()
   })
 
-  test('copy button copies terminal screen to clipboard', async ({ page, context }) => {
+  test('Composer stays visible when it has focus (even if layout shrinks)', async ({ page }) => {
+    await page.goto('/')
+    const composer = page.locator('[data-composer]')
+    const textarea = composer.locator('textarea')
+
+    // Focus the Composer textarea.
+    await textarea.focus()
+    await expect(textarea).toBeFocused()
+
+    // Simulate keyboard opening while Composer is focused.
+    await page.setViewportSize({ width: MOBILE.width, height: 400 })
+    await page.waitForTimeout(200)
+
+    // Composer stays because :focus-within is true.
+    await expect(composer).toBeVisible()
+  })
+
+  test('copy button is visible and copies terminal screen', async ({ page, context }) => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write'])
     await page.goto('/')
-
-    // Wait for the terminal to have any content at all.
     await expectTerminalReady(page)
 
-    // The copy button reads the xterm buffer, which may differ from the
-    // visible history HTML. Verify the button exists and the clipboard
-    // write succeeds (non-empty result).
     const copyBtn = page.getByRole('button', { name: 'Copy terminal screen' })
     await expect(copyBtn).toBeVisible()
     await copyBtn.click()
 
-    // The xterm buffer might be mostly blank (content scrolled into history
-    // HTML). Verify the clipboard was written to at all — even blank lines
-    // produce a string.
     const clipboardText = await page.evaluate(() => navigator.clipboard.readText())
     expect(typeof clipboardText).toBe('string')
   })

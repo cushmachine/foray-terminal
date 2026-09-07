@@ -66,15 +66,27 @@ button, input {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
-/* Hide the key toolbar when the soft keyboard shrinks the layout.
-   The main column (data-main-column) establishes a size container;
-   when useAppHeight shrinks --app-height, the column shrinks, and the
-   container query fires. Scoped to mobile viewports so the desktop
-   toggle is untouched. */
+/* The main column establishes a size container so we can react to the
+   soft keyboard shrinking the layout via @container queries. */
 [data-main-column] { container-type: size; }
 
+/* Hide the Composer (mobile text-input bar) when the keyboard shrinks
+   the layout AND the Composer itself is not focused. This fires when
+   the user taps the terminal directly (keyboard opens, Composer is not
+   focused → hidden, giving the terminal more room). When the Composer
+   IS focused (:focus-within), it stays visible so the user can type. */
 @media (max-width: 767px), ((pointer: coarse) and (max-height: 500px)) {
   @container (max-height: 550px) {
-    [data-testid="key-toolbar"] { display: none !important; }
+    [data-composer]:not(:focus-within) { display: none !important; }
+  }
+}
+
+/* On touch devices using the DOM renderer, override xterm's
+   user-select: none so native long-press selection works. */
+@media (pointer: coarse) {
+  .xterm {
+    -webkit-user-select: text !important;
+    user-select: text !important;
+    -webkit-touch-callout: default !important;
   }
 }

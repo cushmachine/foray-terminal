@@ -49,7 +49,7 @@ export function Composer({ onSubmit }: ComposerProps) {
   }
 
   return (
-    <div style={{
+    <div data-composer style={{
       display: 'flex',
       alignItems: 'flex-end',
       gap: 6,
