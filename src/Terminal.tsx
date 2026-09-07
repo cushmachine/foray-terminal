@@ -4,6 +4,7 @@ import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { ClipboardAddon } from '@xterm/addon-clipboard'
 import { WebglAddon } from '@xterm/addon-webgl'
+import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
 import type { UseSocketReturn } from './hooks/useSocket'
 import { imageFilesFromClipboard, pathToTerminalInput, pickImageFiles, uploadImage } from './imageUpload'
@@ -11,6 +12,8 @@ import { canFit, nextResize, type TerminalDims } from './terminalSize'
 import { NO_MODIFIERS, applyModifiers, type Modifiers } from './keys'
 import { paletteFromTheme, ansiLineToHtml, type Palette } from './ansi'
 import { MONO_FONT, THEME } from './theme'
+import { extractUrls, joinWrapped, shortenUrl } from './links'
+import { linkifyRows } from './linkify'
 
 interface TerminalProps {
   windowId: number
@@ -32,6 +35,11 @@ interface UploadStatus {
 const UPLOAD_ERROR_FLASH_MS = 4000
 // onSelectionChange fires continuously during a drag; copy once it settles.
 const COPY_ON_SELECT_MS = 120
+// Output bursts arrive as many small writes; scan the screen for URLs once
+// they settle.
+const LINK_SCAN_MS = 250
+const LINK_CHIP_MAX = 4
+const COPIED_FLASH_MS = 1500
 // Touch device (phone/tablet). Drives the mobile-only terminal policy below:
 // DOM renderer, fixed pty height, composer-mode scroll inset.
 const COARSE = typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse)').matches
@@ -85,6 +93,10 @@ export function Terminal({
 
   const [dragging, setDragging] = useState(false)
   const [uploadStatus, setUploadStatus] = useState<UploadStatus | null>(null)
+  // URLs on the visible screen, oldest first (touch devices only).
+  const [links, setLinks] = useState<string[]>([])
+  const [copiedUrl, setCopiedUrl] = useState<string | null>(null)
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const dragDepth = useRef(0)
   const uploadsInFlight = useRef(0)
   const errorTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -142,6 +154,7 @@ export function Terminal({
   useEffect(() => {
     return () => {
       if (errorTimer.current) clearTimeout(errorTimer.current)
+      if (copiedTimer.current) clearTimeout(copiedTimer.current)
     }
   }, [])
 
@@ -166,6 +179,8 @@ export function Terminal({
     term.loadAddon(fitAddon)
     term.loadAddon(new ClipboardAddon())
     term.open(containerRef.current)
+    // Click/tap a URL on the live screen to open it (all platforms).
+    term.loadAddon(new WebLinksAddon())
     // WebGL on desktop only. The DOM renderer leaves text in the DOM so
     // native long-press selection works on phones. WebGL paints to a canvas
     // where the browser can't select text at all.
@@ -279,14 +294,43 @@ export function Terminal({
     document.addEventListener('focusin', onFocusChange)
     document.addEventListener('focusout', onFocusChange)
 
+    /** The visible screen as logical lines: wrapped rows rejoined. */
+    const visibleLogicalLines = (): string[] => {
+      const buffer = term.buffer.active
+      const rows: { text: string; wrapped: boolean }[] = []
+      for (let i = 0; i < term.rows; i++) {
+        const line = buffer.getLine(i)
+        if (line) rows.push({ text: line.translateToString(true), wrapped: line.isWrapped })
+      }
+      return joinWrapped(rows)
+    }
+
+    // URL chips (touch only): rescan the screen once output settles, and
+    // only re-render when the set actually changed.
+    let linkTimer: ReturnType<typeof setTimeout> | null = null
+    const scheduleLinkScan = () => {
+      if (!COARSE) return
+      if (linkTimer) clearTimeout(linkTimer)
+      linkTimer = setTimeout(() => {
+        linkTimer = null
+        const next = extractUrls(visibleLogicalLines().join('\n'))
+        setLinks((prev) =>
+          prev.length === next.length && prev.every((u, i) => u === next[i]) ? prev : next,
+        )
+      }, LINK_SCAN_MS)
+    }
+
     const appendHistoryLines = (lines: string[]) => {
       if (lines.length === 0) return
       const frag = document.createDocumentFragment()
+      const rows: HTMLElement[] = []
       for (const line of lines) {
         const row = document.createElement('div')
         row.innerHTML = ansiLineToHtml(line, PALETTE) || '&nbsp;'
         frag.appendChild(row)
+        rows.push(row)
       }
+      linkifyRows(rows, term.cols)
       historyEl.appendChild(frag)
       historyCount += lines.length
       while (historyCount > MAX_HISTORY_LINES && historyEl.firstChild) {
@@ -294,12 +338,16 @@ export function Terminal({
         historyCount--
       }
       maybeScrollToBottom()
+      scheduleLinkScan()
     }
 
     const unsubscribe = onMessage((msg) => {
       if (!('windowId' in msg) || msg.windowId !== windowId) return
       if (msg.type === 'terminal:output') {
-        term.write(msg.data, maybeScrollToBottom)
+        term.write(msg.data, () => {
+          maybeScrollToBottom()
+          scheduleLinkScan()
+        })
       }
       if (msg.type === 'terminal:history') {
         if (msg.reset) {
@@ -374,13 +422,7 @@ export function Terminal({
     }
     const handleCopyScreen = () => {
       if (!isActiveRef.current) return
-      const buffer = term.buffer.active
-      const lines: string[] = []
-      for (let i = 0; i < term.rows; i++) {
-        const line = buffer.getLine(i)
-        if (line) lines.push(line.translateToString(true))
-      }
-      const text = lines.join('\n').trimEnd()
+      const text = visibleLogicalLines().join('\n').trimEnd()
       if (text) navigator.clipboard?.writeText(text).catch(() => {})
     }
     window.addEventListener('nest:sendkeys', handleSendKeys)
@@ -428,6 +470,7 @@ export function Terminal({
       window.removeEventListener('nest:copy-screen', handleCopyScreen)
       if (submitTimer) clearTimeout(submitTimer)
       if (copyTimer) clearTimeout(copyTimer)
+      if (linkTimer) clearTimeout(linkTimer)
       scrollEl.removeEventListener('scroll', handleScroll)
       container.removeEventListener('wheel', handleWheel, { capture: true })
       container.removeEventListener('touchend', handleTouchCopy)
@@ -547,6 +590,30 @@ export function Terminal({
     send({ type: 'terminal:attach', windowId, cols: term?.cols, rows: term?.rows })
   }
 
+  const copyLink = (url: string) => {
+    navigator.clipboard?.writeText(url).catch(() => {})
+    setCopiedUrl(url)
+    if (copiedTimer.current) clearTimeout(copiedTimer.current)
+    copiedTimer.current = setTimeout(() => {
+      copiedTimer.current = null
+      setCopiedUrl(null)
+    }, COPIED_FLASH_MS)
+  }
+
+  const chipButton: React.CSSProperties = {
+    flexShrink: 0,
+    height: 32,
+    padding: '0 10px',
+    borderRadius: 8,
+    border: '1px solid var(--key-border)',
+    background: 'var(--key-bg)',
+    color: 'var(--key-text)',
+    fontFamily: MONO_FONT,
+    fontSize: 12,
+    cursor: 'pointer',
+    touchAction: 'manipulation',
+  }
+
   return (
     <div
       data-testid="terminal"
@@ -554,7 +621,7 @@ export function Terminal({
       // active); only the active one answers to the "terminal" test id, so
       // the visual suite's getByTestId('terminal') is unique.
       {...(isActive ? {} : { 'data-testid': 'terminal-inactive' })}
-      style={{ position: 'relative', width: '100%', height: '100%' }}
+      style={{ position: 'relative', width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -564,7 +631,8 @@ export function Terminal({
         ref={scrollRef}
         data-testid="terminal-scroll"
         style={{
-          height: '100%',
+          flex: 1,
+          minHeight: 0,
           overflowY: 'auto',
           overscrollBehavior: 'contain',
           WebkitOverflowScrolling: 'touch',
@@ -595,6 +663,58 @@ export function Terminal({
           }}
         />
       </div>
+      {COARSE && links.length > 0 && (
+        // URLs on screen as chips: a phone can't select a wrapped URL, so
+        // give it a button. Buttons keep focus where it is (no keyboard drop).
+        <div
+          data-testid="link-chip"
+          style={{
+            flexShrink: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 6,
+            padding: '6px 8px',
+            background: 'var(--surface)',
+            borderTop: '1px solid var(--border)',
+            fontFamily: MONO_FONT,
+            fontSize: 12,
+          }}
+        >
+          {links.slice(-LINK_CHIP_MAX).reverse().map((url) => (
+            <div key={url} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span
+                title={url}
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  color: 'var(--accent-text)',
+                }}
+              >
+                {shortenUrl(url)}
+              </span>
+              <button
+                data-testid="link-open"
+                onPointerDown={(e) => e.preventDefault()}
+                onClick={() => window.open(url, '_blank', 'noopener')}
+                style={chipButton}
+              >
+                Open
+              </button>
+              <button
+                data-testid="link-copy"
+                onPointerDown={(e) => e.preventDefault()}
+                onClick={() => copyLink(url)}
+                style={chipButton}
+              >
+                {copiedUrl === url ? 'Copied' : 'Copy'}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
       {dragging && (
         <div
           style={{

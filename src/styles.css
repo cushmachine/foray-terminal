@@ -74,6 +74,14 @@ button, input {
   [data-main-column]:has(.xterm.focus) [data-composer] { opacity: 0.55; }
 }
 
+/* URLs in the scrollback history (see linkify.ts). */
+.term-link {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+  text-underline-offset: 2px;
+}
+
 /* On touch devices using the DOM renderer, override xterm's
    user-select: none so native long-press selection works. */
 @media (pointer: coarse) {
