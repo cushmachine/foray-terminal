@@ -136,6 +136,7 @@ export function Terminal({
       lineHeight: 1.4,
       cursorStyle: 'bar',
       cursorBlink: true,
+      cursorInactiveStyle: 'none',
       scrollback: 0,
       allowTransparency: true,
       convertEol: true,

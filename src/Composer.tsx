@@ -91,27 +91,6 @@ export function Composer({ onSubmit }: ComposerProps) {
           overflowY: 'auto',
         }}
       />
-      <button
-        // Don't take focus from the field, or the keyboard drops on every tap.
-        onPointerDown={(e) => e.preventDefault()}
-        onClick={submit}
-        aria-label={text ? 'Send' : 'Press Enter'}
-        title={text ? 'Send' : 'Enter'}
-        style={{
-          flexShrink: 0,
-          height: 36,
-          minWidth: 44,
-          padding: '0 12px',
-          borderRadius: 10,
-          border: '1px solid var(--accent-dim)',
-          background: text ? 'var(--accent-dim)' : 'transparent',
-          color: text ? 'var(--accent-text)' : 'var(--text-dim)',
-          fontSize: 16,
-          touchAction: 'manipulation',
-        }}
-      >
-        ↵
-      </button>
     </div>
   )
 }
