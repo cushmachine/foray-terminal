@@ -50,6 +50,7 @@ test.describe('session list', () => {
   test.use({ viewport: DESKTOP })
 
   test('#4 sessions are listed in creation order, not name order', async ({ page }) => {
+    test.setTimeout(120_000) // creates three sessions
     await page.goto('/')
     // Lexicographic order would be b1, b10, b2. Creation order is what the
     // user expects: the newest session at the bottom.
@@ -81,6 +82,7 @@ test.describe('sidebar footer', () => {
   test.use({ viewport: { width: 1200, height: 360 } })
 
   test('#11 the new-session button stays pinned while the list scrolls', async ({ page }) => {
+    test.setTimeout(120_000) // creates four sessions
     await page.goto('/')
     const names = [uniqueName('pin1'), uniqueName('pin2'), uniqueName('pin3'), uniqueName('pin4')]
     try {

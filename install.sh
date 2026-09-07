@@ -101,16 +101,20 @@ npm run build 2>&1 | tail -3
 
 TMUX_CONF="$HOME/.tmux.conf"
 
-# Check whether the two settings Nest needs are already present, regardless
+# Check whether the settings Nest needs are already present, regardless
 # of how they got there (hand-written, a previous install, etc.).
 has_mouse_off=false
 has_history_limit=false
+has_extended_keys=false
+has_extended_keys_format=false
 if [ -f "$TMUX_CONF" ]; then
   grep -q 'set.*mouse off' "$TMUX_CONF" 2>/dev/null && has_mouse_off=true
   grep -q 'set.*history-limit' "$TMUX_CONF" 2>/dev/null && has_history_limit=true
+  grep -q 'set.*extended-keys always' "$TMUX_CONF" 2>/dev/null && has_extended_keys=true
+  grep -q 'set.*extended-keys-format csi-u' "$TMUX_CONF" 2>/dev/null && has_extended_keys_format=true
 fi
 
-if $has_mouse_off && $has_history_limit; then
+if $has_mouse_off && $has_history_limit && $has_extended_keys && $has_extended_keys_format; then
   info "tmux config already has the settings Nest needs."
 elif [ -f "$TMUX_CONF" ]; then
   warn "Existing ~/.tmux.conf found — appending Nest settings."
@@ -119,6 +123,8 @@ elif [ -f "$TMUX_CONF" ]; then
     echo "# Added by Nest installer"
     $has_mouse_off  || echo "set -g mouse off"
     $has_history_limit || echo "set -g history-limit 10000"
+    $has_extended_keys || echo "set -s extended-keys always"
+    $has_extended_keys_format || echo "set -s extended-keys-format csi-u"
   } >> "$TMUX_CONF"
 else
   info "Writing tmux config..."
@@ -126,6 +132,10 @@ else
 # Nest: scrollback comes from tmux history, served as HTML to the browser.
 set -g mouse off
 set -g history-limit 10000
+# Modified keys (Shift+Enter in Claude Code) reach the pane as CSI u instead
+# of being downgraded to a plain Enter.
+set -s extended-keys always
+set -s extended-keys-format csi-u
 TMUX
 fi
 

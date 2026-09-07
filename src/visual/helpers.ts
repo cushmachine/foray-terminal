@@ -38,6 +38,10 @@ export function sessionItem(page: Page, name: string) {
  * session, so it is also the active session afterwards.
  */
 export async function createSession(page: Page, name: string): Promise<void> {
+  // The welcome session:list arrives a beat after load. Counting before it
+  // lands makes `before + 1` wrong once the list renders. A machine with no
+  // sessions has nothing to wait for, so the wait is bounded and forgiving.
+  await page.getByTestId('session-item').first().waitFor({ timeout: 3_000 }).catch(() => {})
   const before = await page.getByTestId('session-item').count()
   await page.getByTestId('new-session').click()
   await expect(page.getByTestId('session-item')).toHaveCount(before + 1)

@@ -43,6 +43,15 @@ export function applySessionMessage(sessions: Session[], msg: ServerMessage): Se
 }
 
 /**
+ * Sessions in creation order. tmux lists sessions by name, so bash-10 would
+ * otherwise sort before bash-2; ids are allocated sequentially, so ascending
+ * id is creation order. Returns a new array; the input is not mutated.
+ */
+export function sortSessions(sessions: Session[]): Session[] {
+  return [...sessions].sort((a, b) => a.id - b.id)
+}
+
+/**
  * Sessions whose terminal has been mounted. Terminals are created the first
  * time a session is viewed rather than for every session on load: an xterm
  * instance plus a server pty per session is heavy on a phone, and each

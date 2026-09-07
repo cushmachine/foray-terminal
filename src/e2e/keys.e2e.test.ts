@@ -89,8 +89,10 @@ test('Shift+Enter as CSI u reaches the pane unchanged', { skip: !hasTmux() && 't
   const windowId = ((await created).window as { id: number }).id
   try {
     ws.send(JSON.stringify({ type: 'terminal:attach', windowId, cols: 100, rows: 30 }))
-    // No prompt wait: prompts differ per machine ($ vs #) and the pty
-    // buffers input until the shell reads it.
+    // Input sent before the attach has spawned its pty is dropped, so wait
+    // for the first paint (the alternate-screen switch) before typing. No
+    // prompt wait beyond that: prompts differ per machine ($ vs #).
+    await waitForOutput(ws, windowId, '\x1b[?1049h')
     ws.send(JSON.stringify({ type: 'terminal:input', windowId, data: 'cat -v\r' }))
     await waitForOutput(ws, windowId, 'cat -v')
     ws.send(JSON.stringify({ type: 'terminal:input', windowId, data: SHIFT_ENTER_CSI_U }))

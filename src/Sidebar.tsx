@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
-import { displayName, type Session } from './sessionState'
+import { displayName, sortSessions, type Session } from './sessionState'
 import { MAX_FONT_SIZE, MIN_FONT_SIZE } from './mobile'
 import { MONO_FONT } from './theme'
 
@@ -111,7 +111,7 @@ export function Sidebar({
   })
 
   return (
-    <div data-testid="sidebar" style={{
+    <div data-testid="sidebar" aria-hidden={isMobile && !isOpen ? true : undefined} style={{
       width: isMobile ? 'min(300px, 85vw)' : 'var(--sidebar-width)',
       background: 'var(--surface)',
       borderRight: '1px solid var(--border)',
@@ -127,7 +127,11 @@ export function Sidebar({
         paddingTop: 'env(safe-area-inset-top)',
         paddingBottom: 'env(safe-area-inset-bottom)',
         transform: isOpen ? 'translateX(0)' : 'translateX(-100%)',
-        transition: 'transform 0.2s ease',
+        // Off-screen is not hidden: without this the closed drawer is still
+        // focusable, read by screen readers and "visible" to automation.
+        // visibility flips only after the slide-out finishes.
+        visibility: isOpen ? 'visible' : 'hidden',
+        transition: 'transform 0.2s ease, visibility 0.2s',
         boxShadow: isOpen ? '0 0 32px rgba(0,0,0,0.5)' : 'none',
       } : {}),
     }}>
@@ -181,8 +185,8 @@ export function Sidebar({
       </div>
 
       {/* Session list */}
-      <div data-testid="session-list" style={{ flex: 1, overflowY: 'auto', padding: '0 8px', overscrollBehavior: 'contain' }}>
-        {sessions.map(session => {
+      <div data-testid="session-list" style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0 8px', overscrollBehavior: 'contain' }}>
+        {sortSessions(sessions).map(session => {
           const active = session.id === activeSession
           const renaming = renamingId === session.id
           const armed = confirmKillId === session.id
@@ -228,6 +232,7 @@ export function Sidebar({
                   data-testid="session-item"
                   data-session-id={session.id}
                   data-active={active ? 'true' : 'false'}
+                  title={displayName(session)}
                   onClick={() => onSelect(session.id)}
                   style={{
                     flex: 1,

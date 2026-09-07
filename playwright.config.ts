@@ -24,8 +24,11 @@ export default defineConfig({
   testMatch: '**/*.spec.ts',
   globalTeardown: './src/visual/global-teardown.ts',
   outputDir: `.playwright/results-${VISUAL_PORT}`,
-  timeout: 30_000,
-  expect: { timeout: 5_000 },
+  // Creating a session is a real tmux new-session plus an attach; on this
+  // small VM under load that can take a few seconds each, and some specs
+  // create several.
+  timeout: 60_000,
+  expect: { timeout: 10_000 },
   // One worker: every test shares one tmux server and one Nest server.
   workers: 1,
   retries: 0,

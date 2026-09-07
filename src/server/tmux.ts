@@ -132,6 +132,7 @@ export async function createWindow(
       if (name) {
         await exec('tmux', ['set', '-t', actualName, NAMED_OPTION, '1']).catch(() => {})
       }
+      await enableExtendedKeys(exec)
 
       const parsed = parseLine(stdout.trim(), hostname)
       if (!parsed) throw new Error(`Failed to parse new session output: ${stdout}`)
@@ -146,6 +147,19 @@ export async function createWindow(
     }
   }
   throw new Error(`Could not create session: too many name collisions for ${sessionName}`)
+}
+
+/**
+ * Let modified keys reach the pane as CSI u. Nest's client sends Shift+Enter
+ * as ESC[13;2u; with tmux's default `extended-keys off` the server parses
+ * that as Shift+Enter and hands the pane a bare carriage return, so Claude
+ * Code inside submits instead of inserting a newline. These are server
+ * options (global to the tmux server) and idempotent; a tmux too old to
+ * know them just keeps its defaults.
+ */
+export async function enableExtendedKeys(exec: TmuxExecutor = defaultExec): Promise<void> {
+  await exec('tmux', ['set', '-s', 'extended-keys', 'always']).catch(() => {})
+  await exec('tmux', ['set', '-s', 'extended-keys-format', 'csi-u']).catch(() => {})
 }
 
 /**
