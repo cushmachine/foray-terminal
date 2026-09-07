@@ -130,3 +130,57 @@ export function repeatDelay(n: number): number {
 
 /** Pointer travel beyond which a press is a scroll, not a tap. */
 export const TAP_SLOP_PX = 10
+
+// ---------------------------------------------------------------------------
+// Keyboard shortcuts for the chrome (AUDIT #9)
+// ---------------------------------------------------------------------------
+
+export type ShortcutAction = 'toggle-sidebar' | 'toggle-files'
+
+/** The parts of a KeyboardEvent the shortcut table looks at. */
+export interface ShortcutKey {
+  key: string
+  metaKey: boolean
+  ctrlKey: boolean
+  shiftKey: boolean
+  altKey: boolean
+}
+
+/**
+ * Which app-level action a key chord triggers, or null when the key belongs
+ * to the terminal. Meta+B / Meta+\ follow VS Code; Ctrl+Shift+B / Ctrl+Shift+\
+ * cover keyboards without a Command key. Plain Ctrl+B is the tmux prefix and
+ * Alt chords are terminal input, so neither is claimed.
+ */
+export function shortcutAction(e: ShortcutKey): ShortcutAction | null {
+  if (e.altKey) return null
+  const chord = e.metaKey ? !e.ctrlKey : e.ctrlKey && e.shiftKey
+  if (!chord) return null
+  const key = e.key.toLowerCase()
+  if (key === 'b') return 'toggle-sidebar'
+  // Shift+\ types | on most layouts, so accept both spellings.
+  if (key === '\\' || key === '|') return 'toggle-files'
+  return null
+}
+
+// ---------------------------------------------------------------------------
+// Toolbar overflow hint (AUDIT #5)
+// ---------------------------------------------------------------------------
+
+export interface ScrollMetrics {
+  scrollLeft: number
+  clientWidth: number
+  scrollWidth: number
+}
+
+/**
+ * Which edges of a horizontally scrolling row still have content past
+ * them. A one-pixel tolerance keeps sub-pixel scroll positions from
+ * flickering the hint at the ends.
+ */
+export function overflowHint({ scrollLeft, clientWidth, scrollWidth }: ScrollMetrics): { left: boolean; right: boolean } {
+  return {
+    left: scrollLeft > 1,
+    right: scrollWidth - (scrollLeft + clientWidth) > 1,
+  }
+}

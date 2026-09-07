@@ -8,15 +8,19 @@ import { FilePanel } from './FilePanel'
 import { useSocket } from './hooks/useSocket'
 import { useAppHeight } from './hooks/useAppHeight'
 import { applySessionMessage, openedWith, type Session } from './sessionState'
-import { NO_MODIFIERS, type Modifiers } from './keys'
+import { NO_MODIFIERS, shortcutAction, type Modifiers } from './keys'
 import {
   FONT_SIZE_KEY,
+  KEY_TOOLBAR_KEY,
   MOBILE_MEDIA_QUERY,
   clampFontSize,
   defaultFontSize,
   isMobileViewport,
   readFontSize,
+  readToolbarVisible,
+  resolvePanels,
   swipeAction,
+  type PanelAction,
   type Point,
 } from './mobile'
 import { TopBar } from './TopBar'
@@ -108,6 +112,9 @@ export function App() {
   // Desktop starts with the sidebar in view; a phone starts on the terminal.
   const [sidebarOpen, setSidebarOpen] = useState(() => !detectMobile())
   const [filePanelOpen, setFilePanelOpen] = useState(false)
+  // The stored key-toolbar choice; readToolbarVisible turns it into a
+  // decision (touch layouts always show it).
+  const [toolbarChoice, setToolbarChoice] = useState(() => storageGet(KEY_TOOLBAR_KEY))
   const [mobileView, setMobileView] = useState<MobileView>('terminal')
   const [openFile, setOpenFile] = useState<string | null>(null)
   const [filePanelWidth, setFilePanelWidth] = useState(320)
@@ -119,6 +126,44 @@ export function App() {
   isMobileRef.current = isMobile
   const [fontSize, setFontSize] = useFontSize(isMobile)
   useAppHeight()
+
+  const toolbarVisible = readToolbarVisible(toolbarChoice, isMobile)
+  const toggleToolbar = useCallback(() => {
+    setToolbarChoice(prev => {
+      const next = readToolbarVisible(prev, false) ? 'false' : 'true'
+      storageSet(KEY_TOOLBAR_KEY, next)
+      return next
+    })
+  }, [])
+
+  // Side panels go through resolvePanels so a tablet never shows both at
+  // once (AUDIT #6). A ref keeps the current state visible to the keyboard
+  // listener, which is installed once.
+  const panelsRef = useRef({ sidebarOpen, filePanelOpen })
+  panelsRef.current = { sidebarOpen, filePanelOpen }
+  const applyPanelAction = useCallback((action: PanelAction) => {
+    const next = resolvePanels(panelsRef.current, action, window.innerWidth)
+    setSidebarOpen(next.sidebarOpen)
+    setFilePanelOpen(next.filePanelOpen)
+  }, [])
+
+  // Keyboard shortcuts for the chrome (AUDIT #9). Captured on window so they
+  // win over xterm, which otherwise swallows every key while focused.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const action = shortcutAction(e)
+      if (!action) return
+      e.preventDefault()
+      e.stopPropagation()
+      if (isMobileRef.current && action === 'toggle-files') {
+        setMobileView(v => (v === 'files' ? 'terminal' : 'files'))
+        return
+      }
+      applyPanelAction(action)
+    }
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => window.removeEventListener('keydown', onKeyDown, true)
+  }, [applyPanelAction])
 
   // Mount a terminal for whichever session becomes active.
   useEffect(() => {
@@ -232,9 +277,9 @@ export function App() {
     if (isMobile) {
       setMobileView('files')
     } else {
-      setFilePanelOpen(true)
+      applyPanelAction('open-files')
     }
-  }, [isMobile])
+  }, [isMobile, applyPanelAction])
 
   const handleCloseFile = useCallback(() => {
     setOpenFile(null)
@@ -316,12 +361,14 @@ export function App() {
         <TopBar
           isMobile={isMobile}
           sidebarOpen={sidebarOpen}
-          onToggleSidebar={() => setSidebarOpen(v => !v)}
+          onToggleSidebar={() => applyPanelAction('toggle-sidebar')}
           activeSessionData={activeSessionData}
           mobileView={mobileView}
           onSetMobileView={setMobileView}
           filePanelOpen={filePanelOpen}
-          onToggleFilePanel={() => setFilePanelOpen(v => !v)}
+          onToggleFilePanel={() => applyPanelAction('toggle-files')}
+          toolbarVisible={toolbarVisible}
+          onToggleToolbar={toggleToolbar}
         />
 
         {/* Main content area */}
@@ -380,14 +427,16 @@ export function App() {
 
         {/* Key toolbar — CSS container query hides it when the keyboard
             shrinks the layout on mobile (see styles.css). */}
-        <KeyToolbar
-          onSend={sendKeys}
-          onPaste={pasteText}
-          onUpload={uploadFiles}
-          modifiers={modifiers}
-          onToggleModifier={toggleModifier}
-          isMobile={isMobile}
-        />
+        {toolbarVisible && (
+          <KeyToolbar
+            onSend={sendKeys}
+            onPaste={pasteText}
+            onUpload={uploadFiles}
+            modifiers={modifiers}
+            onToggleModifier={toggleModifier}
+            isMobile={isMobile}
+          />
+        )}
       </div>
     </div>
   )

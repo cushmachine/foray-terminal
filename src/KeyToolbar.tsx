@@ -4,6 +4,7 @@ import {
   PRIMARY_KEYS,
   SECONDARY_KEYS,
   TAP_SLOP_PX,
+  overflowHint,
   repeatDelay,
   type KeyDef,
   type Modifiers,
@@ -55,6 +56,28 @@ export function KeyToolbar({
   const [showMore, setShowMore] = useState(false)
   const press = useRef<PressState | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
+  const row = useRef<HTMLDivElement>(null)
+  // Which edges of the primary row hide more keys (AUDIT #5).
+  const [overflow, setOverflow] = useState({ left: false, right: false })
+
+  useEffect(() => {
+    const el = row.current
+    if (!el) return
+    const update = () => {
+      const next = overflowHint(el)
+      setOverflow((prev) => (prev.left === next.left && prev.right === next.right ? prev : next))
+    }
+    update()
+    el.addEventListener('scroll', update, { passive: true })
+    const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(update) : null
+    observer?.observe(el)
+    window.addEventListener('resize', update)
+    return () => {
+      el.removeEventListener('scroll', update)
+      observer?.disconnect()
+      window.removeEventListener('resize', update)
+    }
+  }, [])
 
   useEffect(() => {
     return () => {
@@ -229,6 +252,16 @@ export function KeyToolbar({
     overscrollBehaviorX: 'contain',
   }
 
+  const fadeStyle = (side: 'left' | 'right'): React.CSSProperties => ({
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    [side]: 0,
+    width: 28,
+    pointerEvents: 'none',
+    background: `linear-gradient(to ${side}, transparent, var(--surface))`,
+  })
+
   return (
     <div data-testid="key-toolbar" style={{
       background: 'var(--surface)',
@@ -243,8 +276,13 @@ export function KeyToolbar({
           {SECONDARY_KEYS.map(renderKey)}
         </div>
       )}
-      <div data-testid="key-toolbar-row" style={rowStyle}>
-        {PRIMARY_KEYS.map(renderKey)}
+      <div style={{ position: 'relative' }}>
+        <div ref={row} data-testid="key-toolbar-row" style={rowStyle}>
+          {PRIMARY_KEYS.map(renderKey)}
+        </div>
+        {/* Edge fades hint that the row scrolls; each goes away at its end. */}
+        {overflow.left && <div data-testid="keytoolbar-fade-left" style={fadeStyle('left')} />}
+        {overflow.right && <div data-testid="keytoolbar-fade-right" style={fadeStyle('right')} />}
       </div>
       <input
         ref={fileInput}

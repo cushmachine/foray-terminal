@@ -91,3 +91,54 @@ export function readFontSize(raw: string | null | undefined, fallback: number): 
   if (!Number.isFinite(parsed)) return fallback
   return clampFontSize(parsed)
 }
+
+// ---------------------------------------------------------------------------
+// Side panels (AUDIT #6)
+// ---------------------------------------------------------------------------
+
+/**
+ * Below this width the sidebar and the file panel are exclusive: with both
+ * open on a 768px tablet the terminal is squeezed to ~230px and wraps every
+ * few characters. Desktop widths keep them independent.
+ */
+export const TABLET_MAX_WIDTH = 1024
+
+export interface PanelState {
+  sidebarOpen: boolean
+  filePanelOpen: boolean
+}
+
+export type PanelAction = 'toggle-sidebar' | 'toggle-files' | 'open-files'
+
+/** The panel state after `action`, given the viewport width. */
+export function resolvePanels(state: PanelState, action: PanelAction, width: number): PanelState {
+  const exclusive = width < TABLET_MAX_WIDTH
+  switch (action) {
+    case 'toggle-sidebar': {
+      const sidebarOpen = !state.sidebarOpen
+      return { sidebarOpen, filePanelOpen: exclusive && sidebarOpen ? false : state.filePanelOpen }
+    }
+    case 'toggle-files': {
+      const filePanelOpen = !state.filePanelOpen
+      return { sidebarOpen: exclusive && filePanelOpen ? false : state.sidebarOpen, filePanelOpen }
+    }
+    case 'open-files':
+      return { sidebarOpen: exclusive ? false : state.sidebarOpen, filePanelOpen: true }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Key toolbar on desktop (AUDIT #10)
+// ---------------------------------------------------------------------------
+
+export const KEY_TOOLBAR_KEY = 'nest:keyToolbar'
+
+/**
+ * Whether the key toolbar shows. Touch layouts always need it. On desktop
+ * it is clutter next to a physical keyboard, so it is off unless the user
+ * turned it on and that choice was stored.
+ */
+export function readToolbarVisible(raw: string | null | undefined, isMobile: boolean): boolean {
+  if (isMobile) return true
+  return raw === 'true'
+}

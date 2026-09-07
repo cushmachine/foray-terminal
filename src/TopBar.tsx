@@ -12,6 +12,9 @@ interface TopBarProps {
   onSetMobileView: (view: MobileView) => void
   filePanelOpen: boolean
   onToggleFilePanel: () => void
+  /** Desktop only: whether the key toolbar is showing (AUDIT #10). */
+  toolbarVisible: boolean
+  onToggleToolbar: () => void
 }
 
 export function TopBar({
@@ -23,6 +26,8 @@ export function TopBar({
   onSetMobileView,
   filePanelOpen,
   onToggleFilePanel,
+  toolbarVisible,
+  onToggleToolbar,
 }: TopBarProps) {
   return (
     <div style={{
@@ -121,6 +126,28 @@ export function TopBar({
             </button>
           ))}
         </div>
+      )}
+
+      {/* Desktop key toolbar toggle: off by default next to a real keyboard */}
+      {!isMobile && (
+        <button
+          data-testid="keytoolbar-toggle"
+          onClick={onToggleToolbar}
+          aria-pressed={toolbarVisible}
+          title={toolbarVisible ? 'Hide key toolbar' : 'Show key toolbar'}
+          style={{
+            background: toolbarVisible ? 'var(--accent-dim)' : 'transparent',
+            border: `1px solid ${toolbarVisible ? 'var(--accent)' : 'var(--border)'}`,
+            color: toolbarVisible ? 'var(--accent)' : 'var(--text-dim)',
+            fontSize: 12,
+            padding: '4px 10px',
+            borderRadius: 4,
+            cursor: 'pointer',
+            fontFamily: MONO_FONT,
+          }}
+        >
+          keys
+        </button>
       )}
 
       {/* Desktop file panel toggle */}
