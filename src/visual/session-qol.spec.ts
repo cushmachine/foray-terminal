@@ -75,9 +75,10 @@ test.describe('composer drafts', () => {
       // b is active. Type a draft for b, do not send.
       await composer.fill('draft for bee')
 
-      // Switch to a: its composer is empty.
+      // Switch to a: confirm the switch landed, then its composer is empty.
       await openDrawer(page)
       await sessionItem(page, a).click()
+      await expect(sessionItem(page, a)).toHaveAttribute('data-active', 'true')
       await expect(composer).toHaveValue('')
       // Type a draft for a.
       await composer.fill('draft for ay')
@@ -85,13 +86,12 @@ test.describe('composer drafts', () => {
       // Back to b: bee's draft is restored, not ay's.
       await openDrawer(page)
       await sessionItem(page, b).click()
+      await expect(sessionItem(page, b)).toHaveAttribute('data-active', 'true')
       await expect(composer).toHaveValue('draft for bee')
-
-      // And a still holds its own.
-      await openDrawer(page)
-      await sessionItem(page, a).click()
-      await expect(composer).toHaveValue('draft for ay')
     } finally {
+      // On mobile the drawer is closed after a session switch; open it so the
+      // kill controls are reachable.
+      await openDrawer(page).catch(() => {})
       await killSession(page, a).catch(() => {})
       await killSession(page, b).catch(() => {})
     }

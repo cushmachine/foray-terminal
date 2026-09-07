@@ -46,8 +46,12 @@ export async function createSession(page: Page, name: string): Promise<void> {
   await page.getByTestId('new-session').click()
   await expect(page.getByTestId('session-item')).toHaveCount(before + 1)
   // On a phone, creating a session auto-closes the drawer (the new terminal
-  // takes over); reopen it so the rename controls are reachable.
-  if (await page.getByTestId('sidebar').isHidden().catch(() => false)) {
+  // takes over); wait for it to settle, then reopen so the rename controls
+  // are reachable. Read from the viewport rather than a live isHidden() check,
+  // which races the close transition. Desktop keeps the sidebar pinned.
+  const vp = page.viewportSize()
+  if (vp && vp.width < 700) {
+    await expect(page.getByTestId('sidebar')).toBeHidden()
     await page.getByTestId('sidebar-toggle').click()
     await expect(page.getByTestId('sidebar')).toBeVisible()
   }
