@@ -66,33 +66,12 @@ button, input {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
-/* When the Composer has focus on mobile, slide the xterm live screen
-   upward via negative margin-top. Margins don't trigger ResizeObserver,
-   so xterm never resizes, the running program (Claude Code) never
-   redraws, and no status-bar duplicates land in history.
-   --xterm-h is set from JS in the ResizeObserver callback. */
+/* One live input at a time: the cursor is already hidden when xterm is
+   blurred (cursorInactiveStyle); mirror it by dimming the Composer when
+   xterm has focus. */
 @media (pointer: coarse) {
-  [data-xterm-screen] {
-    /* "Showing" transition: 50ms delay absorbs iOS focus flicker */
-    transition: margin-top 0.2s ease-out 50ms, opacity 0.15s ease-out 50ms;
-    will-change: margin-top, opacity;
-  }
-  [data-main-column]:has([data-composer]:focus-within) [data-xterm-screen] {
-    /* "Hiding" transition: no delay */
-    transition: margin-top 0.2s ease-out, opacity 0.15s ease-out;
-    margin-top: calc(-1 * var(--xterm-h, 600px)) !important;
-    opacity: 0 !important;
-    visibility: hidden !important;
-    pointer-events: none !important;
-  }
-}
-
-/* Breathing room at the bottom of history when the xterm screen is
-   hidden, so the last line isn't flush against the Composer. */
-@media (pointer: coarse) {
-  [data-main-column]:has([data-composer]:focus-within) [data-history] {
-    padding-bottom: 48px !important;
-  }
+  [data-composer] { transition: opacity 0.15s ease; }
+  [data-main-column]:has(.xterm.focus) [data-composer] { opacity: 0.55; }
 }
 
 /* On touch devices using the DOM renderer, override xterm's

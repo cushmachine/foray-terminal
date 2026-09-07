@@ -32,6 +32,11 @@ interface UploadStatus {
 const UPLOAD_ERROR_FLASH_MS = 4000
 // onSelectionChange fires continuously during a drag; copy once it settles.
 const COPY_ON_SELECT_MS = 120
+// Touch device (phone/tablet). Drives the mobile-only terminal policy below:
+// DOM renderer, fixed pty height, composer-mode scroll inset.
+const COARSE = typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse)').matches
+const SEPARATOR = /^[\s─━═╌┄]+$/
+const PROMPT = /^\s*❯/
 
 /**
  * Test hook: the active terminal's xterm instance as window.__nest.term, so
@@ -86,10 +91,25 @@ export function Terminal({
 
   // Whether the scroll container is pinned to the bottom.
   const stickRef = useRef(true)
+  // Pixels to keep below the fold when pinned (composer mode on touch); the
+  // main effect installs the real function once the xterm exists.
+  const insetRef = useRef<() => number>(() => 0)
+  // A smooth programmatic scroll fires scroll events on the way; ignore them
+  // for the stick check until it lands.
+  const suppressStickUntil = useRef(0)
 
-  const scrollToBottom = () => {
+  const scrollToBottom = (smooth = false) => {
     const el = scrollRef.current
-    if (el) requestAnimationFrame(() => { el.scrollTop = el.scrollHeight })
+    if (!el) return
+    requestAnimationFrame(() => {
+      const top = Math.max(0, el.scrollHeight - el.clientHeight - insetRef.current())
+      if (smooth) {
+        suppressStickUntil.current = Date.now() + 600
+        el.scrollTo({ top, behavior: 'smooth' })
+      } else {
+        el.scrollTop = top
+      }
+    })
   }
 
   const maybeScrollToBottom = () => {
@@ -149,9 +169,8 @@ export function Terminal({
     // WebGL on desktop only. The DOM renderer leaves text in the DOM so
     // native long-press selection works on phones. WebGL paints to a canvas
     // where the browser can't select text at all.
-    const coarsePointer = window.matchMedia?.('(pointer: coarse)').matches
     let webgl: WebglAddon | null = null
-    if (!coarsePointer) {
+    if (!COARSE) {
       try {
         webgl = new WebglAddon()
         webgl.onContextLoss(() => { webgl?.dispose(); webgl = null })
@@ -191,16 +210,74 @@ export function Terminal({
     })
 
     const observer = new ResizeObserver(() => {
-      const h = container.offsetHeight
-      if (h > 0) container.style.setProperty('--xterm-h', `${h}px`)
       requestAnimationFrame(fitAndReportSize)
     })
     observer.observe(container)
 
+    // On phones the keyboard shrinks the scroll viewport but must not shrink
+    // the pty: the container keeps the tallest height seen, so xterm never
+    // refits, Claude Code never repaints, and the server never resends history.
+    let fullH = 0
+    let lastW = 0
+    const scrollObserver = new ResizeObserver(() => {
+      if (COARSE) {
+        const w = scrollEl.clientWidth
+        const h = scrollEl.clientHeight
+        if (w !== lastW) { lastW = w; fullH = 0 }
+        if (h > fullH) {
+          fullH = h
+          container.style.setProperty('--xterm-full-h', `${fullH}px`)
+        }
+      }
+      maybeScrollToBottom()
+    })
+    scrollObserver.observe(scrollEl)
+
     const handleScroll = () => {
-      stickRef.current = scrollEl.scrollTop + scrollEl.clientHeight >= scrollEl.scrollHeight - 4
+      if (Date.now() < suppressStickUntil.current) return
+      stickRef.current = scrollEl.scrollTop + scrollEl.clientHeight >= scrollEl.scrollHeight - insetRef.current() - 4
     }
     scrollEl.addEventListener('scroll', handleScroll, { passive: true })
+
+    // Pixels of the xterm screen to keep below the fold while the Composer has
+    // focus: everything under the last real output row (prompt box, status bar,
+    // trailing blanks). The cursor row is never output, so the walk starts above it.
+    const bottomInset = (): number => {
+      if (!COARSE) return 0
+      if (!document.querySelector('[data-composer]:focus-within')) return 0
+      const buf = term.buffer.active
+      const text = (r: number) => buf.getLine(r)?.translateToString(true) ?? ''
+      let row = buf.baseY + buf.cursorY - 1
+      while (row >= 0) {
+        const t = text(row)
+        if (t !== '' && !SEPARATOR.test(t) && !PROMPT.test(t)) break
+        row--
+      }
+      const outputRow = row - buf.baseY
+      // Measure rather than assume: the DOM renderer keeps one div per row in
+      // .xterm-rows, and xterm's screen can overflow the container's padding.
+      const rowEl = term.element?.querySelector('.xterm-rows')?.children[outputRow] as HTMLElement | undefined
+      if (rowEl) {
+        const rowBottom = rowEl.getBoundingClientRect().bottom - scrollEl.getBoundingClientRect().top + scrollEl.scrollTop
+        return Math.max(0, scrollEl.scrollHeight - rowBottom)
+      }
+      // No output row on screen (or no DOM rows): park the whole screen.
+      const screen = term.element?.querySelector<HTMLElement>('.xterm-screen')
+      const cellH = screen ? screen.clientHeight / Math.max(term.rows, 1) : 0
+      return (term.rows - outputRow - 1) * cellH
+    }
+    insetRef.current = bottomInset
+
+    // Switching between the Composer and the terminal re-pins: composer mode
+    // parks the prompt box below the fold, terminal mode brings it back.
+    let pinRaf = 0
+    const onFocusChange = () => {
+      if (!COARSE) return
+      cancelAnimationFrame(pinRaf)
+      pinRaf = requestAnimationFrame(() => { stickRef.current = true; scrollToBottom(true) })
+    }
+    document.addEventListener('focusin', onFocusChange)
+    document.addEventListener('focusout', onFocusChange)
 
     const appendHistoryLines = (lines: string[]) => {
       if (lines.length === 0) return
@@ -339,71 +416,6 @@ export function Terminal({
       navigator.clipboard?.writeText(text).catch(() => {})
     }
     container.addEventListener('touchend', handleTouchCopy)
-
-    // Snapshot the xterm screen into the history HTML when the xterm
-    // slides away (Composer focused). The last N lines of terminal output
-    // live only in the xterm buffer, not in history, so without this they
-    // vanish when the xterm container is hidden. The snapshot is removed
-    // when the xterm slides back.
-    let snapshotActive = false
-
-    const isStatusLine = (line: string): boolean => {
-      const t = line.trim()
-      if (!t) return true
-      if (/^[─━═\s]+$/.test(t)) return true
-      if (t.startsWith('❯') || t.startsWith('>') || t.startsWith('$')) return true
-      if (t.startsWith('▸') || t.startsWith('▹')) return true
-      if (/context/i.test(t) && /\d+%/.test(t)) return true
-      if (/auto mode/i.test(t)) return true
-      return false
-    }
-
-    const addSnapshot = () => {
-      if (snapshotActive) return
-      const buffer = term.buffer.active
-      const lines: string[] = []
-      for (let i = 0; i < term.rows; i++) {
-        const line = buffer.getLine(i)
-        if (line) lines.push(line.translateToString(true))
-      }
-      while (lines.length > 0 && isStatusLine(lines[lines.length - 1])) lines.pop()
-      if (lines.length === 0) return
-      const frag = document.createDocumentFragment()
-      for (const text of lines) {
-        const row = document.createElement('div')
-        row.setAttribute('data-snapshot', '')
-        row.textContent = text || ' '
-        frag.appendChild(row)
-      }
-      historyEl.appendChild(frag)
-      snapshotActive = true
-    }
-
-    const removeSnapshot = () => {
-      if (!snapshotActive) return
-      historyEl.querySelectorAll('[data-snapshot]').forEach(el => el.remove())
-      snapshotActive = false
-    }
-
-    const handleTransitionEnd = (e: TransitionEvent) => {
-      if ((e as TransitionEvent).propertyName === 'margin-top' &&
-          document.querySelector('[data-composer]:focus-within')) {
-        addSnapshot()
-      }
-      maybeScrollToBottom()
-      setTimeout(maybeScrollToBottom, 50)
-    }
-
-    const handleTransitionStart = (e: TransitionEvent) => {
-      if ((e as TransitionEvent).propertyName === 'margin-top' &&
-          !document.querySelector('[data-composer]:focus-within')) {
-        removeSnapshot()
-      }
-    }
-
-    container.addEventListener('transitionend', handleTransitionEnd)
-    container.addEventListener('transitionstart', handleTransitionStart)
-
     termRef.current = term
 
     return () => {
@@ -419,13 +431,15 @@ export function Terminal({
       scrollEl.removeEventListener('scroll', handleScroll)
       container.removeEventListener('wheel', handleWheel, { capture: true })
       container.removeEventListener('touchend', handleTouchCopy)
-      container.removeEventListener('transitionend', handleTransitionEnd)
-      container.removeEventListener('transitionstart', handleTransitionStart)
-      removeSnapshot()
+      document.removeEventListener('focusin', onFocusChange)
+      document.removeEventListener('focusout', onFocusChange)
+      cancelAnimationFrame(pinRaf)
+      insetRef.current = () => 0
       selectionSub.dispose()
       dataSub.dispose()
       unsubscribe()
       observer.disconnect()
+      scrollObserver.disconnect()
       term.dispose()
     }
   }, [windowId, send, onMessage])
@@ -548,6 +562,7 @@ export function Terminal({
     >
       <div
         ref={scrollRef}
+        data-testid="terminal-scroll"
         style={{
           height: '100%',
           overflowY: 'auto',
@@ -558,7 +573,6 @@ export function Terminal({
       >
         <div
           ref={historyRef}
-          data-history
           style={{
             fontFamily: MONO_FONT,
             fontSize,
@@ -576,7 +590,7 @@ export function Terminal({
           data-xterm-screen
           style={{
             width: '100%',
-            height: '100%',
+            height: COARSE ? 'var(--xterm-full-h, 100%)' : '100%',
             padding: 8,
           }}
         />

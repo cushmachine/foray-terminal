@@ -8,7 +8,7 @@
 // a CSS variable lets the root size itself to the visible area, and the
 // flex layout plus xterm's ResizeObserver do the rest.
 
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 
 /** The bit of VisualViewport we read, so the pure helper is testable. */
 export interface ViewportLike {
@@ -32,45 +32,29 @@ export function appHeight(viewport: ViewportLike | null | undefined, fallback: n
   return Math.round(viewport.height)
 }
 
-export function useAppHeight(): { keyboardVisible: boolean } {
-  const [keyboardVisible, setKeyboardVisible] = useState(false)
-
+export function useAppHeight(): void {
   useEffect(() => {
     const vv = window.visualViewport
     const root = document.documentElement
-    // Baseline: the viewport height at mount (before any keyboard). On
-    // Android window.innerHeight shrinks WITH the keyboard, so comparing
-    // against a live value never detects it. Captured once; reset only on
-    // orientation change.
-    let fullHeight = window.innerHeight
 
     const apply = () => {
-      const h = appHeight(vv, window.innerHeight)
-      root.style.setProperty(APP_HEIGHT_VAR, `${h}px`)
+      root.style.setProperty(APP_HEIGHT_VAR, `${appHeight(vv, window.innerHeight)}px`)
+      // iOS may scroll the page to reveal the focused element when the
+      // keyboard appears. Nothing here is meant to scroll, so pin it back.
       if (window.scrollY !== 0) window.scrollTo(0, 0)
-      setKeyboardVisible(h < fullHeight * 0.75)
-    }
-
-    const onOrientationChange = () => {
-      setTimeout(() => {
-        fullHeight = window.innerHeight
-        apply()
-      }, 300)
     }
 
     apply()
     vv?.addEventListener('resize', apply)
     vv?.addEventListener('scroll', apply)
     window.addEventListener('resize', apply)
-    window.addEventListener('orientationchange', onOrientationChange)
+    window.addEventListener('orientationchange', apply)
     return () => {
       vv?.removeEventListener('resize', apply)
       vv?.removeEventListener('scroll', apply)
       window.removeEventListener('resize', apply)
-      window.removeEventListener('orientationchange', onOrientationChange)
+      window.removeEventListener('orientationchange', apply)
       root.style.removeProperty(APP_HEIGHT_VAR)
     }
   }, [])
-
-  return { keyboardVisible }
 }
