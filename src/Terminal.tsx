@@ -340,7 +340,10 @@ export function Terminal({
     }
     container.addEventListener('touchend', handleTouchCopy)
 
-    const handleTransitionEnd = () => maybeScrollToBottom()
+    const handleTransitionEnd = () => {
+      maybeScrollToBottom()
+      setTimeout(maybeScrollToBottom, 50)
+    }
     container.addEventListener('transitionend', handleTransitionEnd)
 
     termRef.current = term

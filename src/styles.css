@@ -91,7 +91,7 @@ button, input {
    hidden, so the last line isn't flush against the Composer. */
 @media (pointer: coarse) {
   [data-main-column]:has([data-composer]:focus-within) [data-history] {
-    padding-bottom: 12px !important;
+    padding-bottom: 48px !important;
   }
 }
 
