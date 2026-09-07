@@ -13,7 +13,7 @@ import { canFit, nextResize, type TerminalDims } from './terminalSize'
 import { NO_MODIFIERS, applyModifiers, type Modifiers } from './keys'
 import { paletteFromTheme, ansiLineToHtml, type Palette } from './ansi'
 import { MONO_FONT, THEME } from './theme'
-import { extractUrls, joinWrapped, shortenUrl } from './links'
+import { extractUrls, extractCommands, joinWrapped, shortenUrl, shortenCommand } from './links'
 import { linkifyRows } from './linkify'
 
 interface TerminalProps {
@@ -95,6 +95,7 @@ export function Terminal({
   const [uploadStatus, setUploadStatus] = useState<UploadStatus | null>(null)
   // URLs on the visible screen, oldest first (touch devices only).
   const [links, setLinks] = useState<string[]>([])
+  const [commands, setCommands] = useState<string[]>([])
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null)
   const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const dragDepth = useRef(0)
@@ -313,9 +314,14 @@ export function Terminal({
       if (linkTimer) clearTimeout(linkTimer)
       linkTimer = setTimeout(() => {
         linkTimer = null
-        const next = extractUrls(visibleLogicalLines().join('\n'))
+        const text = visibleLogicalLines().join('\n')
+        const nextLinks = extractUrls(text)
         setLinks((prev) =>
-          prev.length === next.length && prev.every((u, i) => u === next[i]) ? prev : next,
+          prev.length === nextLinks.length && prev.every((u, i) => u === nextLinks[i]) ? prev : nextLinks,
+        )
+        const nextCmds = extractCommands(text)
+        setCommands((prev) =>
+          prev.length === nextCmds.length && prev.every((c, i) => c === nextCmds[i]) ? prev : nextCmds,
         )
       }, LINK_SCAN_MS)
     }
@@ -663,9 +669,7 @@ export function Terminal({
           }}
         />
       </div>
-      {COARSE && links.length > 0 && (
-        // URLs on screen as chips: a phone can't select a wrapped URL, so
-        // give it a button. Buttons keep focus where it is (no keyboard drop).
+      {COARSE && (links.length > 0 || commands.length > 0) && (
         <div
           data-testid="link-chip"
           style={{
@@ -680,6 +684,32 @@ export function Terminal({
             fontSize: 12,
           }}
         >
+          {commands.slice(-LINK_CHIP_MAX).reverse().map((cmd) => (
+            <div key={`cmd:${cmd}`} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span
+                title={cmd}
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  color: 'var(--text)',
+                }}
+              >
+                <span style={{ color: 'var(--text-faint)', marginRight: 4 }}>$</span>
+                {shortenCommand(cmd)}
+              </span>
+              <button
+                data-testid="cmd-copy"
+                onPointerDown={(e) => e.preventDefault()}
+                onClick={() => copyLink(cmd)}
+                style={chipButton}
+              >
+                {copiedUrl === cmd ? 'Copied' : 'Copy'}
+              </button>
+            </div>
+          ))}
           {links.slice(-LINK_CHIP_MAX).reverse().map((url) => (
             <div key={url} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <span

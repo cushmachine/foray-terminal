@@ -12,7 +12,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { extractUrls, shortenUrl, joinWrapped } from '../links.ts'
+import { extractUrls, extractCommands, shortenUrl, shortenCommand, joinWrapped } from '../links.ts'
 
 // ---------------------------------------------------------------------------
 // extractUrls
@@ -132,4 +132,53 @@ test('joinWrapped: wraps join only to their own line', () => {
 
 test('joinWrapped: empty input gives an empty list', () => {
   assert.deepEqual(joinWrapped([]), [])
+})
+
+// ---------------------------------------------------------------------------
+// extractCommands
+// ---------------------------------------------------------------------------
+
+test('extractCommands: detects common CLI tools', () => {
+  assert.deepEqual(extractCommands('claude --resume abc-123'), ['claude --resume abc-123'])
+  assert.deepEqual(extractCommands('git push origin main'), ['git push origin main'])
+  assert.deepEqual(extractCommands('npm install'), ['npm install'])
+})
+
+test('extractCommands: strips $ prompt prefix', () => {
+  assert.deepEqual(extractCommands('$ claude --resume abc-123'), ['claude --resume abc-123'])
+  assert.deepEqual(extractCommands('$ git status'), ['git status'])
+})
+
+test('extractCommands: ignores tool name alone (no args)', () => {
+  assert.deepEqual(extractCommands('git'), [])
+  assert.deepEqual(extractCommands('npm'), [])
+})
+
+test('extractCommands: multiple commands, deduped', () => {
+  const text = 'git push origin main\nnpm install\ngit push origin main'
+  assert.deepEqual(extractCommands(text), ['git push origin main', 'npm install'])
+})
+
+test('extractCommands: ignores non-command lines', () => {
+  assert.deepEqual(extractCommands('nothing to see here'), [])
+  assert.deepEqual(extractCommands('the git repository is fine'), [])
+})
+
+test('extractCommands: command in the middle of prose is not matched', () => {
+  assert.deepEqual(extractCommands('run git push to deploy'), [])
+})
+
+// ---------------------------------------------------------------------------
+// shortenCommand
+// ---------------------------------------------------------------------------
+
+test('shortenCommand: short command returned whole', () => {
+  assert.equal(shortenCommand('git push'), 'git push')
+})
+
+test('shortenCommand: long command is truncated with ellipsis', () => {
+  const long = 'claude --resume 52040212-6482-422c-a8e6-324df93ab7d1-extra-long-id-here'
+  const out = shortenCommand(long, 50)
+  assert.ok(out.length <= 50, `expected <= 50 chars, got ${out.length}`)
+  assert.ok(out.endsWith('…'))
 })

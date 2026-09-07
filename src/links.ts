@@ -45,6 +45,44 @@ export function shortenUrl(url: string, max = 40): string {
   return `${label.slice(0, head)}…${label.slice(label.length - tail)}`
 }
 
+// ---------------------------------------------------------------------------
+// Command detection
+// ---------------------------------------------------------------------------
+
+// Common CLI tools whose name at the start of a line strongly signals a
+// copyable shell command. Keep sorted for readability.
+const CLI_TOOLS = [
+  'aws', 'brew', 'bun', 'cargo', 'claude', 'curl', 'docker', 'gh', 'git',
+  'go', 'kubectl', 'make', 'node', 'npm', 'npx', 'pip', 'pip3', 'pnpm',
+  'python', 'python3', 'ruby', 'scp', 'ssh', 'wget', 'yarn',
+]
+
+const CLI_RE = new RegExp(
+  `^(?:\\$\\s+)?(?:${CLI_TOOLS.join('|')})\\s+\\S.*$`,
+  'gm',
+)
+
+/** Shell commands on screen, deduped, first-occurrence order. */
+export function extractCommands(text: string): string[] {
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const m of text.matchAll(CLI_RE)) {
+    let cmd = m[0].trim()
+    if (cmd.startsWith('$ ')) cmd = cmd.slice(2)
+    if (seen.has(cmd)) continue
+    seen.add(cmd)
+    out.push(cmd)
+  }
+  return out
+}
+
+/** Shorten a command for chip display: keep the first two tokens, ellipsise the rest. */
+export function shortenCommand(cmd: string, max = 50): string {
+  if (cmd.length <= max) return cmd
+  const keep = max - 1
+  return `${cmd.slice(0, keep)}…`
+}
+
 /**
  * Join screen rows into logical lines: a row flagged `wrapped` is the
  * continuation of the row above it (xterm's isWrapped / tmux's soft wrap).
