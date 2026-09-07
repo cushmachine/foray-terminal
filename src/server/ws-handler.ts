@@ -6,7 +6,7 @@
 
 import path from 'node:path'
 import type { WebSocket } from 'ws'
-import type { ClientMessage, ServerMessage } from '../shared/protocol.ts'
+import { MAX_HISTORY_LINES, type ClientMessage, type ServerMessage } from '../shared/protocol.ts'
 import { listWindows, createWindow, killWindow, renameWindow, paneHistoryState, captureHistoryLines } from './tmux.ts'
 import { planHistoryUpdate, alignHistory, nextTail } from './history.ts'
 import { attachToPane, type PtyHandle, type PtySpawner } from './pty-bridge.ts'
@@ -231,7 +231,9 @@ export function handleConnection(ws: WebSocket, deps: ConnectionDeps): void {
         // No overlap with what was sent: the client is too far behind to
         // append, so fall through and start it over.
       }
-      const lines = await captureHistoryLines(windowId, state.size)
+      // Only the tail the client will keep. `known` still records the full
+      // size so later syncs append from the right place.
+      const lines = await captureHistoryLines(windowId, Math.min(state.size, MAX_HISTORY_LINES))
       if (stale()) return
       tracker.sentTail = nextTail([], lines, HISTORY_TAIL)
       tracker.known = state.size

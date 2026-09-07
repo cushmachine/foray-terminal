@@ -358,3 +358,170 @@ test('SocketManager.reconnectNow: after close() does nothing', () => {
   manager.reconnectNow()
   assert.equal(instances.length, 1)
 })
+
+// ---------------------------------------------------------------------------
+// Test 6: connect timeout — a dial that never opens is abandoned and retried
+// ---------------------------------------------------------------------------
+
+test('SocketManager connect timeout: a dial that never opens is abandoned and redialed', async () => {
+  const { manager, instances } = makeManager(5, { connectTimeoutMs: 10 })
+  assert.equal(instances.length, 1)
+  assert.equal(manager.status, 'connecting')
+
+  await sleep(60)
+  assert.ok(instances.length >= 2, 'the hung dial should have been replaced')
+  assert.equal(instances[0].readyState, CLOSED, 'the hung socket should have been closed')
+  assert.equal(instances[0].onopen, null, 'the hung socket should be detached')
+
+  // A late open on the abandoned socket must not be mistaken for success.
+  instances[0].readyState = OPEN
+  assert.notEqual(manager.status, 'connected')
+
+  manager.close()
+})
+
+test('SocketManager connect timeout: cleared once the dial opens', async () => {
+  const { manager, instances } = makeManager(5, { connectTimeoutMs: 10 })
+  instances[0].triggerOpen()
+  await sleep(40)
+  assert.equal(instances.length, 1, 'an open socket must not be abandoned')
+  assert.equal(manager.status, 'connected')
+
+  manager.close()
+})
+
+test('SocketManager connect timeout: close() cancels a pending dial timer', async () => {
+  const { manager, instances } = makeManager(5, { connectTimeoutMs: 10 })
+  manager.close()
+  await sleep(40)
+  assert.equal(instances.length, 1)
+})
+
+// ---------------------------------------------------------------------------
+// Test 7: reconnectNow mid-dial — an old hung dial is restarted, a fresh one kept
+// ---------------------------------------------------------------------------
+
+test('SocketManager.reconnectNow: mid-dial, restarts a dial that has hung for a while', () => {
+  let clock = 0
+  const { manager, instances } = makeManager(5, { connectTimeoutMs: 0, now: () => clock })
+  assert.equal(manager.status, 'connecting')
+
+  clock = 30_000
+  manager.reconnectNow()
+  assert.equal(instances.length, 2, 'a stale dial should be replaced')
+  assert.equal(instances[0].readyState, CLOSED)
+  assert.equal(manager.status, 'connecting')
+
+  manager.close()
+})
+
+test('SocketManager.reconnectNow: mid-dial, leaves a fresh dial alone', () => {
+  let clock = 0
+  const { manager, instances } = makeManager(5, { connectTimeoutMs: 0, now: () => clock })
+
+  clock = 200
+  manager.reconnectNow()
+  assert.equal(instances.length, 1, 'a dial made moments ago may be about to succeed')
+
+  manager.close()
+})
+
+// ---------------------------------------------------------------------------
+// Test 8: wake probe — coming back to the foreground judges the socket fast
+// ---------------------------------------------------------------------------
+
+test('SocketManager.reconnectNow: while connected, a dead socket is replaced within the wake timeout', async () => {
+  const { manager, instances } = makeManager(1000, {
+    heartbeatIntervalMs: 0, heartbeatTimeoutMs: 10_000, wakeProbeTimeoutMs: 10,
+  })
+  const sock = instances[0]
+  sock.triggerOpen()
+
+  manager.reconnectNow()
+  assert.deepEqual(sentTypes(sock), ['ping'])
+  await sleep(40)
+  assert.equal(instances.length, 2, 'no pong within the wake timeout should replace the socket')
+  assert.equal(manager.status, 'connecting', 'the redial should skip the backoff')
+
+  manager.close()
+})
+
+test('SocketManager.reconnectNow: while connected, a pong keeps the socket', async () => {
+  const { manager, instances } = makeManager(5, { heartbeatIntervalMs: 0, wakeProbeTimeoutMs: 10 })
+  const sock = instances[0]
+  sock.triggerOpen()
+
+  manager.reconnectNow()
+  sock.triggerMessage({ type: 'pong' })
+  await sleep(40)
+  assert.equal(instances.length, 1)
+  assert.equal(manager.status, 'connected')
+
+  manager.close()
+})
+
+test('SocketManager.reconnectNow: the wake probe shortens a pong deadline already running', async () => {
+  const { manager, instances } = makeManager(5, {
+    heartbeatIntervalMs: 0, heartbeatTimeoutMs: 10_000, wakeProbeTimeoutMs: 10,
+  })
+  const sock = instances[0]
+  sock.triggerOpen()
+  // A heartbeat ping is in flight with the long deadline...
+  ;(manager as unknown as { ping(): void }).ping()
+  assert.deepEqual(sentTypes(sock), ['ping'])
+
+  // ...then the page wakes: the short deadline takes over.
+  manager.reconnectNow()
+  await sleep(40)
+  assert.equal(instances.length, 2, 'the wake deadline should have replaced the socket')
+
+  manager.close()
+})
+
+// ---------------------------------------------------------------------------
+// Test 9: pause — a hidden page stops judging its socket
+// ---------------------------------------------------------------------------
+
+test('SocketManager.pause: stops the heartbeat and forgets a pending pong deadline', async () => {
+  const { manager, instances } = makeManager(5, { heartbeatIntervalMs: 10, heartbeatTimeoutMs: 10 })
+  const sock = instances[0]
+  sock.triggerOpen()
+  await sleep(15)
+  assert.ok(sentTypes(sock).includes('ping'), 'the heartbeat should be running before the pause')
+
+  manager.pause()
+  const pingsAtPause = sock.sent.length
+  await sleep(50)
+  assert.equal(instances.length, 1, 'a paused manager must not condemn the socket')
+  assert.equal(sock.sent.length, pingsAtPause, 'no pings while paused')
+  assert.equal(manager.status, 'connected')
+
+  manager.close()
+})
+
+test('SocketManager.pause: reconnectNow resumes the heartbeat', async () => {
+  const { manager, instances } = makeManager(5, { heartbeatIntervalMs: 10, heartbeatTimeoutMs: 1000, wakeProbeTimeoutMs: 1000 })
+  const sock = instances[0]
+  sock.triggerOpen()
+  manager.pause()
+  sock.sent.length = 0
+
+  manager.reconnectNow()
+  assert.deepEqual(sentTypes(sock), ['ping'], 'the wake probe goes out at once')
+  sock.triggerMessage({ type: 'pong' })
+  await sleep(25)
+  assert.ok(sock.sent.length >= 2, 'the heartbeat should tick again after the wake')
+
+  manager.close()
+})
+
+test('SocketManager.pause: a socket that opens while paused does not start the heartbeat', async () => {
+  const { manager, instances } = makeManager(5, { heartbeatIntervalMs: 10, heartbeatTimeoutMs: 10 })
+  manager.pause()
+  instances[0].triggerOpen()
+  await sleep(50)
+  assert.equal(instances.length, 1)
+  assert.deepEqual(sentTypes(instances[0]), [])
+
+  manager.close()
+})

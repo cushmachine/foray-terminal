@@ -9,9 +9,10 @@
 //
 // `useSocket()` is a thin React hook wrapping a SocketManager instance,
 // exposing its status as component state and its send/onMessage methods
-// as stable callbacks. It also nudges the manager whenever the page comes
-// back to the foreground or the browser reports being online again, since
-// phones drop sockets constantly and shouldn't have to wait out a backoff.
+// as stable callbacks. It also pauses the heartbeat while the page is
+// hidden and nudges the manager whenever the page comes back to the
+// foreground or the browser reports being online again, since phones drop
+// sockets constantly and shouldn't have to wait out a backoff.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ClientMessage, ServerMessage } from '../shared/protocol'
@@ -52,6 +53,24 @@ export function computeBackoffDelay(attempt: number): number {
 export const DEFAULT_HEARTBEAT_INTERVAL_MS = 25_000
 /** How long to wait for a pong before declaring the socket dead. */
 export const DEFAULT_HEARTBEAT_TIMEOUT_MS = 10_000
+/**
+ * How long a dial may sit without opening before it is abandoned and tried
+ * again. A phone waking from sleep often dials before its VPN or radio is
+ * back; those packets go nowhere and the OS would take minutes to notice.
+ */
+export const DEFAULT_CONNECT_TIMEOUT_MS = 5_000
+/**
+ * Pong deadline for the probe sent when the page returns to the foreground.
+ * A socket that died in the background should be found and replaced in a
+ * moment, not after the full heartbeat timeout.
+ */
+export const DEFAULT_WAKE_PROBE_TIMEOUT_MS = 2_000
+/**
+ * A dial younger than this is left alone by reconnectNow(): the wake events
+ * (visibilitychange, pageshow, online) tend to arrive together, and a fresh
+ * dial may well be about to succeed.
+ */
+export const WAKE_REDIAL_MIN_AGE_MS = 1_000
 
 export interface SocketManagerOptions {
   /** Creates the underlying socket. Defaults to the global WebSocket. */
@@ -62,6 +81,12 @@ export interface SocketManagerOptions {
   heartbeatIntervalMs?: number
   /** Time allowed for a pong to arrive before the socket is dropped. */
   heartbeatTimeoutMs?: number
+  /** Time allowed for a dial to open before it is abandoned. 0 disables. */
+  connectTimeoutMs?: number
+  /** Pong deadline for the foreground probe (see reconnectNow). */
+  wakeProbeTimeoutMs?: number
+  /** Clock used to age dials; tests inject a fake. */
+  now?: () => number
 }
 
 /**
@@ -80,6 +105,10 @@ export class SocketManager {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null
   private pongTimer: ReturnType<typeof setTimeout> | null = null
+  private connectTimer: ReturnType<typeof setTimeout> | null = null
+  /** When the current dial started; meaningful only while `connecting`. */
+  private dialStartedAt = 0
+  private paused = false
   private closed = false
 
   private readonly url: string
@@ -87,6 +116,9 @@ export class SocketManager {
   private readonly backoff: (attempt: number) => number
   private readonly heartbeatIntervalMs: number
   private readonly heartbeatTimeoutMs: number
+  private readonly connectTimeoutMs: number
+  private readonly wakeProbeTimeoutMs: number
+  private readonly now: () => number
 
   constructor(url: string, options: SocketManagerOptions = {}) {
     this.url = url
@@ -94,6 +126,9 @@ export class SocketManager {
     this.backoff = options.backoff ?? computeBackoffDelay
     this.heartbeatIntervalMs = options.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS
     this.heartbeatTimeoutMs = options.heartbeatTimeoutMs ?? DEFAULT_HEARTBEAT_TIMEOUT_MS
+    this.connectTimeoutMs = options.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS
+    this.wakeProbeTimeoutMs = options.wakeProbeTimeoutMs ?? DEFAULT_WAKE_PROBE_TIMEOUT_MS
+    this.now = options.now ?? (() => Date.now())
     this.connect()
   }
 
@@ -109,11 +144,20 @@ export class SocketManager {
 
     const ws = this.factory(this.url)
     this.ws = ws
+    this.dialStartedAt = this.now()
+    this.clearConnectTimer()
+    if (this.connectTimeoutMs > 0) {
+      this.connectTimer = setTimeout(() => {
+        this.connectTimer = null
+        this.abandonDial()
+      }, this.connectTimeoutMs)
+    }
 
     ws.onopen = () => {
+      this.clearConnectTimer()
       this.reconnectAttempt = 0
       this.setStatus('connected')
-      this.startHeartbeat()
+      if (!this.paused) this.startHeartbeat()
       const pending = this.queue
       this.queue = []
       for (const msg of pending) {
@@ -136,6 +180,7 @@ export class SocketManager {
 
     ws.onclose = () => {
       if (this.ws !== ws) return // stale handler from a socket we've since replaced
+      this.clearConnectTimer()
       this.stopHeartbeat()
       this.setStatus('disconnected')
       this.scheduleReconnect()
@@ -154,6 +199,41 @@ export class SocketManager {
       this.reconnectTimer = null
       this.connect()
     }, delay)
+  }
+
+  private clearConnectTimer(): void {
+    if (this.connectTimer) clearTimeout(this.connectTimer)
+    this.connectTimer = null
+  }
+
+  /**
+   * Detach from the current socket without waiting on a close handshake the
+   * far end may never answer. Returns the socket for the caller to close.
+   */
+  private detach(): WebSocketLike | null {
+    const ws = this.ws
+    this.ws = null
+    this.clearConnectTimer()
+    this.stopHeartbeat()
+    if (ws) {
+      ws.onopen = ws.onclose = ws.onerror = ws.onmessage = null
+      try {
+        ws.close()
+      } catch {
+        // A socket that is already gone can throw here; nothing to do.
+      }
+    }
+    return ws
+  }
+
+  /**
+   * The dial has not opened in time. Drop it and try again on the backoff
+   * schedule; the far end may simply not be reachable yet.
+   */
+  private abandonDial(): void {
+    this.detach()
+    this.setStatus('disconnected')
+    this.scheduleReconnect()
   }
 
   // -- heartbeat ------------------------------------------------------------
@@ -180,13 +260,24 @@ export class SocketManager {
    * left alone: its timer will decide the socket's fate.
    */
   private ping(): void {
-    if (!this.ws || this.ws.readyState !== WS_OPEN || this.pongTimer) return
+    if (this.pongTimer) return
+    this.probe(this.heartbeatTimeoutMs)
+  }
+
+  /**
+   * Send a ping and give the server `timeoutMs` to answer, replacing any
+   * pong deadline already running. Used by the heartbeat and, with a much
+   * shorter deadline, by the foreground wake-up.
+   */
+  private probe(timeoutMs: number): void {
+    if (!this.ws || this.ws.readyState !== WS_OPEN) return
+    this.clearPongTimer()
     // Arm the timer before sending so an instant reply can't slip in ahead
     // of it and leave it running.
     this.pongTimer = setTimeout(() => {
       this.pongTimer = null
       this.dropDeadConnection()
-    }, this.heartbeatTimeoutMs)
+    }, timeoutMs)
     this.ws.send(JSON.stringify({ type: 'ping' } satisfies ClientMessage))
   }
 
@@ -196,20 +287,21 @@ export class SocketManager {
    * it, mark ourselves disconnected, and dial again right away.
    */
   private dropDeadConnection(): void {
-    const ws = this.ws
-    this.ws = null
-    this.stopHeartbeat()
-    if (ws) {
-      ws.onopen = ws.onclose = ws.onerror = ws.onmessage = null
-      try {
-        ws.close()
-      } catch {
-        // A socket that is already gone can throw here; nothing to do.
-      }
-    }
+    this.detach()
     this.setStatus('disconnected')
     this.reconnectAttempt = 0
     this.connect()
+  }
+
+  /**
+   * The page went to the background. Stop judging the socket: timers are
+   * frozen there and would all fire at once on return, condemning a socket
+   * that may be fine. The server's protocol-level pings keep it alive
+   * meanwhile. reconnectNow() resumes the heartbeat.
+   */
+  pause(): void {
+    this.paused = true
+    this.stopHeartbeat()
   }
 
   /**
@@ -220,13 +312,23 @@ export class SocketManager {
    */
   reconnectNow(): void {
     if (this.closed) return
+    this.paused = false
     if (this.status === 'connected') {
-      this.ping()
+      this.startHeartbeat()
+      this.probe(this.wakeProbeTimeoutMs)
       return
     }
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null
+      this.reconnectAttempt = 0
+      this.connect()
+      return
+    }
+    // Mid-dial. A dial that has been hanging for a while was probably made
+    // before the network was back; start over rather than wait it out.
+    if (this.ws && this.now() - this.dialStartedAt >= WAKE_REDIAL_MIN_AGE_MS) {
+      this.detach()
       this.reconnectAttempt = 0
       this.connect()
     }
@@ -257,6 +359,7 @@ export class SocketManager {
   close(): void {
     this.closed = true
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer)
+    this.clearConnectTimer()
     this.stopHeartbeat()
     this.messageHandlers.clear()
     this.statusHandlers.clear()
@@ -284,7 +387,10 @@ export function useSocket(): UseSocketReturn {
     // background. The moment we're visible or online again, reconnect
     // instead of waiting out whatever backoff was scheduled.
     const wake = () => {
-      if (document.visibilityState === 'hidden') return
+      if (document.visibilityState === 'hidden') {
+        manager.pause()
+        return
+      }
       manager.reconnectNow()
     }
     document.addEventListener('visibilitychange', wake)

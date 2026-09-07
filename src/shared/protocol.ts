@@ -4,6 +4,14 @@
 // and the server (tsx, Node ESM). Keep it free of Node- or DOM-specific APIs
 // so it can be imported from either side without extra config.
 
+/**
+ * Most scrollback lines the client keeps. The server sends no more than
+ * this on attach: anything beyond it would be shipped over the wire only
+ * for the client to throw away, and on a phone that download is most of
+ * the wait when a session reconnects.
+ */
+export const MAX_HISTORY_LINES = 3000
+
 /** A single Nest session (one tmux session), as exposed to the client. */
 export interface TmuxWindow {
   id: number

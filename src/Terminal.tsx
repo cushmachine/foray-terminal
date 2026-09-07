@@ -7,6 +7,7 @@ import { WebglAddon } from '@xterm/addon-webgl'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
 import type { UseSocketReturn } from './hooks/useSocket'
+import { MAX_HISTORY_LINES } from './shared/protocol'
 import { imageFilesFromClipboard, pathToTerminalInput, pickImageFiles, uploadImage } from './imageUpload'
 import { canFit, nextResize, type TerminalDims } from './terminalSize'
 import { NO_MODIFIERS, applyModifiers, type Modifiers } from './keys'
@@ -25,7 +26,6 @@ interface TerminalProps {
 }
 
 const PALETTE: Palette = paletteFromTheme(THEME)
-const MAX_HISTORY_LINES = 3000
 
 interface UploadStatus {
   kind: 'uploading' | 'error'
