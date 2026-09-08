@@ -42,3 +42,14 @@ test('findAnchorRow: a short signature at the end of the history', () => {
   assert.equal(findAnchorRow(rows(10), { index: 9, texts: ['10'] }), 9)
   assert.equal(findAnchorRow(rows(10), { index: 50, texts: ['9', '10'] }), 8)
 })
+
+// A line still being wrapped onto the screen reaches the client in pieces:
+// its history part first, the extension as a row of its own later. A reset
+// captures it joined, so the rows of a signature taken before the reset may
+// be one row after it (and the other way round).
+test('findAnchorRow: a signature matches on its joined text when rows were merged or split', () => {
+  assert.equal(findAnchorRow(['x', 'abcdef', 'next', 'y'], { index: 1, texts: ['abc', 'def', 'next'] }), 1)
+  assert.equal(findAnchorRow(['x', 'abc', 'def', 'next'], { index: 1, texts: ['abcdef', 'next'] }), 1)
+  // The signature has to end where a row ends.
+  assert.equal(findAnchorRow(['abcdefnext'], { index: 0, texts: ['abc', 'def'] }), -1)
+})

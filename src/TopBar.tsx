@@ -48,10 +48,13 @@ export function TopBar({
         minHeight: 'var(--hit)',
       } as CSSProperties}
     >
-      {/* Sidebar toggle: hamburger on mobile, collapse arrow on desktop */}
+      {/* Sidebar toggle: hamburger on mobile, collapse arrow on desktop.
+          A tap must not take focus: the drawer hands it back to whatever
+          had it, and on a phone that is the Composer with the keyboard up. */}
       <button
         className="btn-ghost"
         data-testid="sidebar-toggle"
+        onMouseDown={(e) => e.preventDefault()}
         onClick={onToggleSidebar}
         aria-label={sidebarLabel}
         title={sidebarLabel}

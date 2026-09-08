@@ -200,6 +200,12 @@ export function useTerminal({
 
     const handleScroll = () => controller.handleScroll()
     scrollEl.addEventListener('scroll', handleScroll, { passive: true })
+    // Capture, so the gesture is seen before the container's wheel handler
+    // below stops it and before the scroll event it causes.
+    const onGesture = () => controller.onScrollGesture()
+    scrollEl.addEventListener('wheel', onGesture, { capture: true, passive: true })
+    scrollEl.addEventListener('touchstart', onGesture, { capture: true, passive: true })
+    scrollEl.addEventListener('keydown', onGesture, { capture: true })
     const onFocusChange = () => controller.onFocusChange()
     if (touch) {
       document.addEventListener('focusin', onFocusChange)
@@ -263,6 +269,9 @@ export function useTerminal({
       webgl = null
       if (copyTimer) clearTimeout(copyTimer)
       scrollEl.removeEventListener('scroll', handleScroll)
+      scrollEl.removeEventListener('wheel', onGesture, { capture: true })
+      scrollEl.removeEventListener('touchstart', onGesture, { capture: true })
+      scrollEl.removeEventListener('keydown', onGesture, { capture: true })
       container.removeEventListener('wheel', handleWheel, { capture: true })
       document.removeEventListener('focusin', onFocusChange)
       document.removeEventListener('focusout', onFocusChange)

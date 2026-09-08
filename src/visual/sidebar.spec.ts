@@ -46,6 +46,25 @@ test.describe('mobile drawer', () => {
   })
 })
 
+test.describe('drawer focus on a phone', () => {
+  test.use({ viewport: MOBILE, isMobile: true, hasTouch: true })
+
+  // The drawer is modal, so it takes focus (and the keyboard goes down with
+  // it). Closing it must put the user back where they were: in the
+  // Composer, keyboard up, ready to type.
+  test('closing the drawer hands focus back to the Composer', async ({ page }) => {
+    await page.goto('/')
+    const textarea = page.locator('[data-composer] textarea')
+    await textarea.focus()
+    await expect(textarea).toBeFocused()
+    await openDrawer(page)
+    await expect(page.getByTestId('sidebar-close')).toBeFocused()
+    await page.getByTestId('sidebar-close').click()
+    await expect(page.getByTestId('sidebar')).toBeHidden()
+    await expect(textarea).toBeFocused()
+  })
+})
+
 test.describe('session list', () => {
   test.use({ viewport: DESKTOP })
 

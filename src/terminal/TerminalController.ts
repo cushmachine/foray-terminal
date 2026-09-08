@@ -70,7 +70,6 @@ export interface TerminalControllerOptions {
   send: (msg: ClientMessage) => unknown
   raf?: (cb: () => void) => number
   caf?: (id: number) => void
-  now?: () => number
   /** Fit the xterm to its container; false when the container has no size yet. */
   fit?: () => boolean
   scroll?: ScrollLike
@@ -84,14 +83,21 @@ export interface TerminalControllerOptions {
 
 /** How far above the bottom (past the inset) still counts as pinned. */
 export const STICK_SLOP_PX = 4
-/**
- * A smooth programmatic scroll fires scroll events on its way; they are
- * ignored for the pin check this long so the view is not unpinned by its
- * own animation.
- */
-export const SMOOTH_SCROLL_SETTLE_MS = 600
 
 type ScrollAnchor = { kind: 'row'; row: RowAnchor } | { kind: 'screen'; offset: number }
+
+/**
+ * A smooth programmatic scroll in flight. The browser animates it over
+ * later frames and fires scroll events on the way; those must not unpin
+ * the view, but a user scroll in the same moments must. Position tells
+ * them apart: the animation only ever moves from `from` towards `to`.
+ */
+interface ScrollRun {
+  from: number
+  to: number
+  /** The last position seen on the way. */
+  last: number
+}
 
 export class TerminalController {
   state: AttachState = 'idle'
@@ -105,7 +111,6 @@ export class TerminalController {
   private readonly send: (msg: ClientMessage) => unknown
   private readonly raf: (cb: () => void) => number
   private readonly caf: (id: number) => void
-  private readonly now: () => number
   private readonly fit: () => boolean
   private readonly scroll: ScrollLike | null
   private readonly history: HistoryPane | null
@@ -120,11 +125,12 @@ export class TerminalController {
   private scrollFrame: number | null = null
   private scrollSmooth = false
   private pinFrame: number | null = null
+  private insetFrame: number | null = null
   private reported: TerminalDims | null = null
   private historyCount = 0
-  /** The inset as of the last pin or focus change; handleScroll reads this. */
+  /** The inset as of the last pin, focus change or output; handleScroll reads this. */
   private inset = 0
-  private suppressStickUntil = 0
+  private run: ScrollRun | null = null
   private lastStatus: SocketStatus | null = null
   private disposed = false
 
@@ -134,7 +140,6 @@ export class TerminalController {
     this.send = options.send
     this.raf = options.raf ?? ((cb) => requestAnimationFrame(cb))
     this.caf = options.caf ?? ((id) => cancelAnimationFrame(id))
-    this.now = options.now ?? (() => Date.now())
     this.fit = options.fit ?? (() => true)
     this.scroll = options.scroll ?? null
     this.history = options.history ?? null
@@ -197,6 +202,9 @@ export class TerminalController {
     if (!('windowId' in msg) || msg.windowId !== this.windowId) return
     switch (msg.type) {
       case 'terminal:output':
+        // A pane on the alternate screen has no scrollback to reset, so
+        // its output is the first sign that the pty is ours.
+        if (this.state === 'attaching') this.setState('attached')
         this.term.write(msg.data, () => this.maybeScrollToBottom())
         return
       case 'terminal:history':
@@ -250,8 +258,29 @@ export class TerminalController {
 
   handleScroll(): void {
     const el = this.scroll
-    if (!el || this.now() < this.suppressStickUntil) return
-    this.stick = el.scrollTop + el.clientHeight >= el.scrollHeight - this.inset - STICK_SLOP_PX
+    if (!el) return
+    const top = el.scrollTop
+    const run = this.run
+    if (run) {
+      const left = Math.abs(top - run.to)
+      const closer = left < Math.abs(run.last - run.to) && (top - run.to) * (run.from - run.to) > 0
+      if (left > STICK_SLOP_PX && closer) {
+        run.last = top
+        return
+      }
+      // Arrived, or moved away: from here on the position is the user's.
+      this.run = null
+    }
+    this.stick = top + el.clientHeight >= el.scrollHeight - this.inset - STICK_SLOP_PX
+  }
+
+  /**
+   * A wheel, a touch or a key on the scroll container: the browser drops
+   * any smooth scroll of ours, so the next scroll event is the user's
+   * even when it happens to move the same way.
+   */
+  onScrollGesture(): void {
+    this.run = null
   }
 
   /** Scroll to the bottom (less the inset) on the next frame. Calls in one frame coalesce; smooth wins. */
@@ -267,16 +296,31 @@ export class TerminalController {
       this.inset = this.insetSource()
       const top = Math.max(0, el.scrollHeight - el.clientHeight - this.inset)
       if (wantSmooth) {
-        this.suppressStickUntil = this.now() + SMOOTH_SCROLL_SETTLE_MS
+        this.run = { from: el.scrollTop, to: top, last: el.scrollTop }
         el.scrollTo({ top, behavior: 'smooth' })
       } else {
+        this.run = null
         el.scrollTop = top
       }
     })
   }
 
+  /**
+   * The screen changed (output, a resize): a pinned view follows. A
+   * scrolled-up one stays, but the inset under the fold may have moved
+   * with the screen, and handleScroll reads the cache when the reader
+   * comes back down, so it is refreshed either way.
+   */
   maybeScrollToBottom(): void {
-    if (this.stick) this.scrollToBottom()
+    if (this.stick) {
+      this.scrollToBottom()
+      return
+    }
+    if (this.disposed || this.insetFrame !== null) return
+    this.insetFrame = this.schedule(() => {
+      this.insetFrame = null
+      this.inset = this.insetSource()
+    })
   }
 
   /**
@@ -299,13 +343,17 @@ export class TerminalController {
 
   private appendHistory(lines: string[]): void {
     if (lines.length === 0 || !this.history) return
+    // Rows trimmed from the top move everything below them up; a reader
+    // who has scrolled up keeps the same text in view (scrollAnchor.ts).
+    const over = this.historyCount + lines.length - MAX_HISTORY_LINES
+    const anchor = over > 0 ? this.captureAnchor() : null
     this.history.append(lines)
     this.historyCount += lines.length
-    const over = this.historyCount - MAX_HISTORY_LINES
     if (over > 0) {
       this.history.trimTop(over)
       this.historyCount -= over
     }
+    if (anchor) this.restoreAnchor(anchor)
     this.maybeScrollToBottom()
   }
 
@@ -392,6 +440,6 @@ export class TerminalController {
     this.detach()
     for (const id of this.frames) this.caf(id)
     this.frames.clear()
-    this.fitFrame = this.scrollFrame = this.pinFrame = null
+    this.fitFrame = this.scrollFrame = this.pinFrame = this.insetFrame = null
   }
 }

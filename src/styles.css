@@ -119,9 +119,18 @@ button, input, textarea {
   border-radius: var(--radius-md);
   background: var(--surface-raised);
   color: var(--text);
+  font-size: 13px;
 }
 .field:focus-visible {
   border-color: var(--accent);
+}
+/* iOS zooms the page when a field under 16px takes focus; the Composer
+   sets its own 16px inline, this covers the rename field and the editor. */
+@media (pointer: coarse) {
+  .field,
+  .cm-content {
+    font-size: 16px;
+  }
 }
 
 /* Buttons. Size and placement stay inline where they are layout; the

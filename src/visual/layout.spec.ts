@@ -1,6 +1,6 @@
 // Layout and chrome: top bar, panels and their toggles across viewports.
 import { test, expect } from '@playwright/test'
-import { DESKTOP, MOBILE, NARROW, TABLET } from './helpers.ts'
+import { DESKTOP, MOBILE, NARROW, TABLET, openDrawer } from './helpers.ts'
 
 test.describe('key toolbar on desktop', () => {
   test.use({ viewport: DESKTOP })
@@ -92,6 +92,34 @@ test.describe('file panel on a phone', () => {
     expect(closeBox!.x + closeBox!.width).toBeLessThanOrEqual(MOBILE.width)
     const panel = await page.getByTestId('file-panel').boundingBox()
     expect(panel!.width).toBeLessThanOrEqual(MOBILE.width)
+  })
+})
+
+test.describe('text fields on a phone', () => {
+  test.use({ viewport: MOBILE, isMobile: true, hasTouch: true })
+
+  // iOS zooms the page when a field under 16px takes focus, and the zoom
+  // does not undo itself on blur.
+  test('the Composer, the rename field and the editor use a 16px font', async ({ page }) => {
+    await page.goto('/')
+    const fontSize = (selector: string) =>
+      page.locator(selector).first().evaluate((el) => getComputedStyle(el).fontSize)
+    expect(await fontSize('[data-composer] textarea')).toBe('16px')
+
+    await openDrawer(page)
+    await page.getByTestId('session-rename').first().click()
+    const input = page.getByTestId('session-name-input')
+    await expect(input).toBeVisible()
+    expect(await fontSize('[data-testid="session-name-input"]')).toBe('16px')
+    await input.press('Escape')
+    await page.getByTestId('sidebar-close').click()
+    await expect(page.getByTestId('sidebar')).toBeHidden()
+
+    await page.getByRole('button', { name: 'files' }).click()
+    await page.getByTestId('file-panel').getByRole('button', { name: /\.md$/ }).first().click()
+    await page.getByTestId('file-edit-toggle').click()
+    await expect(page.getByTestId('file-panel').locator('.cm-content')).toBeVisible()
+    expect(await fontSize('[data-testid="file-panel"] .cm-content')).toBe('16px')
   })
 })
 

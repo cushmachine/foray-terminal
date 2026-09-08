@@ -110,6 +110,31 @@ test('SocketManager: starts in connecting state', () => {
   manager.close()
 })
 
+// React's strict mode runs a state initializer twice and keeps one result;
+// a manager that dialled in its constructor would leave the other's socket
+// open for good. So the hook creates the manager idle and opens it from
+// its effect, which runs once per committed manager.
+test('SocketManager: with autoConnect off, nothing dials until open(), and open() dials once', () => {
+  const { manager, instances } = makeManager(5, { autoConnect: false })
+  try {
+    assert.equal(instances.length, 0)
+    assert.equal(manager.status, 'connecting')
+    manager.open()
+    assert.equal(instances.length, 1)
+    manager.open()
+    assert.equal(instances.length, 1, 'a second open is a no-op')
+  } finally {
+    manager.close()
+  }
+})
+
+test('SocketManager: open() after close() never dials', () => {
+  const { manager, instances } = makeManager(5, { autoConnect: false })
+  manager.close()
+  manager.open()
+  assert.equal(instances.length, 0)
+})
+
 test('SocketManager: transitions to connected on open', () => {
   const { manager, instances } = makeManager()
   const statuses: string[] = []

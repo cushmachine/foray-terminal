@@ -88,6 +88,8 @@ export interface SocketManagerOptions {
   wakeProbeTimeoutMs?: number
   /** Clock used to age dials; tests inject a fake. */
   now?: () => number
+  /** Dial in the constructor (the default), or wait for open(). */
+  autoConnect?: boolean
 }
 
 /**
@@ -111,6 +113,7 @@ export class SocketManager {
   private dialStartedAt = 0
   private paused = false
   private closed = false
+  private opened = false
 
   private readonly url: string
   private readonly factory: WebSocketFactory
@@ -130,6 +133,13 @@ export class SocketManager {
     this.connectTimeoutMs = options.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS
     this.wakeProbeTimeoutMs = options.wakeProbeTimeoutMs ?? DEFAULT_WAKE_PROBE_TIMEOUT_MS
     this.now = options.now ?? (() => Date.now())
+    if (options.autoConnect ?? true) this.open()
+  }
+
+  /** Start dialling. Once: later calls, and any call after close(), do nothing. */
+  open(): void {
+    if (this.opened || this.closed) return
+    this.opened = true
     this.connect()
   }
 
@@ -405,19 +415,22 @@ function socketUrl(): string {
  *
  * The manager is created during the first render, not in an effect, so a
  * child's `onMessage` subscription in its own (earlier-running) effect
- * lands on a live manager. The effect only wires the wake listeners and
- * closes the manager on unmount; a manager found closed on re-run (React's
- * strict-mode double mount) is replaced.
+ * lands on a live manager. It does not dial until the effect opens it:
+ * strict mode runs the initializer twice and keeps one manager, and the
+ * other must not be left holding a socket. The effect also wires the wake
+ * listeners and closes the manager on unmount; a manager found closed on
+ * re-run (the strict-mode double mount) is replaced.
  */
 export function useSocket(): UseSocketReturn {
-  const [manager, setManager] = useState(() => new SocketManager(socketUrl()))
+  const [manager, setManager] = useState(() => new SocketManager(socketUrl(), { autoConnect: false }))
   const [status, setStatus] = useState<SocketStatus>(manager.status)
 
   useEffect(() => {
     if (manager.isClosed) {
-      setManager(new SocketManager(socketUrl()))
+      setManager(new SocketManager(socketUrl(), { autoConnect: false }))
       return
     }
+    manager.open()
     // Test hook (see SocketManager.dropForTest).
     const w = window as unknown as { __nestSocket?: { drop: (holdMs?: number) => void } }
     w.__nestSocket = { drop: (holdMs) => manager.dropForTest(holdMs) }

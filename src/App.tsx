@@ -149,10 +149,13 @@ export function App() {
         setNotice(next && next.text === dismissedNotice.current ? null : next)
         return
       }
-      // Errors the file panel doesn't own (it filters on files:*) go to
-      // the toast so a failed session op isn't silent.
-      if (msg.type === 'error' && !msg.request.startsWith('files:')) {
-        setToast(`${msg.request} failed: ${msg.message}`)
+      // Errors the file panel (files:*) and the terminals (terminal:*, shown
+      // as the exited overlay) do not own go to the toast so a failed
+      // session op isn't silent.
+      if (msg.type === 'error') {
+        if (!msg.request.startsWith('files:') && !msg.request.startsWith('terminal:')) {
+          setToast(`${msg.request} failed: ${msg.message}`)
+        }
         return
       }
       if (msg.type === 'session:ownership') {

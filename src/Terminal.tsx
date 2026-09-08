@@ -82,8 +82,10 @@ export function Terminal({
     containerRef,
     hostRef,
   })
-  const focusTerm = useCallback(() => term?.focus(), [term])
-  const upload = useImageUpload({ windowId, containerRef, onSettled: focusTerm })
+  const restoreFocus = useCallback(() => {
+    if (term) focusInput(term, touch)
+  }, [term, touch])
+  const upload = useImageUpload({ windowId, containerRef, onSettled: restoreFocus })
   const [selecting, setSelecting] = useState<Selection | null>(null)
   const submitTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -137,10 +139,6 @@ export function Terminal({
       unpublish?.()
     }
   }, [term, windowId, isActive, send, sendInput, upload.uploadFiles, toggleSelectMode])
-
-  const restoreFocus = useCallback(() => {
-    if (term) focusInput(term, touch)
-  }, [term, touch])
 
   return (
     <div

@@ -62,7 +62,8 @@ export function Sidebar({
   // The drawer is a modal layer: Escape closes it, and keyboard focus
   // moves in while it is open and back out when it closes. Focus is not
   // handed back to a text field, since on a phone that would raise the
-  // soft keyboard the user did not ask for.
+  // soft keyboard the user did not ask for. The Composer is the exception:
+  // the keyboard was up when the drawer opened, so it comes back with it.
   const drawerOpen = isMobile && isOpen
   useEscape(onClose, drawerOpen)
   const drawerRef = useRef<HTMLDivElement>(null)
@@ -73,7 +74,8 @@ export function Sidebar({
     closeRef.current?.focus()
     return () => {
       if (drawerRef.current?.contains(document.activeElement)) (document.activeElement as HTMLElement | null)?.blur()
-      if (previous && previous.isConnected && previous !== document.body && !isEditableTarget(previous)) previous.focus()
+      if (!previous || !previous.isConnected || previous === document.body) return
+      if (!isEditableTarget(previous) || previous.closest('[data-composer]')) previous.focus()
     }
   }, [drawerOpen])
 
@@ -139,9 +141,10 @@ export function Sidebar({
         transform: isOpen ? 'translateX(0)' : 'translateX(-100%)',
         // Off-screen is not hidden: without this the closed drawer is still
         // focusable, read by screen readers and "visible" to automation.
-        // visibility flips only after the slide-out finishes.
+        // visibility flips at once on open (the focus move above needs the
+        // close button focusable right away) and after the slide-out on close.
         visibility: isOpen ? 'visible' : 'hidden',
-        transition: 'transform 0.2s ease, visibility 0.2s',
+        transition: isOpen ? 'transform 0.2s ease' : 'transform 0.2s ease, visibility 0s 0.2s',
         boxShadow: isOpen ? '0 0 32px rgba(0,0,0,0.5)' : 'none',
       } : {}),
     }}>
@@ -236,7 +239,6 @@ export function Sidebar({
                     minWidth: 0,
                     minHeight: hit,
                     padding: '0 10px',
-                    fontSize: 13,
                   }}
                 />
               ) : (

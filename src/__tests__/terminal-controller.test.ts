@@ -1,6 +1,6 @@
 // TerminalController: size reporting, the scroll pin, the history cap, the
 // detach/attach cycle and what a lost socket does to each state. Driven
-// with fake frames, a fake clock and fake DOM-shaped objects.
+// with fake frames and fake DOM-shaped objects.
 //
 // Run with: npx tsx --test src/__tests__/terminal-controller.test.ts
 
@@ -8,7 +8,6 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { MAX_HISTORY_LINES, type ClientMessage } from '../shared/protocol.ts'
 import {
-  SMOOTH_SCROLL_SETTLE_MS,
   STICK_SLOP_PX,
   TerminalController,
   type AttachState,
@@ -41,8 +40,12 @@ function fakeFrames() {
   }
 }
 
-/** A history pane that keeps its rows as strings. */
-function fakeHistory() {
+/**
+ * A history pane that keeps its rows as strings. With a row height and the
+ * scroll element it also lays the rows out, `rowHeight` pixels each from
+ * the top of the content, so the anchor code can measure them.
+ */
+function fakeHistory(rowHeight = 0, scroll?: ScrollLike) {
   const lines: string[] = []
   const rows: RowLike[] = []
   const pane: HistoryPane & { lines: string[] } = {
@@ -53,7 +56,14 @@ function fakeHistory() {
     append(more) {
       for (const line of more) {
         lines.push(line)
-        rows.push({ textContent: line || ' ', getBoundingClientRect: () => ({ top: 0, bottom: 0, height: 0 }) })
+        const row: RowLike = {
+          textContent: line || ' ',
+          getBoundingClientRect() {
+            const top = rows.indexOf(row) * rowHeight - (scroll?.scrollTop ?? 0)
+            return { top, bottom: top + rowHeight, height: rowHeight }
+          },
+        }
+        rows.push(row)
       }
     },
     trimTop(count) {
@@ -69,6 +79,11 @@ function fakeHistory() {
   return pane
 }
 
+/**
+ * A scroll container. A smooth scrollTo only records its target: the
+ * browser animates over later frames, and a test plays those positions
+ * back through handleScroll itself.
+ */
 function fakeScroll(scrollHeight: number, clientHeight: number) {
   const el: ScrollLike & { smoothTo: number | null } = {
     scrollTop: 0,
@@ -77,7 +92,6 @@ function fakeScroll(scrollHeight: number, clientHeight: number) {
     smoothTo: null,
     scrollTo({ top }) {
       el.smoothTo = top
-      el.scrollTop = top
     },
     getBoundingClientRect: () => ({ top: 0 }),
   }
@@ -89,7 +103,6 @@ function setup(overrides: Partial<TerminalControllerOptions> = {}) {
   const frames = fakeFrames()
   const term = { cols: 80, rows: 24, write: (_data: string, cb?: () => void) => cb?.() }
   const states: AttachState[] = []
-  let clock = 0
   const controller = new TerminalController({
     term,
     windowId: WINDOW,
@@ -98,15 +111,11 @@ function setup(overrides: Partial<TerminalControllerOptions> = {}) {
     },
     raf: frames.raf,
     caf: frames.caf,
-    now: () => clock,
     onStateChange: (s) => {
       states.push(s)
     },
     ...overrides,
   })
-  const tick = (ms: number) => {
-    clock += ms
-  }
   /** Attach and answer with the history reset the server sends. */
   const bringUp = () => {
     controller.attach()
@@ -115,10 +124,17 @@ function setup(overrides: Partial<TerminalControllerOptions> = {}) {
     assert.equal(controller.state, 'attached')
     sent.length = 0
   }
-  return { sent, frames, term, states, controller, tick, bringUp }
+  return { sent, frames, term, states, controller, bringUp }
 }
 
 const types = (sent: ClientMessage[]) => sent.map((m) => m.type)
+const output = (data: string) => ({ type: 'terminal:output', windowId: WINDOW, data }) as const
+
+/** The browser moved the scroll container to `top` and fired a scroll event. */
+function scrolled(controller: TerminalController, el: ScrollLike, top: number): void {
+  el.scrollTop = top
+  controller.handleScroll()
+}
 
 // -- resize reporting ---------------------------------------------------------
 
@@ -208,22 +224,114 @@ test('pin: the inset parks the fold above the bottom, and handleScroll reads the
   assert.equal(controller.stick, true)
 })
 
-test('pin: scroll events during a smooth scroll do not unpin', () => {
+test('pin: a smooth scroll on its way to the target does not unpin; a scroll away from it does', () => {
   const scroll = fakeScroll(1000, 400)
-  const { frames, controller, tick, bringUp } = setup({ scroll })
+  let inset = 0
+  const { frames, controller, bringUp } = setup({ scroll, inset: () => inset })
   bringUp()
+  scroll.scrollTop = 600
 
+  // The composer takes focus: the pin moves up by the inset, smoothly.
+  inset = 100
+  controller.onFocusChange()
+  frames.flush()
+  frames.flush()
+  assert.equal(scroll.smoothTo, 500)
+  // The browser animates: intermediate positions fire scroll events.
+  scrolled(controller, scroll, 570)
+  scrolled(controller, scroll, 530)
+  assert.equal(controller.stick, true, 'on its way to the target')
+  scrolled(controller, scroll, 500)
+  assert.equal(controller.stick, true, 'arrived')
+
+  // A second focus change starts another one; the user grabs the view
+  // mid-flight and scrolls up. That is not the animation any more.
+  inset = 0
   controller.onFocusChange()
   frames.flush()
   frames.flush()
   assert.equal(scroll.smoothTo, 600)
-  // The browser animates: intermediate positions fire scroll events.
-  scroll.scrollTop = 100
-  controller.handleScroll()
-  assert.equal(controller.stick, true, 'ignored while the smooth scroll settles')
-  tick(SMOOTH_SCROLL_SETTLE_MS)
-  controller.handleScroll()
-  assert.equal(controller.stick, false, 'a real position counts once it has settled')
+  scrolled(controller, scroll, 540)
+  assert.equal(controller.stick, true)
+  scrolled(controller, scroll, 300)
+  assert.equal(controller.stick, false, 'moving away from the target is the user')
+  scrolled(controller, scroll, 400)
+  assert.equal(controller.stick, false, 'and the animation does not get its claim back')
+})
+
+test('pin: a wheel, touch or key hands the next scroll event to the user', () => {
+  const scroll = fakeScroll(1000, 400)
+  let inset = 100
+  const { frames, controller, bringUp } = setup({ scroll, inset: () => inset })
+  bringUp()
+  controller.onFocusChange()
+  frames.flush()
+  frames.flush()
+  scrolled(controller, scroll, 500)
+  assert.equal(controller.stick, true)
+
+  // Composer blurred: the view glides down from the inset to the bottom.
+  inset = 0
+  controller.onFocusChange()
+  frames.flush()
+  frames.flush()
+  assert.equal(scroll.smoothTo, 600)
+  scrolled(controller, scroll, 520)
+  assert.equal(controller.stick, true)
+  // A wheel nudge: whatever the container does next is the user's doing,
+  // even a small move in the animation's own direction.
+  controller.onScrollGesture()
+  scrolled(controller, scroll, 540)
+  assert.equal(controller.stick, false)
+})
+
+// The keyboard.spec reconnect flake: with a time window instead of a target,
+// a user scroll within 600 ms of a focus change was swallowed, the view
+// stayed "pinned", and the next history reset dragged it to the bottom.
+test('pin: a user scroll right after a focus change unpins, so a history reset leaves the view where it is', () => {
+  const scroll = fakeScroll(1000, 400)
+  const history = fakeHistory()
+  const { frames, controller, bringUp } = setup({ scroll, history })
+  bringUp()
+  scroll.scrollTop = 600
+  controller.onFocusChange()
+  frames.flush()
+  frames.flush()
+  assert.equal(scroll.smoothTo, 600)
+
+  // Straight away, the user scrolls up to read.
+  scrolled(controller, scroll, 200)
+  assert.equal(controller.stick, false)
+
+  // The socket came back: the server replaces the scrollback.
+  controller.handle({ type: 'terminal:history', windowId: WINDOW, lines: ['a', 'b'], reset: true })
+  frames.flush()
+  assert.equal(scroll.scrollTop, 200, 'the reader keeps their place')
+})
+
+test('pin: output while scrolled up refreshes the inset, so the pin check is right when the reader comes back down', () => {
+  const scroll = fakeScroll(1000, 400)
+  let inset = 50
+  const { frames, controller, bringUp } = setup({ scroll, inset: () => inset })
+  bringUp()
+  controller.onFocusChange()
+  frames.flush()
+  frames.flush()
+  assert.equal(scroll.smoothTo, 550)
+  scrolled(controller, scroll, 550)
+  assert.equal(controller.stick, true)
+
+  scrolled(controller, scroll, 200)
+  assert.equal(controller.stick, false)
+  // The screen redraws under the fold: more chrome below the last output row.
+  inset = 150
+  controller.handle(output('x'))
+  frames.flush()
+  assert.equal(scroll.scrollTop, 200, 'a scrolled-up view is not moved')
+
+  // Back down to where the fold now is.
+  scrolled(controller, scroll, 450)
+  assert.equal(controller.stick, true)
 })
 
 test('pin: a focus change while scrolled up leaves the view alone', () => {
@@ -269,6 +377,25 @@ test('history: a reset replaces everything and starts the count over', () => {
   assert.equal(history.lines[0], 'r0')
 })
 
+test('history: trimming the top under a scrolled-up view keeps the same text at the top of the viewport', () => {
+  const scroll = fakeScroll(MAX_HISTORY_LINES * 10 + 400, 400)
+  const history = fakeHistory(10, scroll)
+  const { frames, controller, bringUp } = setup({ scroll, history })
+  bringUp()
+  const lines = (n: number, from: number) => Array.from({ length: n }, (_, i) => String(from + i))
+  controller.handle({ type: 'terminal:history', windowId: WINDOW, lines: lines(MAX_HISTORY_LINES, 0), reset: false })
+  frames.flush()
+
+  // Reading row 1000 at the top of the viewport.
+  scrolled(controller, scroll, 10_000)
+  assert.equal(controller.stick, false)
+  controller.handle({ type: 'terminal:history', windowId: WINDOW, lines: lines(100, MAX_HISTORY_LINES), reset: false })
+  frames.flush()
+  assert.equal(history.lines[0], '100', 'the 100 oldest rows went')
+  assert.equal(history.lines[900], '1000')
+  assert.equal(scroll.scrollTop, 9_000, 'row 1000 is still at the top of the viewport')
+})
+
 test('history: messages for another window are ignored', () => {
   const history = fakeHistory()
   const { controller, bringUp } = setup({ history })
@@ -297,6 +424,18 @@ test('cycle: leaving the active slot detaches; coming back attaches again', () =
   assert.equal(controller.state, 'attaching')
   assert.deepEqual(types(sent), ['terminal:detach', 'terminal:attach'])
   assert.deepEqual(states, ['attaching', 'attached', 'idle', 'attaching'])
+})
+
+// A pane on the alternate screen (vim, Claude Code) has no scrollback to
+// reset, so the first sign of the pty is its output.
+test('cycle: output while attaching means the pty is ours', () => {
+  const { frames, controller, states } = setup()
+  controller.attach()
+  frames.flush()
+  controller.handle(output('\x1b[?1049h'))
+  assert.equal(controller.state, 'attached')
+  controller.handle({ type: 'terminal:history', windowId: WINDOW, lines: [], reset: true })
+  assert.deepEqual(states, ['attaching', 'attached'])
 })
 
 test('cycle: a detach before the attach frame runs sends neither message', () => {
