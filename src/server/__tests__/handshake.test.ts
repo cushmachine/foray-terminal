@@ -7,7 +7,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { describeCheckout, readServedClientBuild } from '../build.ts'
-import { connect, startTestServer, tmpDir, waitForType } from './helpers.ts'
+import { connect, startTestServer, tmpDir, waitForType, wsUrl, type Msg } from './helpers.ts'
 
 test('client:hello is answered with server:hello carrying a server build', async () => {
   const { url, close } = await startTestServer()
@@ -65,14 +65,14 @@ test('readServedClientBuild reads the stamped id from dist/index.html, null when
 // the socket opens, before the server has finished the welcome's tmux round
 // trip. Those messages must be handled, not dropped.
 test('a message sent the instant the socket opens is still answered', async () => {
-  const { url, close } = await startServer(0)
+  const { url, close } = await startTestServer()
   try {
-    const ws = new WsClient(url.replace(/^http/, 'ws') + '/ws')
+    const ws = new WebSocket(wsUrl(url))
     const types: string[] = []
     const hello = new Promise<Msg>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error(`no server:hello; got ${types.join(',') || 'nothing'}`)), 5000)
-      ws.on('message', (data) => {
-        const msg = JSON.parse(String(data)) as Msg
+      ws.addEventListener('message', (ev) => {
+        const msg = JSON.parse(String(ev.data)) as Msg
         types.push(msg.type)
         if (msg.type === 'server:hello') {
           clearTimeout(timer)
@@ -81,8 +81,8 @@ test('a message sent the instant the socket opens is still answered', async () =
       })
     })
     await new Promise<void>((resolve, reject) => {
-      ws.once('open', resolve)
-      ws.once('error', reject)
+      ws.addEventListener('open', () => resolve(), { once: true })
+      ws.addEventListener('error', () => reject(new Error('socket error')), { once: true })
     })
     ws.send(JSON.stringify({ type: 'client:hello', build: 'test0000.abc' }))
     const reply = await hello
