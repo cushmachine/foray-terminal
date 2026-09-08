@@ -3,7 +3,7 @@
 // Serves the built client (in production), accepts image uploads at
 // POST /api/upload, and upgrades `/ws` connections for the
 // terminal/session/file protocol defined in src/shared/protocol.ts.
-// Run directly with `npm run dev:server` (tsx watch) or `npm start` (built).
+// Run directly with `npm start` (`tsx src/server/index.ts`).
 
 import express from 'express'
 import multer from 'multer'
@@ -12,11 +12,12 @@ import path from 'node:path'
 import { existsSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import { WebSocketServer, type WebSocket } from 'ws'
-import type { ServerMessage } from '../shared/protocol.ts'
-import { listWindows, type TmuxExecutor } from './tmux.ts'
+import type { ServerMessage, TmuxWindow } from '../shared/protocol.ts'
+import { enableExtendedKeys, listWindows, type TmuxExecutor } from './tmux.ts'
 import type { PtySpawner } from './pty-bridge.ts'
-import { handleConnection, type Logger } from './ws-handler.ts'
+import { handleConnection, type Connection } from './ws-handler.ts'
 import { describeCheckout, readServedClientBuild } from './build.ts'
+import { SILENT, scopedLog, type Logger } from './log.ts'
 import {
   DAY_MS,
   DEFAULT_MAX_UPLOAD_AGE_DAYS,
@@ -50,6 +51,11 @@ export const DEFAULT_POLL_INTERVAL_MS = 2000
 export const DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000
 
 export interface ServerOptions {
+  /**
+   * Interface to listen on. Default: every interface, which assumes a
+   * private network (DEPLOY.md); set to 127.0.0.1 to keep it local.
+   */
+  host?: string
   /** Override the tmux poll interval (tests use a short one). */
   pollIntervalMs?: number
   /** Where POST /api/upload saves files. Defaults to ~/uploads. */
@@ -74,15 +80,15 @@ export interface ServerOptions {
    * value is served regardless of NODE_ENV (tests point it at a fixture).
    */
   clientDist?: string
-  /** Drop all log output (tests). */
+  /** Where log lines go. Defaults to the console. */
+  logger?: Logger
+  /** Drop all log output (tests); shorthand for a no-op `logger`. */
   quiet?: boolean
 }
 
-const SILENT: Logger = { log: () => {}, error: () => {} }
-
-/** Where the server's log lines go, per `ServerOptions.quiet`. */
+/** Where the server's log lines go, per `ServerOptions.logger` and `quiet`. */
 function loggerFor(options: ServerOptions): Logger {
-  return options.quiet ? SILENT : console
+  return options.logger ?? (options.quiet ? SILENT : console)
 }
 
 /** Send a protocol message to a single client, typed against ServerMessage. */
@@ -108,6 +114,7 @@ function broadcast(wss: WebSocketServer, message: ServerMessage): void {
  * don't actually look like an image (415), and requests with no file (400).
  */
 function createUploadHandler(uploadDir: string, logger: Logger): express.RequestHandler {
+  const log = scopedLog(logger, 'upload')
   const receive = multer({
     storage: multer.memoryStorage(),
     limits: { fileSize: MAX_UPLOAD_BYTES, files: 1 },
@@ -132,7 +139,7 @@ function createUploadHandler(uploadDir: string, logger: Logger): express.Request
         return fail(400, err.message)
       }
       if (err) {
-        logger.error('[upload] error receiving upload:', err)
+        log.error('error receiving upload:', err)
         return fail(500, 'upload failed')
       }
       if (!req.file) return fail(400, `no file uploaded (expected multipart field "${UPLOAD_FIELD_NAME}")`)
@@ -143,7 +150,7 @@ function createUploadHandler(uploadDir: string, logger: Logger): express.Request
         res.json(body)
       } catch (saveErr) {
         if (saveErr instanceof UnsupportedImageError) return fail(415, saveErr.message)
-        logger.error('[upload] error saving upload:', saveErr)
+        log.error('error saving upload:', saveErr)
         fail(500, 'failed to save upload')
       }
     })
@@ -188,7 +195,7 @@ export interface StartedServer {
 
 /**
  * Where the built client lives. The server always runs from the project
- * root (`tsx src/server/index.ts`, via `npm run dev:server` or `npm start`),
+ * root (`tsx src/server/index.ts`, via `npm start` or scripts/start.sh),
  * and `vite build` writes to `<project-root>/dist`. Resolved against
  * process.cwd() rather than __dirname so this doesn't depend on whether the
  * server itself is compiled or run in place.
@@ -213,10 +220,23 @@ export function startServer(
 ): Promise<StartedServer> {
   const app = createApp(options)
   const logger = loggerFor(options)
+  const log = scopedLog(logger, 'server')
   // Read once: tsx runs the source as of now, until the next restart.
   const serverBuild = describeCheckout()
   const server = http.createServer(app)
   const wss = new WebSocketServer({ server, path: '/ws' })
+
+  const tmuxExec = options.tmuxExec
+
+  // Modified keys reach panes as CSI u only once the tmux server has these
+  // options; set them once here. A tmux server that is not up yet cannot
+  // take them, so the listing below retries while they are unset.
+  let extendedKeysSet = false
+  const ensureExtendedKeys = async (): Promise<void> => {
+    if (extendedKeysSet) return
+    extendedKeysSet = await enableExtendedKeys(tmuxExec)
+  }
+  void ensureExtendedKeys()
 
   // Live refresh. Only changes made through Nest (create/kill/rename) reach
   // us as messages. A `cd` in the shell, or a program retitling its
@@ -224,13 +244,25 @@ export function startServer(
   // with no message at all. tmux has no hook for cwd changes, so while
   // anyone is connected we re-list every few seconds and broadcast only
   // when something differs. One tmux spawn per tick.
+  let lastWindows: TmuxWindow[] = []
   let lastListing = ''
+  /** The session list now, or the last good one when tmux itself failed. */
+  const currentWindows = async (): Promise<TmuxWindow[]> => {
+    try {
+      lastWindows = await listWindows(tmuxExec)
+      // A listing proves the tmux server is up.
+      if (lastWindows.length > 0) void ensureExtendedKeys()
+    } catch (err) {
+      log.error('list-sessions failed:', err)
+    }
+    return lastWindows
+  }
   let polling = false
   const pollTmux = async (): Promise<void> => {
     if (polling || wss.clients.size === 0) return
     polling = true
     try {
-      const windows = await listWindows(options.tmuxExec)
+      const windows = await currentWindows()
       const listing = JSON.stringify(windows)
       if (listing !== lastListing) {
         lastListing = listing
@@ -260,10 +292,10 @@ export function startServer(
     try {
       const deleted = await purgeOldUploads(uploadDir, maxUploadAgeDays * DAY_MS)
       if (deleted.length > 0) {
-        logger.log(`[uploads] purged ${deleted.length} file(s) older than ${maxUploadAgeDays}d from ${uploadDir}`)
+        log.log(`purged ${deleted.length} upload(s) older than ${maxUploadAgeDays}d from ${uploadDir}`)
       }
     } catch (err) {
-      logger.error('[uploads] sweep failed:', err)
+      log.error('upload sweep failed:', err)
     }
   }
   let sweepTimer: ReturnType<typeof setTimeout> | null = null
@@ -297,12 +329,16 @@ export function startServer(
 
   // Session handoff / ownership tracking for THIS server instance: which
   // WebSocket connections are currently attached (via terminal:attach) to
-  // which tmux window. Purely in-memory — exists only to support
-  // "single owner" handoff (a new attach takes over from any previous
-  // attachers) and to let clients show an ownership indicator. Scoped per
-  // server instance (rather than module-level) so multiple servers started
-  // in the same process — as tests do — don't share state.
+  // which tmux window. Purely in-memory: it exists to support "single
+  // owner" handoff (a new attach takes over from any previous attachers)
+  // and to let clients show an ownership indicator. Scoped per server
+  // instance (rather than module-level) so multiple servers started in the
+  // same process, as tests do, don't share state.
   const windowClients = new Map<number, Set<WebSocket>>()
+
+  // Every live connection's handler, so a request on one connection
+  // (session:kill, a handoff) can drop the attachments others hold.
+  const connections = new Map<WebSocket, Connection>()
 
   /** Current ownership snapshot: how many clients are attached to each window. */
   const getOwnership = (): Array<{ windowId: number; clients: number }> =>
@@ -315,75 +351,81 @@ export function startServer(
     broadcast(wss, { type: 'session:ownership', ownership: getOwnership() })
   }
 
-  /** Remove a disconnecting client from every window's client set. */
-  const removeClientFromAllWindows = (ws: WebSocket): void => {
-    for (const [windowId, clients] of windowClients) {
-      if (clients.delete(ws) && clients.size === 0) {
-        windowClients.delete(windowId)
-      }
-    }
+  /** Drop a client from one window's client set; true if it was there. */
+  const releaseWindow = (ws: WebSocket, windowId: number): boolean => {
+    const clients = windowClients.get(windowId)
+    if (!clients?.delete(ws)) return false
+    if (clients.size === 0) windowClients.delete(windowId)
+    return true
   }
 
-  wss.on('connection', async (ws, req) => {
+  wss.on('connection', (ws, req) => {
     const remote = req.socket.remoteAddress ?? 'unknown'
     const userAgent = String(req.headers['user-agent'] ?? '').slice(0, 160)
-    logger.log(`[ws] client connected from ${remote} ua="${userAgent}"`)
+    log.log(`client connected from ${remote} ua="${userAgent}"`)
     alive.set(ws, true)
     ws.on('pong', () => alive.set(ws, true))
 
-    // Welcome message: send the real tmux window list. If any windows
-    // already have clients attached (e.g. this connection is a browser tab
-    // reconnecting to a server other tabs are already using), follow up
-    // with the current ownership snapshot so the new client can render
-    // indicators immediately — but omit it entirely when there's nothing to
-    // report, so a freshly started server's welcome sequence stays a single
-    // message.
-    const windows = await listWindows(options.tmuxExec)
-    lastListing = JSON.stringify(windows)
-    send(ws, { type: 'session:list', windows })
-    const initialOwnership = getOwnership()
-    if (initialOwnership.length > 0) {
-      send(ws, { type: 'session:ownership', ownership: initialOwnership })
-    }
-
-    handleConnection(ws, {
+    const connection = handleConnection(ws, {
       remoteAddress: remote,
       send: (msg) => send(ws, msg),
       broadcast: (msg) => broadcast(wss, msg),
       ptySpawner: options.ptySpawner,
-      tmuxExec: options.tmuxExec,
+      tmuxExec,
       logger,
+      // The welcome is the session list. If any windows already have
+      // clients attached (this is a tab reconnecting to a server other
+      // tabs are using), follow up with the ownership snapshot so the new
+      // client can render indicators immediately; omit it when there is
+      // nothing to report, so a fresh server's welcome stays one message.
+      welcome: async () => {
+        const windows = await currentWindows()
+        lastListing = JSON.stringify(windows)
+        send(ws, { type: 'session:list', windows })
+        const initialOwnership = getOwnership()
+        if (initialOwnership.length > 0) {
+          send(ws, { type: 'session:ownership', ownership: initialOwnership })
+        }
+      },
       claimWindow: (windowId) => {
-        const previousClients = windowClients.get(windowId)
-        if (previousClients) {
-          for (const client of previousClients) {
-            if (client !== ws) {
-              send(client, { type: 'terminal:detached', windowId, reason: 'taken-over' })
-            }
-          }
+        // Whoever attached last owns the window: everyone else attached to
+        // it loses their pty and is told why.
+        for (const client of windowClients.get(windowId) ?? []) {
+          if (client === ws) continue
+          connections.get(client)?.dropAttachment(windowId)
+          send(client, { type: 'terminal:detached', windowId, reason: 'taken-over' })
         }
         windowClients.set(windowId, new Set([ws]))
         broadcastOwnership()
       },
+      releaseWindow: (windowId) => {
+        if (releaseWindow(ws, windowId)) broadcastOwnership()
+      },
       releaseAllWindows: () => {
-        removeClientFromAllWindows(ws)
+        for (const windowId of [...windowClients.keys()]) releaseWindow(ws, windowId)
         broadcastOwnership()
+      },
+      dropAttachmentsFor: (windowId) => {
+        for (const other of connections.values()) other.dropAttachment(windowId)
+        if (windowClients.delete(windowId)) broadcastOwnership()
       },
       userAgent,
       serverBuild,
       servedClientBuild: () => readServedClientBuild(options.clientDist ?? clientDistDir()),
     })
+    connections.set(ws, connection)
+    ws.on('close', () => connections.delete(ws))
   })
 
   return new Promise<StartedServer>((resolve, reject) => {
     server.once('error', reject)
-    server.listen(port, () => {
+    const onListening = (): void => {
       server.removeListener('error', reject)
 
       const address = server.address()
       const actualPort = typeof address === 'object' && address ? address.port : port
       const url = `http://localhost:${actualPort}`
-      logger.log(`[server] listening on ${url}`)
+      log.log(`listening on ${url}${options.host ? ` (${options.host})` : ''}`)
 
       const close = (): Promise<void> =>
         new Promise<void>((resolveClose, rejectClose) => {
@@ -410,7 +452,9 @@ export function startServer(
         })
 
       resolve({ server, wss, url, close })
-    })
+    }
+    if (options.host) server.listen(port, options.host, onListening)
+    else server.listen(port, onListening)
   })
 }
 
@@ -420,7 +464,7 @@ const isMain = process.argv[1] !== undefined && import.meta.url === pathToFileUR
 if (isMain) {
   const envPort = process.env.PORT ? parseInt(process.env.PORT, 10) : NaN
   const port = Number.isFinite(envPort) ? envPort : DEFAULT_PORT
-  startServer(port).catch((err) => {
+  startServer(port, { host: process.env.HOST || undefined }).catch((err) => {
     console.error('Failed to start server:', err)
     process.exit(1)
   })

@@ -7,11 +7,49 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import chokidar from 'chokidar'
 import type { FileNode } from '../shared/protocol.ts'
+import { ClientError } from './errors.ts'
 
 /** Directory/file names that are always excluded from the tree and watcher, regardless of .gitignore. */
 const ALWAYS_SKIP = new Set(['node_modules', '.git', 'dist', '.DS_Store'])
 
 const DEFAULT_MAX_DEPTH = 5
+
+/**
+ * Most nodes a tree response carries. A session whose cwd is a home
+ * directory or a monorepo has far more, and a phone renders a few hundred;
+ * past this the walk stops and the response says it was cut short.
+ */
+export const MAX_TREE_NODES = 5000
+
+/**
+ * The directory a files:* request is about. Clients send the session's
+ * cwd as tmux reports it, which is absolute; anything else has no sensible
+ * base to resolve against.
+ */
+export function resolveRoot(cwd: string): string {
+  if (!path.isAbsolute(cwd)) throw new ClientError('Invalid path (cwd must be absolute)')
+  return path.normalize(cwd)
+}
+
+/**
+ * Whether the tree and the watcher leave `fullPath` (under `root`) out.
+ * Beyond ALWAYS_SKIP anywhere in the path, dot-directories directly under
+ * the root are skipped (.cache, .npm, .local under a home directory) along
+ * with everything inside them; dot-files at the root (.gitignore, .env)
+ * stay. `isDir` is unknown on chokidar's first look at a path; it asks
+ * again with stats before watching it.
+ */
+function isSkipped(root: string, fullPath: string, isDir: boolean | undefined): boolean {
+  const rel = path.relative(root, fullPath)
+  if (rel === '') return false
+  const segments = rel.split(path.sep)
+  if (segments.some((segment) => ALWAYS_SKIP.has(segment))) return true
+  if (segments[0].startsWith('.')) {
+    if (segments.length > 1) return true
+    if (isDir) return true
+  }
+  return false
+}
 
 // ---------------------------------------------------------------------------
 // .gitignore parsing: a small subset (`*` globs matched against the basename and the relative path, trailing / for directories, ! negation)
@@ -99,30 +137,42 @@ function toPosixPath(relPath: string): string {
   return relPath.split(path.sep).join('/')
 }
 
+/** Nodes still allowed into one tree response, shared across the walk. */
+interface Budget {
+  left: number
+  truncated: boolean
+}
+
 async function walk(
   root: string,
   dir: string,
   depth: number,
   maxDepth: number,
   gitignore: GitignoreMatcher,
+  budget: Budget,
 ): Promise<FileNode[]> {
   const entries = await fs.readdir(dir, { withFileTypes: true })
   const nodes: FileNode[] = []
 
   for (const entry of entries) {
-    if (ALWAYS_SKIP.has(entry.name)) continue
-
     const isDir = entry.isDirectory()
     const isFile = entry.isFile()
     if (!isDir && !isFile) continue // skip symlinks, sockets, etc.
 
     const fullPath = path.join(dir, entry.name)
+    if (isSkipped(root, fullPath, isDir)) continue
     const relPath = toPosixPath(path.relative(root, fullPath))
 
     if (gitignore.isIgnored(relPath, isDir)) continue
 
+    if (budget.left === 0) {
+      budget.truncated = true
+      break
+    }
+    budget.left--
+
     if (isDir) {
-      const children = depth < maxDepth ? await walk(root, fullPath, depth + 1, maxDepth, gitignore) : []
+      const children = depth < maxDepth ? await walk(root, fullPath, depth + 1, maxDepth, gitignore, budget) : []
       nodes.push({ name: entry.name, path: relPath, type: 'dir', children })
     } else {
       nodes.push({ name: entry.name, path: relPath, type: 'file' })
@@ -137,19 +187,33 @@ async function walk(
   return nodes
 }
 
+export interface Tree {
+  entries: FileNode[]
+  /** The walk hit `maxNodes` and stopped; the listing is partial. */
+  truncated: boolean
+}
+
 /**
  * Recursively list the directory tree rooted at `cwd`.
  *
  * - Respects a top-level .gitignore (if present) using a simplified matcher.
- * - Always skips node_modules, .git, dist, .DS_Store, regardless of .gitignore.
+ * - Always skips node_modules, .git, dist, .DS_Store, regardless of
+ *   .gitignore, and dot-directories directly under the root.
  * - Directories are sorted before files; each group is alphabetical.
  * - `maxDepth` (default 5) bounds recursion: directories at the max depth
  *   are still listed, but their contents are not read.
+ * - Stops after `maxNodes` nodes and reports `truncated`.
  */
-export async function getTree(cwd: string, maxDepth: number = DEFAULT_MAX_DEPTH): Promise<FileNode[]> {
+export async function getTree(
+  cwd: string,
+  maxDepth: number = DEFAULT_MAX_DEPTH,
+  maxNodes: number = MAX_TREE_NODES,
+): Promise<Tree> {
   const root = path.resolve(cwd)
   const gitignore = await loadGitignore(root)
-  return walk(root, root, 1, maxDepth, gitignore)
+  const budget: Budget = { left: maxNodes, truncated: false }
+  const entries = await walk(root, root, 1, maxDepth, gitignore, budget)
+  return { entries, truncated: budget.truncated }
 }
 
 // ---------------------------------------------------------------------------
@@ -162,10 +226,10 @@ export async function getTree(cwd: string, maxDepth: number = DEFAULT_MAX_DEPTH)
  */
 async function resolveSafePath(cwd: string, relativePath: string): Promise<string> {
   if (relativePath.startsWith('/')) {
-    throw new Error(`Invalid path (absolute paths are not allowed): ${relativePath}`)
+    throw new ClientError(`Invalid path (absolute paths are not allowed): ${relativePath}`)
   }
   if (relativePath.includes('..')) {
-    throw new Error(`Invalid path (path traversal is not allowed): ${relativePath}`)
+    throw new ClientError(`Invalid path (path traversal is not allowed): ${relativePath}`)
   }
 
   const root = path.resolve(cwd)
@@ -173,7 +237,7 @@ async function resolveSafePath(cwd: string, relativePath: string): Promise<strin
 
   const rel = path.relative(root, resolved)
   if (rel.startsWith('..') || path.isAbsolute(rel)) {
-    throw new Error(`Invalid path (escapes cwd): ${relativePath}`)
+    throw new ClientError(`Invalid path (escapes cwd): ${relativePath}`)
   }
 
   // Follow symlinks to prevent a symlink inside cwd pointing outside it
@@ -183,7 +247,7 @@ async function resolveSafePath(cwd: string, relativePath: string): Promise<strin
     const realResolved = await fs.realpath(resolved)
     const realRel = path.relative(realRoot, realResolved)
     if (realRel.startsWith('..') || path.isAbsolute(realRel)) {
-      throw new Error(`Invalid path (escapes cwd via symlink): ${relativePath}`)
+      throw new ClientError(`Invalid path (escapes cwd via symlink): ${relativePath}`)
     }
   } catch (err) {
     // File or parent dirs might not exist yet (writes to new nested paths).
@@ -195,7 +259,7 @@ async function resolveSafePath(cwd: string, relativePath: string): Promise<strin
           const realCheck = await fs.realpath(check)
           const checkRel = path.relative(realRoot, realCheck)
           if (checkRel.startsWith('..') || path.isAbsolute(checkRel)) {
-            throw new Error(`Invalid path (escapes cwd via symlink): ${relativePath}`)
+            throw new ClientError(`Invalid path (escapes cwd via symlink): ${relativePath}`)
           }
           break
         } catch (inner) {
@@ -218,7 +282,7 @@ export async function readFile(cwd: string, relativePath: string): Promise<strin
   const resolved = await resolveSafePath(cwd, relativePath)
   const { size } = await fs.stat(resolved)
   if (size > MAX_FILE_SIZE) {
-    throw new Error(`File too large (${(size / 1024 / 1024).toFixed(1)}MB, max 1MB)`)
+    throw new ClientError(`File too large (${(size / 1024 / 1024).toFixed(1)}MB, max 1MB)`)
   }
   return fs.readFile(resolved, 'utf-8')
 }
@@ -240,48 +304,52 @@ export interface Watcher {
   ready: Promise<void>
 }
 
+export interface WatchEvents {
+  /** A file under the root was created or written; the path is relative to it. */
+  onChange: (path: string) => void
+  /** A file under the root was deleted. */
+  onRemove: (path: string) => void
+}
+
 const WATCH_DEBOUNCE_MS = 300
 
 /**
- * Watch `cwd` recursively for file changes, debounced 300ms per file.
- * `onChange` receives the changed file's path relative to `cwd`.
+ * Watch `cwd` recursively for file changes, debounced 300ms per file: a
+ * burst of events on one path is reported once, as whatever happened last.
  */
-export function watchDir(cwd: string, onChange: (path: string) => void): Watcher {
+export function watchDir(cwd: string, events: WatchEvents): Watcher {
   const root = path.resolve(cwd)
-  const timers = new Map<string, NodeJS.Timeout>()
+  const pending = new Map<string, { timer: NodeJS.Timeout; kind: 'change' | 'remove' }>()
 
   const watcher = chokidar.watch(root, {
     ignoreInitial: true,
-    ignored: (filePath: string) => {
-      const rel = path.relative(root, filePath)
-      if (rel === '') return false
-      return rel.split(path.sep).some((segment) => ALWAYS_SKIP.has(segment))
-    },
+    ignored: (filePath: string, stats?: { isDirectory(): boolean }) =>
+      isSkipped(root, filePath, stats?.isDirectory()),
   })
 
-  const handleEvent = (filePath: string) => {
+  const handleEvent = (kind: 'change' | 'remove') => (filePath: string) => {
     const relPath = toPosixPath(path.relative(root, filePath))
-
-    const existing = timers.get(relPath)
-    if (existing) clearTimeout(existing)
-
+    const existing = pending.get(relPath)
+    if (existing) clearTimeout(existing.timer)
     const timer = setTimeout(() => {
-      timers.delete(relPath)
-      onChange(relPath)
+      const entry = pending.get(relPath)
+      pending.delete(relPath)
+      if (entry?.kind === 'remove') events.onRemove(relPath)
+      else events.onChange(relPath)
     }, WATCH_DEBOUNCE_MS)
-    timers.set(relPath, timer)
+    pending.set(relPath, { timer, kind })
   }
 
-  watcher.on('add', handleEvent)
-  watcher.on('change', handleEvent)
-  watcher.on('unlink', handleEvent)
+  watcher.on('add', handleEvent('change'))
+  watcher.on('change', handleEvent('change'))
+  watcher.on('unlink', handleEvent('remove'))
   const ready = new Promise<void>((resolve) => watcher.once('ready', resolve))
 
   return {
     ready,
     close(): void {
-      for (const timer of timers.values()) clearTimeout(timer)
-      timers.clear()
+      for (const { timer } of pending.values()) clearTimeout(timer)
+      pending.clear()
       void watcher.close()
     },
   }

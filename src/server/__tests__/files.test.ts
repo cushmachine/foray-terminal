@@ -13,7 +13,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { getTree, readFile, writeFile, watchDir, type Watcher } from '../files.ts'
 import type { FileNode } from '../../shared/protocol.ts'
-import { tmpDir } from './helpers.ts'
+import { connect, handleTestConnection, startTestServer, tmpDir, until, waitForType } from './helpers.ts'
 
 /** Flatten a tree into a list of names, for easy "does X appear anywhere" checks. */
 function collectNames(nodes: FileNode[]): string[] {
@@ -45,7 +45,7 @@ test('getTree: basic structure, dirs before files, correct types', async () => {
     await fs.writeFile(path.join(dir, 'sub', 'c.ts'), 'c')
     await fs.writeFile(path.join(dir, 'sub', 'deep', 'd.json'), 'd')
 
-    const tree = await getTree(dir)
+    const { entries: tree } = await getTree(dir)
 
     // Top level: sub (dir) should come before a.txt, b.md (files).
     assert.equal(tree.length, 3)
@@ -80,8 +80,8 @@ test('getTree: respects .gitignore', async () => {
     await fs.writeFile(path.join(dir, 'ignored.log'), 'ignored')
     await fs.writeFile(path.join(dir, '.gitignore'), '*.log\n')
 
-    const tree = await getTree(dir)
-    const names = collectNames(tree)
+    const { entries } = await getTree(dir)
+    const names = collectNames(entries)
 
     assert.ok(!names.includes('ignored.log'), 'ignored.log should be filtered out')
     assert.ok(names.includes('keep.txt'), 'keep.txt should remain')
@@ -103,8 +103,8 @@ test('getTree: always skips node_modules, .git, dist, .DS_Store', async () => {
     await fs.writeFile(path.join(dir, 'dist', 'bundle.js'), '')
     await fs.writeFile(path.join(dir, '.DS_Store'), '')
 
-    const tree = await getTree(dir)
-    const names = collectNames(tree)
+    const { entries } = await getTree(dir)
+    const names = collectNames(entries)
 
     assert.ok(!names.includes('node_modules'))
     assert.ok(!names.includes('.git'))
@@ -123,8 +123,8 @@ test('getTree: respects maxDepth', async () => {
     await fs.mkdir(path.join(dir, 'a', 'b', 'c', 'd', 'e', 'f'), { recursive: true })
     await fs.writeFile(path.join(dir, 'a', 'b', 'c', 'd', 'e', 'f', 'deep.txt'), 'deep')
 
-    const tree = await getTree(dir, 3)
-    const names = collectNames(tree)
+    const { entries } = await getTree(dir, 3)
+    const names = collectNames(entries)
 
     // a (depth1) -> b (depth2) -> c (depth3) should be visible, but c's
     // contents (d, e, f, deep.txt) should not be traversed.
@@ -210,7 +210,7 @@ test('watchDir: fires onChange with relative path on file change', { timeout: 50
     const changed = new Promise<string>((resolve) => {
       report = resolve
     })
-    watcher = watchDir(dir, report)
+    watcher = watchDir(dir, { onChange: report, onRemove: () => {} })
     // Only after the initial scan is a write reliably seen as a change.
     await watcher.ready
     await fs.writeFile(path.join(dir, 'watch.txt'), 'updated')
@@ -218,6 +218,110 @@ test('watchDir: fires onChange with relative path on file change', { timeout: 50
     assert.equal(await changed, 'watch.txt')
   } finally {
     watcher?.close()
+    await fs.rm(dir, { recursive: true, force: true })
+  }
+})
+
+// ---------------------------------------------------------------------------
+// Bounds: node cap, truncation flag, root dot-dirs
+// ---------------------------------------------------------------------------
+
+function countNodes(nodes: FileNode[]): number {
+  let n = 0
+  for (const node of nodes) n += 1 + (node.children ? countNodes(node.children) : 0)
+  return n
+}
+
+// A session whose cwd is a home directory or a monorepo has tens of
+// thousands of nodes; a phone renders a few hundred. The cap is a
+// parameter so the test does not need thousands of files.
+test('getTree stops at the node cap and says so', async () => {
+  const dir = await tmpDir()
+  try {
+    await fs.mkdir(path.join(dir, 'big'))
+    await Promise.all(Array.from({ length: 30 }, (_, i) => fs.writeFile(path.join(dir, 'big', `f${i}`), '')))
+    const { entries, truncated } = await getTree(dir, 5, 10)
+    assert.equal(countNodes(entries), 10)
+    assert.equal(truncated, true)
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('files:tree carries the truncation flag and skips root dot-dirs', async () => {
+  const dir = await tmpDir()
+  const { url, close } = await startTestServer()
+  try {
+    await fs.mkdir(path.join(dir, '.cache'))
+    await fs.writeFile(path.join(dir, '.cache', 'junk'), '')
+    await fs.mkdir(path.join(dir, 'src', '.hidden'), { recursive: true })
+    await fs.writeFile(path.join(dir, 'src', '.hidden', 'kept'), '')
+    await fs.writeFile(path.join(dir, '.env'), '')
+
+    const { ws } = await connect(url)
+    const reply = waitForType(ws, 'files:tree')
+    ws.send(JSON.stringify({ type: 'files:tree', cwd: dir }))
+    const msg = await reply
+    const entries = msg.entries as FileNode[]
+
+    assert.equal(msg.truncated, false)
+    assert.equal(entries.find((n) => n.name === '.cache'), undefined, 'root dot-dirs are skipped')
+    assert.ok(entries.find((n) => n.name === '.env'), 'root dot-files stay')
+    assert.ok(findNode(entries, '.hidden'), 'dot-dirs below the root stay')
+    ws.close()
+  } finally {
+    await close()
+    await fs.rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('getTree reports truncated: false for a small tree', async () => {
+  const dir = await tmpDir()
+  try {
+    await fs.writeFile(path.join(dir, 'a.txt'), 'a')
+    assert.deepEqual(await getTree(dir), {
+      entries: [{ name: 'a.txt', path: 'a.txt', type: 'file' }],
+      truncated: false,
+    })
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('files:tree and files:watch reject a relative cwd', async () => {
+  const conn = handleTestConnection()
+  conn.socket.receive({ type: 'files:tree', cwd: 'relative/dir' })
+  conn.socket.receive({ type: 'files:watch', cwd: '../up' })
+  await until(() => conn.sent.length === 2, 'both replies')
+  for (const msg of conn.sent) {
+    assert.equal(msg.type, 'error')
+    assert.match(String(msg.message), /must be absolute/)
+  }
+  conn.socket.emit('close')
+})
+
+// ---------------------------------------------------------------------------
+// Watching: the ack, deletes
+// ---------------------------------------------------------------------------
+
+test('deleting a watched file produces files:removed, not a logged error', { timeout: 15_000 }, async () => {
+  const dir = await tmpDir()
+  const conn = handleTestConnection()
+  try {
+    await fs.writeFile(path.join(dir, 'a.txt'), 'a')
+    conn.socket.receive({ type: 'files:watch', cwd: dir })
+    // Only after the ack is a change reliably seen.
+    await until(() => conn.sent.some((m) => m.type === 'files:watching'), 'the files:watching ack', 10_000)
+    assert.deepEqual(conn.sent.find((m) => m.type === 'files:watching'), { type: 'files:watching', cwd: dir })
+
+    await fs.unlink(path.join(dir, 'a.txt'))
+    const removed = (): boolean => conn.sent.some((m) => m.type === 'files:removed')
+    await until(() => removed() || conn.errors.length > 0, 'the watcher to react to the delete', 3000)
+
+    assert.deepEqual(conn.errors, [], 'the delete was logged as an error instead of reported')
+    assert.deepEqual(conn.sent.find((m) => m.type === 'files:removed'), { type: 'files:removed', path: 'a.txt' })
+  } finally {
+    conn.socket.emit('close')
     await fs.rm(dir, { recursive: true, force: true })
   }
 })

@@ -68,6 +68,22 @@ export interface TerminalAttachMessage {
   rows?: number
 }
 
+/**
+ * Let go of a window without closing the connection: the server kills this
+ * connection's pty for it and releases ownership. Sent when a terminal
+ * stops being the active one, so only the visible session holds a pty.
+ */
+export interface TerminalDetachMessage {
+  type: 'terminal:detach'
+  windowId: number
+}
+
+/**
+ * Ask for a fresh session list. The server pushes `session:list` on its
+ * own (welcome, and a poll while anyone is connected), so the client does
+ * not send this today; it stays as the refresh hook for a client that
+ * wants the list sooner than the next poll.
+ */
 export interface SessionListRequest {
   type: 'session:list'
 }
@@ -139,6 +155,7 @@ export type ClientMessage =
   | TerminalInputMessage
   | TerminalResizeMessage
   | TerminalAttachMessage
+  | TerminalDetachMessage
   | SessionListRequest
   | SessionCreateMessage
   | SessionKillMessage
@@ -182,9 +199,15 @@ export interface SessionRenamedMessage {
   name: string
 }
 
+/**
+ * The directory tree for a `files:tree` request. `truncated` is set when
+ * the walk hit the server's node cap and stopped early, so the client can
+ * say the listing is partial.
+ */
 export interface FilesTreeMessage {
   type: 'files:tree'
   entries: FileNode[]
+  truncated?: boolean
 }
 
 export interface FilesContentMessage {
@@ -204,9 +227,39 @@ export interface FilesChangedMessage {
   content: string
 }
 
+/** A watched file was deleted; `path` is relative to the watched directory. */
+export interface FilesRemovedMessage {
+  type: 'files:removed'
+  path: string
+}
+
+/**
+ * Acknowledges `files:watch` once the watcher's initial scan is done and
+ * changes under `cwd` are being reported. A change made before this
+ * arrives may go unseen.
+ */
+export interface FilesWatchingMessage {
+  type: 'files:watching'
+  cwd: string
+}
+
+/**
+ * A request failed. This is the only error shape on the socket; the HTTP
+ * upload endpoint answers failures with a JSON body `{ error: string }`
+ * instead (src/shared/uploads.ts). `request` names the client message
+ * that failed so each consumer can pick out its own errors: the file
+ * panel takes `files:*`, a terminal takes those carrying its `windowId`,
+ * and the app logs the rest. It is 'unknown' when the message could not be
+ * parsed or named a type the server does not know.
+ */
 export interface ErrorMessage {
   type: 'error'
   message: string
+  request: ClientMessage['type'] | 'unknown'
+  /** The window the failed request was about, when it named one. */
+  windowId?: number
+  /** The path the failed files:* request was about, when it named one. */
+  path?: string
 }
 
 /**
@@ -231,6 +284,16 @@ export interface TerminalDetachedMessage {
   type: 'terminal:detached'
   windowId: number
   reason: 'taken-over'
+}
+
+/**
+ * This connection's pty for the window ended on its own: the tmux session
+ * was killed or tmux went away. The server has already forgotten the pty;
+ * the client may send `terminal:attach` again to retry.
+ */
+export interface TerminalExitedMessage {
+  type: 'terminal:exited'
+  windowId: number
 }
 
 /**
@@ -272,8 +335,11 @@ export type ServerMessage =
   | FilesContentMessage
   | FilesSavedMessage
   | FilesChangedMessage
+  | FilesRemovedMessage
+  | FilesWatchingMessage
   | ErrorMessage
   | TerminalDetachedMessage
+  | TerminalExitedMessage
   | SessionOwnershipMessage
   | PongMessage
   | ServerHelloMessage

@@ -23,7 +23,7 @@ import {
   type PtyProcess,
 } from '../pty-bridge.ts'
 
-import { connect, startTestServer, waitForType } from './helpers.ts'
+import { connect, fakeTmux, startTestServer, waitForType } from './helpers.ts'
 
 /** Hostname passed to the parser; tmux initialises every pane title to this. */
 const HOST = 'testhost'
@@ -319,7 +319,7 @@ test('attachToPane spawns tmux with correct attach command', () => {
     return createMockPtyProcess()
   }
 
-  attachToPane(5, () => {}, undefined, mockSpawn)
+  attachToPane(5, NO_EVENTS, undefined, mockSpawn)
 
   assert.ok(spawn.calledWith, 'spawn should have been called')
   assert.equal(spawn.calledWith.file, 'tmux')
@@ -337,7 +337,7 @@ test('attachToPane respects custom cols/rows', () => {
     return createMockPtyProcess()
   }
 
-  attachToPane(1, () => {}, { cols: 120, rows: 40 }, mockSpawn)
+  attachToPane(1, NO_EVENTS, { cols: 120, rows: 40 }, mockSpawn)
 
   assert.equal(spawnOptions!.cols, 120)
   assert.equal(spawnOptions!.rows, 40)
@@ -358,7 +358,7 @@ test('attachToPane forwards pty data to onData callback', () => {
     return proc
   }
 
-  attachToPane(1, (data) => received.push(data), undefined, mockSpawn)
+  attachToPane(1, { onData: (data) => received.push(data), onExit: () => {} }, undefined, mockSpawn)
 
   assert.ok(pty.dataCallback, 'onData should have been called')
   pty.dataCallback('hello')
@@ -377,7 +377,7 @@ test('attachToPane handle.write() calls pty.write()', () => {
     return proc
   }
 
-  const handle = attachToPane(1, () => {}, undefined, mockSpawn)
+  const handle = attachToPane(1, NO_EVENTS, undefined, mockSpawn)
   handle.write('ls\n')
   handle.write('pwd\n')
   assert.deepEqual(written, ['ls\n', 'pwd\n'])
@@ -394,7 +394,7 @@ test('attachToPane handle.resize() calls pty.resize()', () => {
     return proc
   }
 
-  const handle = attachToPane(1, () => {}, undefined, mockSpawn)
+  const handle = attachToPane(1, NO_EVENTS, undefined, mockSpawn)
   handle.resize(120, 40)
   assert.deepEqual(resizes, [{ cols: 120, rows: 40 }])
 })
@@ -410,7 +410,7 @@ test('attachToPane handle.kill() calls pty.kill()', () => {
     return proc
   }
 
-  const handle = attachToPane(1, () => {}, undefined, mockSpawn)
+  const handle = attachToPane(1, NO_EVENTS, undefined, mockSpawn)
   assert.equal(killed, false)
   handle.kill()
   assert.equal(killed, true)
@@ -442,11 +442,43 @@ test('server sends session:list welcome and responds to session:list', async () 
 // Helpers
 // ---------------------------------------------------------------------------
 
+const NO_EVENTS = { onData: () => {}, onExit: () => {} }
+
 function createMockPtyProcess(): PtyProcess {
   return {
     onData(_cb: (data: string) => void) {},
+    onExit(_cb: (event: { exitCode: number }) => void) {},
     write(_data: string) {},
     resize(_cols: number, _rows: number) {},
     kill() {},
+    pause() {},
+    resume() {},
   }
 }
+
+// ---------------------------------------------------------------------------
+// Test 6: one sanitiser for create and rename
+// ---------------------------------------------------------------------------
+
+// tmux rejects '.' and ':' in session names (target syntax). Both paths
+// must go through one sanitiser so the same input lands on the same name.
+test('create and rename produce the same tmux session name for the same input', async () => {
+  const tmux = fakeTmux()
+  const created = await createWindow('a.b:c', undefined, tmux.exec)
+  await renameWindow(created.id, 'a.b:c', tmux.exec)
+
+  const newSession = tmux.calls.find((args) => args[0] === 'new-session')
+  const rename = tmux.calls.find((args) => args[0] === 'rename-session')
+  assert.ok(newSession && rename)
+  const createdName = newSession[newSession.indexOf('-s') + 1]
+  const renamedName = rename[rename.length - 1]
+  assert.equal(createdName, renamedName)
+  assert.doesNotMatch(createdName, /[.:]/, 'tmux would reject this name')
+})
+
+test('listWindows throws for tmux failures other than a missing server', async () => {
+  const mockExec: TmuxExecutor = async () => {
+    throw new Error('lost server')
+  }
+  await assert.rejects(() => listWindows(mockExec, HOST), /lost server/)
+})

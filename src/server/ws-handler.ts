@@ -1,18 +1,20 @@
 // Per-connection WebSocket handler for Nest.
 //
-// Owns the pty handles, history trackers, file panel state, and message
-// dispatch for a single client connection.  Extracted from index.ts to
-// keep server setup and per-connection logic in separate files.
+// Owns one client's attachments (pty, history tracker and timers per
+// window), its file-panel state, and the validation and dispatch of its
+// messages. Messages on one socket are handled one at a time, in order, so
+// an input that follows an attach finds the pty it was typed into.
 
-import path from 'node:path'
 import type { WebSocket } from 'ws'
-import { MAX_HISTORY_LINES, type ClientMessage, type ServerMessage } from '../shared/protocol.ts'
+import { MAX_HISTORY_LINES, type ClientMessage, type ErrorMessage, type ServerMessage } from '../shared/protocol.ts'
 import {
   listWindows, createWindow, killWindow, renameWindow, paneHistoryState, captureHistoryLines, type TmuxExecutor,
 } from './tmux.ts'
 import { planHistoryUpdate, alignHistory, nextTail } from './history.ts'
 import { attachToPane, type PtyHandle, type PtySpawner } from './pty-bridge.ts'
-import { getTree, readFile, writeFile, watchDir, type Watcher } from './files.ts'
+import { getTree, readFile, writeFile, watchDir, resolveRoot, type Watcher } from './files.ts'
+import { ClientError, safeErrorMessage } from './errors.ts'
+import { scopedLog, type Logger } from './log.ts'
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -34,11 +36,25 @@ const HISTORY_CHECK_MS = 80
 const HISTORY_TAIL = 50
 
 /**
- * How long after a resize to wait before sending the whole history again.
- * tmux reflows history to the new width, which moves the line boundaries
- * the client already has.
+ * How long after the last resize of a burst to wait before sending the
+ * whole history again. tmux reflows history to the new width, which moves
+ * the line boundaries the client already has.
  */
 const HISTORY_REFLOW_MS = 150
+
+/**
+ * Backpressure. A pane that floods (cat of a big file) fills the socket's
+ * send buffer faster than a phone drains it. Past the high mark the pty is
+ * paused, which blocks the program behind it; it is resumed once the
+ * buffer has drained below the low mark.
+ */
+const BACKPRESSURE_HIGH = 1024 * 1024
+const BACKPRESSURE_LOW = 256 * 1024
+const BACKPRESSURE_POLL_MS = 50
+
+/** Terminal sizes accepted from a client, whatever it claims to measure. */
+const MAX_COLS = 500
+const MAX_ROWS = 200
 
 // ---------------------------------------------------------------------------
 // Types
@@ -58,10 +74,16 @@ interface HistoryTracker {
   resetNext: boolean
 }
 
-/** Where log lines go; `console` in production, a no-op under test. */
-export interface Logger {
-  log(...args: unknown[]): void
-  error(...args: unknown[]): void
+/** Everything this connection holds for one window it is attached to. */
+interface Attachment {
+  windowId: number
+  /** Null until the history that precedes the spawn has been sent. */
+  pty: PtyHandle | null
+  tracker: HistoryTracker
+  /** Pending full history re-send after a resize burst. */
+  reflowTimer: ReturnType<typeof setTimeout> | null
+  /** Polling for the socket buffer to drain while the pty is paused. */
+  drainTimer: ReturnType<typeof setInterval> | null
 }
 
 /** Dependencies injected by the server for each connection. */
@@ -78,12 +100,21 @@ export interface ConnectionDeps {
   tmuxExec?: TmuxExecutor
   logger: Logger
   /**
-   * Claim ownership of a window for this client. Sends terminal:detached
-   * to any previously attached clients and broadcasts updated ownership.
+   * Send the welcome (session list and, if any, ownership). Runs as the
+   * first item of the connection's queue, so nothing is handled before it.
+   */
+  welcome: () => Promise<void>
+  /**
+   * Claim ownership of a window for this client. Detaches any previously
+   * attached clients and broadcasts updated ownership.
    */
   claimWindow: (windowId: number) => void
+  /** Drop this client from one window's ownership and broadcast if that changed anything. */
+  releaseWindow: (windowId: number) => void
   /** Remove this client from all window ownership and broadcast the change. */
   releaseAllWindows: () => void
+  /** Drop every connection's attachment to a window that no longer exists, and its ownership. */
+  dropAttachmentsFor: (windowId: number) => void
   /** User-Agent of the upgrade request, for the connection log. */
   userAgent: string
   /** Commit the server process was started from (server/build.ts). */
@@ -92,101 +123,143 @@ export interface ConnectionDeps {
   servedClientBuild: () => Promise<string | null>
 }
 
+/** What the server keeps per connection, to reach into it from other connections' requests. */
+export interface Connection {
+  /** Kill this connection's pty for a window and forget it; ownership is the caller's business. */
+  dropAttachment: (windowId: number) => void
+}
+
 // ---------------------------------------------------------------------------
-// Validation helpers
+// Validation
 // ---------------------------------------------------------------------------
 
-/** Runtime validation for WebSocket messages -- rejects malformed payloads before they reach handlers. */
-function validateMessage(msg: unknown): ClientMessage {
-  if (typeof msg !== 'object' || msg === null || !('type' in msg)) {
-    throw new Error('Invalid message: missing type')
-  }
-  const { type } = msg as { type: string }
+type FieldType = 'string' | 'number' | 'string?' | 'number?' | 'string|null'
+
+type MessageOf<T extends ClientMessage['type']> = Extract<ClientMessage, { type: T }>
+
+/**
+ * One row per client message type, one entry per field. A type added to
+ * ClientMessage without a row here, or a row missing a field, fails to
+ * compile.
+ */
+type Shapes = {
+  [T in ClientMessage['type']]: { [K in Exclude<keyof MessageOf<T>, 'type'>]-?: FieldType }
+}
+
+const SHAPES: Shapes = {
+  'terminal:input': { windowId: 'number', data: 'string' },
+  'terminal:resize': { windowId: 'number', cols: 'number', rows: 'number' },
+  'terminal:attach': { windowId: 'number', cols: 'number?', rows: 'number?' },
+  'terminal:detach': { windowId: 'number' },
+  'session:list': {},
+  'session:create': { name: 'string?', cwd: 'string?' },
+  'session:kill': { windowId: 'number' },
+  'session:rename': { windowId: 'number', name: 'string' },
+  'files:tree': { cwd: 'string' },
+  'files:read': { path: 'string' },
+  'files:write': { path: 'string', content: 'string' },
+  'files:watch': { cwd: 'string' },
+  'files:unwatch': {},
+  ping: {},
+  'client:hello': { build: 'string|null' },
+}
+
+const FIELD_DESCRIPTIONS: Record<FieldType, string> = {
+  string: 'a string',
+  number: 'a number',
+  'string?': 'a string when given',
+  'number?': 'a number when given',
+  'string|null': 'a string or null',
+}
+
+function fieldOk(value: unknown, type: FieldType): boolean {
+  const isNumber = typeof value === 'number' && Number.isFinite(value)
   switch (type) {
-    case 'terminal:input':
-      if (typeof (msg as any).windowId !== 'number' || typeof (msg as any).data !== 'string')
-        throw new Error('Invalid terminal:input: requires numeric windowId and string data')
-      break
-    case 'terminal:resize':
-      if (typeof (msg as any).windowId !== 'number' || typeof (msg as any).cols !== 'number' || typeof (msg as any).rows !== 'number')
-        throw new Error('Invalid terminal:resize: requires numeric windowId, cols, rows')
-      break
-    case 'terminal:attach':
-      if (typeof (msg as any).windowId !== 'number')
-        throw new Error('Invalid terminal:attach: requires numeric windowId')
-      break
-    case 'session:kill':
-    case 'session:rename':
-      if (typeof (msg as any).windowId !== 'number')
-        throw new Error(`Invalid ${type}: requires numeric windowId`)
-      break
-    case 'client:hello': {
-      const { build } = msg as { build?: unknown }
-      if (build !== null && typeof build !== 'string')
-        throw new Error('Invalid message: client:hello requires build to be a string or null')
-      break
-    }
-    // ping, session:list, session:create, files:* -- minimal validation
-    default:
-      break
+    case 'string': return typeof value === 'string'
+    case 'number': return isNumber
+    case 'string?': return value === undefined || typeof value === 'string'
+    case 'number?': return value === undefined || isNumber
+    case 'string|null': return value === null || typeof value === 'string'
   }
-  return msg as ClientMessage
+}
+
+function isKnownType(type: unknown): type is ClientMessage['type'] {
+  return typeof type === 'string' && Object.prototype.hasOwnProperty.call(SHAPES, type)
+}
+
+/** Check a parsed payload against SHAPES; the error names the message type. */
+export function validateMessage(raw: unknown): ClientMessage {
+  if (typeof raw !== 'object' || raw === null || !('type' in raw)) {
+    throw new ClientError('Invalid message: missing type')
+  }
+  const msg = raw as Record<string, unknown>
+  if (!isKnownType(msg.type)) throw new ClientError(`Invalid message: unknown type ${JSON.stringify(msg.type)}`)
+  const shape: Record<string, FieldType> = SHAPES[msg.type]
+  for (const [field, type] of Object.entries(shape)) {
+    if (!fieldOk(msg[field], type)) {
+      throw new ClientError(`Invalid message: ${msg.type} requires ${field} to be ${FIELD_DESCRIPTIONS[type]}`)
+    }
+  }
+  return msg as unknown as ClientMessage
 }
 
 /**
- * Sanitize error messages before sending them to clients to avoid leaking
- * server-internal paths or other sensitive details.
+ * The fields of an error reply that tie it to the request it answers. Works
+ * on any parsed payload, valid or not, so a rejected message still gets an
+ * error the right consumer can claim.
  */
-function safeErrorMessage(err: unknown): string {
-  if (err instanceof Error) {
-    const msg = err.message
-    if ('code' in err) {
-      const code = (err as NodeJS.ErrnoException).code
-      if (code === 'ENOENT') return 'File or directory not found'
-      if (code === 'EACCES') return 'Permission denied'
-      if (code === 'EISDIR') return 'Path is a directory'
-      if (code === 'ENOTDIR') return 'Not a directory'
-    }
-    // Keep messages from our own Error throws (they're safe)
-    if (msg.startsWith('Invalid path') || msg.startsWith('File too large') || msg.startsWith('Invalid message') || msg.startsWith('Invalid terminal') || msg.startsWith('Invalid session'))
-      return msg
-    return 'Operation failed'
+function correlation(raw: unknown): Pick<ErrorMessage, 'request' | 'windowId' | 'path'> {
+  const msg = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>
+  const fields: Pick<ErrorMessage, 'request' | 'windowId' | 'path'> = {
+    request: isKnownType(msg.type) ? msg.type : 'unknown',
   }
-  return 'Operation failed'
+  if (typeof msg.windowId === 'number') fields.windowId = msg.windowId
+  if (typeof msg.path === 'string') fields.path = msg.path
+  return fields
+}
+
+function clamp(value: number, max: number): number {
+  return Math.max(1, Math.min(max, Math.round(value)))
 }
 
 // ---------------------------------------------------------------------------
 // Connection handler
 // ---------------------------------------------------------------------------
 
+/** One handler per message type; a type without one fails to compile. */
+type Handlers = { [T in ClientMessage['type']]: (msg: MessageOf<T>) => void | Promise<void> }
+
 /**
  * Set up per-connection state and message dispatch for a single WebSocket
- * client. Call this from the `wss.on('connection')` callback after the
- * welcome messages have been sent.
+ * client. Listeners are installed synchronously: a socket that errors
+ * while the welcome is still being assembled must already have someone
+ * listening, or the process goes down with it.
  */
-export function handleConnection(ws: WebSocket, deps: ConnectionDeps): void {
+export function handleConnection(ws: WebSocket, deps: ConnectionDeps): Connection {
   const {
-    remoteAddress, send, broadcast, ptySpawner, tmuxExec, logger, claimWindow, releaseAllWindows,
-    userAgent, serverBuild, servedClientBuild,
+    remoteAddress, send, broadcast, ptySpawner, tmuxExec, logger, welcome, claimWindow, releaseWindow,
+    releaseAllWindows, dropAttachmentsFor, userAgent, serverBuild, servedClientBuild,
   } = deps
+  const log = scopedLog(logger, 'ws')
 
-  // Track pty handles for this connection, keyed by windowId.
-  const ptys = new Map<number, PtyHandle>()
+  /** Set by the close handler; anything still in flight stops at its next check. */
+  let closed = false
 
-  // History sent to this client, keyed by windowId. A tracker lives as
-  // long as the pty it shadows; killing the pty drops it.
-  const trackers = new Map<number, HistoryTracker>()
+  const attachments = new Map<number, Attachment>()
 
-  const dropTracker = (windowId: number): void => {
-    const tracker = trackers.get(windowId)
-    if (!tracker) return
-    if (tracker.timer) clearTimeout(tracker.timer)
-    trackers.delete(windowId)
+  const dropAttachment = (windowId: number): void => {
+    const attachment = attachments.get(windowId)
+    if (!attachment) return
+    attachments.delete(windowId)
+    if (attachment.tracker.timer) clearTimeout(attachment.tracker.timer)
+    if (attachment.reflowTimer) clearTimeout(attachment.reflowTimer)
+    if (attachment.drainTimer) clearInterval(attachment.drainTimer)
+    attachment.pty?.kill()
   }
 
   /** Check the history once output has settled; a burst becomes one check. */
   const scheduleHistory = (windowId: number): void => {
-    const tracker = trackers.get(windowId)
+    const tracker = attachments.get(windowId)?.tracker
     if (!tracker) return
     tracker.dirty = true
     if (tracker.timer || tracker.running) return
@@ -203,7 +276,7 @@ export function handleConnection(ws: WebSocket, deps: ConnectionDeps): void {
    * messages reach the client in order.
    */
   const syncHistory = async (windowId: number, force = false): Promise<void> => {
-    const tracker = trackers.get(windowId)
+    const tracker = attachments.get(windowId)?.tracker
     if (!tracker) return
     if (tracker.running) {
       tracker.dirty = true
@@ -214,9 +287,9 @@ export function handleConnection(ws: WebSocket, deps: ConnectionDeps): void {
     tracker.running = true
     tracker.dirty = false
     tracker.resetNext = false
-    // The tracker can be dropped or replaced (re-attach, close) while tmux
-    // answers; what came back then describes a client state that is gone.
-    const stale = (): boolean => trackers.get(windowId) !== tracker
+    // The attachment can be dropped or replaced (re-attach, close) while
+    // tmux answers; what came back then describes a client state that is gone.
+    const stale = (): boolean => attachments.get(windowId)?.tracker !== tracker
     try {
       const state = await paneHistoryState(windowId, tmuxExec)
       if (stale()) return
@@ -250,210 +323,211 @@ export function handleConnection(ws: WebSocket, deps: ConnectionDeps): void {
       tracker.known = state.size
       send({ type: 'terminal:history', windowId, lines, reset: true })
     } catch (err) {
-      logger.error('[ws] history sync error:', err)
+      log.error('history sync error:', err)
     } finally {
       tracker.running = false
       if (tracker.dirty && !stale()) scheduleHistory(windowId)
     }
   }
 
-  // Track file-panel state for this connection: the cwd most recently
-  // established via files:tree/files:watch, and the active directory
-  // watcher (if any), so files:read/files:write know where to resolve
-  // relative paths and files:watch can be swapped out cleanly.
-  let currentCwd = ''
+  const onOutput = (attachment: Attachment, data: string): void => {
+    // A killed pty can still flush a little (tmux's detach notice); that
+    // belongs to an attachment the client no longer has.
+    if (attachments.get(attachment.windowId) !== attachment) return
+    send({ type: 'terminal:output', windowId: attachment.windowId, data })
+    scheduleHistory(attachment.windowId)
+    if (attachment.drainTimer || ws.bufferedAmount < BACKPRESSURE_HIGH) return
+    attachment.pty?.pause()
+    attachment.drainTimer = setInterval(() => {
+      if (ws.bufferedAmount >= BACKPRESSURE_LOW) return
+      if (attachment.drainTimer) clearInterval(attachment.drainTimer)
+      attachment.drainTimer = null
+      attachment.pty?.resume()
+    }, BACKPRESSURE_POLL_MS)
+  }
+
+  const onExit = (attachment: Attachment): void => {
+    // Our own kill (detach, handoff, close) already forgot the attachment.
+    if (attachments.get(attachment.windowId) !== attachment) return
+    dropAttachment(attachment.windowId)
+    send({ type: 'terminal:exited', windowId: attachment.windowId })
+    releaseWindow(attachment.windowId)
+  }
+
+  const attach = async (msg: MessageOf<'terminal:attach'>): Promise<void> => {
+    const { windowId } = msg
+    dropAttachment(windowId)
+    const attachment: Attachment = {
+      windowId,
+      pty: null,
+      tracker: { known: null, sentTail: [], timer: null, running: false, dirty: false, resetNext: false },
+      reflowTimer: null,
+      drainTimer: null,
+    }
+    attachments.set(windowId, attachment)
+
+    // The client's scrollback is the pane's history; send all of it before
+    // the pty spawns so it sits above the live screen from the first paint.
+    await syncHistory(windowId, true)
+    // The socket may have closed, or the window been killed or taken over,
+    // while tmux answered.
+    if (closed || attachments.get(windowId) !== attachment) return
+
+    claimWindow(windowId)
+    try {
+      attachment.pty = attachToPane(
+        windowId,
+        { onData: (data) => onOutput(attachment, data), onExit: () => onExit(attachment) },
+        {
+          cols: msg.cols === undefined ? undefined : clamp(msg.cols, MAX_COLS),
+          rows: msg.rows === undefined ? undefined : clamp(msg.rows, MAX_ROWS),
+        },
+        ptySpawner,
+      )
+    } catch (err) {
+      // No pty ever existed, so there is nothing to kill; the dispatcher
+      // reports the failure against this attach.
+      attachments.delete(windowId)
+      releaseWindow(windowId)
+      throw err
+    }
+  }
+
+  // File-panel state: the directory files:read/files:write resolve
+  // against (set by files:tree and files:watch) and the active watcher.
+  let currentCwd: string | null = null
   let currentWatcher: Watcher | null = null
 
-  ws.on('message', async (raw) => {
-    try {
-      const msg = validateMessage(JSON.parse(raw.toString()))
-      switch (msg.type) {
-        case 'ping': {
-          send({ type: 'pong' })
-          break
-        }
-        case 'client:hello': {
-          // The one log line that says which bundle a device is running.
-          logger.log(`[ws] hello from ${remoteAddress} build=${msg.build ?? 'none'} ua="${userAgent}"`)
-          send({ type: 'server:hello', serverBuild, clientBuild: await servedClientBuild() })
-          break
-        }
-        case 'session:list': {
-          const wins = await listWindows(tmuxExec)
-          send({ type: 'session:list', windows: wins })
-          break
-        }
-        case 'session:create': {
-          const win = await createWindow(msg.name, msg.cwd, tmuxExec)
-          broadcast({ type: 'session:created', window: win })
-          break
-        }
-        case 'session:kill': {
-          await killWindow(msg.windowId, tmuxExec)
-          broadcast({ type: 'session:killed', windowId: msg.windowId })
-          break
-        }
-        case 'session:rename': {
-          await renameWindow(msg.windowId, msg.name, tmuxExec)
-          broadcast({ type: 'session:renamed', windowId: msg.windowId, name: msg.name })
-          break
-        }
-        case 'terminal:attach': {
-          // Kill any existing pty for this window on this connection.
-          const existing = ptys.get(msg.windowId)
-          if (existing) existing.kill()
-          dropTracker(msg.windowId)
+  const fileRoot = (): string => {
+    if (currentCwd === null) throw new ClientError('No directory selected (send files:tree first)')
+    return currentCwd
+  }
 
-          // The client's scrollback is the pane's history; send all of it
-          // before the pty spawns so it sits above the live screen from
-          // the first paint.
-          trackers.set(msg.windowId, {
-            known: null, sentTail: [], timer: null, running: false, dirty: false, resetNext: false,
-          })
-          await syncHistory(msg.windowId, true)
-
-          // Single-owner handoff: whoever last attached to this window
-          // "owns" it. Notify any previously attached clients (other
-          // connections) that they've been taken over, then replace the
-          // window's client set with just this one. This comes after the
-          // history round-trip so the handoff and the spawn below happen
-          // together, with nothing awaited in between.
-          claimWindow(msg.windowId)
-
-          // pty spawn can throw synchronously (e.g. no tmux binary, or no
-          // real tmux session in a test/dev environment) -- ownership
-          // tracking above should still hold even when this fails.
+  const handlers: Handlers = {
+    ping: () => {
+      send({ type: 'pong' })
+    },
+    'client:hello': async (msg) => {
+      // The one log line that says which bundle a device is running.
+      log.log(`hello from ${remoteAddress} build=${msg.build ?? 'none'} ua="${userAgent}"`)
+      send({ type: 'server:hello', serverBuild, clientBuild: await servedClientBuild() })
+    },
+    'session:list': async () => {
+      send({ type: 'session:list', windows: await listWindows(tmuxExec) })
+    },
+    'session:create': async (msg) => {
+      broadcast({ type: 'session:created', window: await createWindow(msg.name, msg.cwd, tmuxExec) })
+    },
+    'session:kill': async (msg) => {
+      await killWindow(msg.windowId, tmuxExec)
+      dropAttachmentsFor(msg.windowId)
+      broadcast({ type: 'session:killed', windowId: msg.windowId })
+    },
+    'session:rename': async (msg) => {
+      await renameWindow(msg.windowId, msg.name, tmuxExec)
+      broadcast({ type: 'session:renamed', windowId: msg.windowId, name: msg.name })
+    },
+    'terminal:attach': attach,
+    'terminal:detach': (msg) => {
+      dropAttachment(msg.windowId)
+      releaseWindow(msg.windowId)
+    },
+    'terminal:input': (msg) => {
+      attachments.get(msg.windowId)?.pty?.write(msg.data)
+    },
+    'terminal:resize': (msg) => {
+      const attachment = attachments.get(msg.windowId)
+      if (!attachment?.pty) return
+      attachment.pty.resize(clamp(msg.cols, MAX_COLS), clamp(msg.rows, MAX_ROWS))
+      // tmux reflows the history to the new width, so the lines the client
+      // has no longer match; send the whole set again once the burst of
+      // resizes has settled.
+      if (attachment.reflowTimer) clearTimeout(attachment.reflowTimer)
+      attachment.reflowTimer = setTimeout(() => {
+        attachment.reflowTimer = null
+        void syncHistory(msg.windowId, true)
+      }, HISTORY_REFLOW_MS)
+    },
+    'files:tree': async (msg) => {
+      currentCwd = resolveRoot(msg.cwd)
+      const { entries, truncated } = await getTree(currentCwd)
+      send({ type: 'files:tree', entries, truncated })
+    },
+    'files:read': async (msg) => {
+      send({ type: 'files:content', path: msg.path, content: await readFile(fileRoot(), msg.path) })
+    },
+    'files:write': async (msg) => {
+      await writeFile(fileRoot(), msg.path, msg.content)
+      send({ type: 'files:saved', path: msg.path })
+    },
+    'files:watch': (msg) => {
+      const cwd = resolveRoot(msg.cwd)
+      currentWatcher?.close()
+      currentCwd = cwd
+      const watcher = watchDir(cwd, {
+        onChange: async (changedPath) => {
           try {
-            const handle = attachToPane(
-              msg.windowId,
-              (data) => {
-                send({ type: 'terminal:output', windowId: msg.windowId, data })
-                scheduleHistory(msg.windowId)
-              },
-              { cols: msg.cols, rows: msg.rows },
-              ptySpawner,
-            )
-            ptys.set(msg.windowId, handle)
+            send({ type: 'files:changed', path: changedPath, content: await readFile(cwd, changedPath) })
           } catch (err) {
-            logger.error('[ws] pty attach error:', err)
-            send({
-              type: 'error',
-              message: safeErrorMessage(err),
-            })
+            // Gone between the event and the read: report it as the delete it is.
+            if ((err as NodeJS.ErrnoException).code === 'ENOENT') send({ type: 'files:removed', path: changedPath })
+            else log.error('files:watch change handling error:', err)
           }
-          break
-        }
-        case 'terminal:input': {
-          const handle = ptys.get(msg.windowId)
-          if (handle) handle.write(msg.data)
-          break
-        }
-        case 'terminal:resize': {
-          const cols = Math.max(1, Math.min(500, Math.round(msg.cols)))
-          const rows = Math.max(1, Math.min(200, Math.round(msg.rows)))
-          const handle = ptys.get(msg.windowId)
-          if (handle) {
-            handle.resize(cols, rows)
-            // tmux reflows the history to the new width, so the lines the
-            // client has no longer match; send the whole set again once
-            // the reflow has landed.
-            setTimeout(() => {
-              void syncHistory(msg.windowId, true)
-            }, HISTORY_REFLOW_MS)
-          }
-          break
-        }
-        case 'files:tree': {
-          // Validate cwd: resolve to an absolute path and reject traversal.
-          // TODO: in production, validate against the tmux session's actual cwd.
-          const treeCwd = path.resolve(msg.cwd)
-          if (msg.cwd.includes('..')) {
-            throw new Error('Invalid path (path traversal is not allowed)')
-          }
-          // Establish/refresh the cwd for this connection so subsequent
-          // files:read/files:write requests (which only carry a relative
-          // path) know what to resolve against.
-          currentCwd = treeCwd
-          const entries = await getTree(treeCwd)
-          send({ type: 'files:tree', entries })
-          break
-        }
-        case 'files:read': {
-          const content = await readFile(currentCwd, msg.path)
-          send({ type: 'files:content', path: msg.path, content })
-          break
-        }
-        case 'files:write': {
-          await writeFile(currentCwd, msg.path, msg.content)
-          send({ type: 'files:saved', path: msg.path })
-          break
-        }
-        case 'files:watch': {
-          // Validate cwd: resolve to an absolute path and reject traversal.
-          // TODO: in production, validate against the tmux session's actual cwd.
-          const watchCwd = path.resolve(msg.cwd)
-          if (msg.cwd.includes('..')) {
-            throw new Error('Invalid path (path traversal is not allowed)')
-          }
-          // Close any existing watcher for this connection before
-          // starting a new one (e.g. the client switched directories).
-          if (currentWatcher) currentWatcher.close()
-          currentCwd = watchCwd
-          currentWatcher = watchDir(watchCwd, async (changedPath) => {
-            try {
-              const content = await readFile(watchCwd, changedPath)
-              send({ type: 'files:changed', path: changedPath, content })
-            } catch (err) {
-              // E.g. the file was deleted rather than changed -- nothing to
-              // send, but don't let it become an unhandled rejection.
-              logger.error('[ws] files:watch change handling error:', err)
-            }
-          })
-          break
-        }
-        case 'files:unwatch': {
-          if (currentWatcher) {
-            currentWatcher.close()
-            currentWatcher = null
-          }
-          break
-        }
-        default:
-          break
-      }
-    } catch (err) {
-      logger.error('[ws] message handling error:', err)
-      send({
-        type: 'error',
-        message: safeErrorMessage(err),
+        },
+        onRemove: (removedPath) => {
+          send({ type: 'files:removed', path: removedPath })
+        },
       })
+      currentWatcher = watcher
+      // The ack is not awaited: a big directory's initial scan must not
+      // hold up the terminal input queued behind it.
+      void watcher.ready.then(() => {
+        if (currentWatcher === watcher && !closed) send({ type: 'files:watching', cwd })
+      })
+    },
+    'files:unwatch': () => {
+      currentWatcher?.close()
+      currentWatcher = null
+    },
+  }
+
+  const handle = async (text: string): Promise<void> => {
+    if (closed) return
+    let raw: unknown
+    try {
+      raw = JSON.parse(text)
+      const msg = validateMessage(raw)
+      const handler = handlers[msg.type] as (msg: ClientMessage) => void | Promise<void>
+      await handler(msg)
+    } catch (err) {
+      if (!(err instanceof ClientError)) log.error('message handling error:', err)
+      send({ type: 'error', message: safeErrorMessage(err), ...correlation(raw) })
     }
+  }
+
+  // The per-connection queue: the welcome first, then each message after
+  // the one before it has finished. `handle` never rejects, so one failing
+  // message cannot stall the rest.
+  let queue: Promise<void> = welcome().catch((err) => log.error('welcome failed:', err))
+  ws.on('message', (data) => {
+    const text = data.toString()
+    queue = queue.then(() => handle(text))
   })
 
   ws.on('close', () => {
-    logger.log(`[ws] client disconnected (${remoteAddress})`)
-    // Clean up all pty handles for this connection.
-    for (const handle of ptys.values()) {
-      handle.kill()
-    }
-    ptys.clear()
-    for (const tracker of trackers.values()) {
-      if (tracker.timer) clearTimeout(tracker.timer)
-    }
-    trackers.clear()
-
-    // Clean up any active file watcher for this connection.
-    if (currentWatcher) {
-      currentWatcher.close()
-      currentWatcher = null
-    }
-
+    closed = true
+    log.log(`client disconnected (${remoteAddress})`)
+    for (const windowId of [...attachments.keys()]) dropAttachment(windowId)
+    currentWatcher?.close()
+    currentWatcher = null
     // Drop this connection from ownership tracking and let everyone else
     // know the ownership snapshot changed.
     releaseAllWindows()
   })
 
   ws.on('error', (err) => {
-    logger.error('[ws] connection error:', err)
+    log.error('connection error:', err)
   })
+
+  return { dropAttachment }
 }

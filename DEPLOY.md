@@ -36,8 +36,9 @@ build keeps the previous `dist/` serving. Never run `pm2 restart` or
 ## Network
 
 Nest listens on port 3000 on every interface (`ecosystem.config.cjs`) and
-has no authentication: it assumes a private network. Expose it over
-Tailscale:
+has no authentication: it assumes a private network. Set `HOST` to bind
+one interface instead (`HOST=127.0.0.1` keeps it local; `PORT` picks the
+port). Expose it over Tailscale:
 
 ```bash
 tailscale serve --bg 3000

@@ -15,7 +15,8 @@ import type { WebSocket as ServerSocket } from 'ws'
 import { startServer, type ServerOptions } from '../index.ts'
 import { SEP, type TmuxExecutor } from '../tmux.ts'
 import type { PtySpawner } from '../pty-bridge.ts'
-import { handleConnection, type ConnectionDeps, type Logger } from '../ws-handler.ts'
+import { handleConnection, type ConnectionDeps } from '../ws-handler.ts'
+import type { Logger } from '../log.ts'
 
 /** A parsed protocol message; the fields beyond `type` are whatever it carries. */
 export type Msg = { type: string } & Record<string, any>
@@ -275,6 +276,8 @@ export interface HandledConnection {
   ptys: FakePty[]
   /** Window ids handed to claimWindow, in order. */
   claimed: number[]
+  /** Window ids handed to releaseWindow, in order. */
+  releasedWindows: number[]
   /** How often releaseAllWindows was called. */
   released: number
 }
@@ -305,8 +308,10 @@ export function handleTestConnection(overrides: Partial<ConnectionDeps> = {}): H
       errors.push(args)
     },
   }
-  const conn: HandledConnection = { socket, sent, broadcasts, errors, tmux, ptys, claimed, released: 0 }
-  handleConnection(socket as unknown as ServerSocket, {
+  const conn: HandledConnection = {
+    socket, sent, broadcasts, errors, tmux, ptys, claimed, releasedWindows: [], released: 0,
+  }
+  const connection = handleConnection(socket as unknown as ServerSocket, {
     remoteAddress: 'test',
     send: (msg) => {
       sent.push(msg as Msg)
@@ -317,12 +322,18 @@ export function handleTestConnection(overrides: Partial<ConnectionDeps> = {}): H
     ptySpawner: spawner,
     tmuxExec: tmux.exec,
     logger,
+    welcome: async () => {},
     claimWindow: (windowId) => {
       claimed.push(windowId)
+    },
+    releaseWindow: (windowId) => {
+      conn.releasedWindows.push(windowId)
     },
     releaseAllWindows: () => {
       conn.released++
     },
+    // This is the only connection, so "every connection" is this one.
+    dropAttachmentsFor: (windowId) => connection.dropAttachment(windowId),
     userAgent: 'test',
     serverBuild: 'test',
     servedClientBuild: async () => null,

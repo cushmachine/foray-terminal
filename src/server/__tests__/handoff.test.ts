@@ -45,6 +45,10 @@ test('terminal:attach: a second client taking a window detaches the first', asyn
     assert.equal(detachedMsg.windowId, 0)
     assert.equal(detachedMsg.reason, 'taken-over')
     assert.equal(ptys.length, 2, 'each attach spawns its own pty')
+    // The loser's pty is gone too, not left as a second tmux client that
+    // keeps the session sized to a screen nobody is looking at.
+    assert.equal(ptys[0].killed, true, 'the taken-over client\'s pty is killed server-side')
+    assert.equal(ptys[1].killed, false)
 
     ws1.close()
     ws2.close()

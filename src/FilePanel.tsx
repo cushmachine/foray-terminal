@@ -198,6 +198,8 @@ export function FilePanel({ openFile, onOpenFile, onClose, isMobile, width, onRe
           setEditing(false)
           break
         case 'error':
+          // Only this panel's own requests; terminal and session errors are not ours to show.
+          if (!msg.request.startsWith('files:')) break
           if (loadingPathRef.current) {
             setFileError(msg.message)
           } else {

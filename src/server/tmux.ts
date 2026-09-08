@@ -8,6 +8,7 @@ import { execFile as _execFile } from 'node:child_process'
 import os from 'node:os'
 import { promisify } from 'node:util'
 import type { TmuxWindow } from '../shared/protocol.ts'
+import { ClientError } from './errors.ts'
 import type { PaneHistoryState } from './history.ts'
 
 const promisedExecFile = promisify(_execFile)
@@ -53,6 +54,28 @@ const FORMAT = [
 const SHELLS = new Set(['bash', 'zsh', 'sh', 'fish', 'dash'])
 
 /**
+ * The tmux session name for a user-facing session name. tmux rejects '.'
+ * and ':' (they are target syntax), so both become '-'. Create and rename
+ * go through here so the same input always lands on the same name.
+ */
+export function sessionNameFor(name: string): string {
+  const safe = name.replace(/[.:]/g, '-')
+  if (!safe) throw new ClientError('Invalid session name')
+  return `${PREFIX}${safe}`
+}
+
+/** Whether a tmux failure's stderr or message mentions `text`. */
+function failureMentions(err: unknown, text: string): boolean {
+  const e = err as { stderr?: string; message?: string } | null
+  return Boolean(e?.stderr?.includes(text) || e?.message?.includes(text))
+}
+
+/** True when tmux failed because its server is not running (no sessions at all). */
+const isNoServer = (err: unknown): boolean => failureMentions(err, 'no server running')
+
+const isDuplicate = (err: unknown): boolean => failureMentions(err, 'duplicate session')
+
+/**
  * Parse one FORMAT line, e.g. `$5<SEP>nest_shell<SEP>/root<SEP>nest<SEP>bash<SEP>`.
  * Only returns sessions with the "nest_" prefix.
  *
@@ -78,23 +101,27 @@ function parseLine(line: string, hostname: string): TmuxWindow | null {
 
 /**
  * List all Nest sessions (tmux sessions with the "nest_" prefix).
- * Returns [] if tmux is not running or no Nest sessions exist.
+ * Returns [] when no Nest sessions exist or the tmux server is not
+ * running; any other tmux failure is thrown, so a caller can tell "no
+ * sessions" from "tmux is broken" and keep its last good list.
  */
 export async function listWindows(
   exec: TmuxExecutor = defaultExec,
   hostname: string = os.hostname(),
 ): Promise<TmuxWindow[]> {
+  let stdout: string
   try {
-    const { stdout } = await exec('tmux', ['list-sessions', '-F', FORMAT])
-    if (!stdout.trim()) return []
-    return stdout
-      .trim()
-      .split('\n')
-      .map((line) => parseLine(line, hostname))
-      .filter((w): w is TmuxWindow => w !== null)
-  } catch {
-    return []
+    ;({ stdout } = await exec('tmux', ['list-sessions', '-F', FORMAT]))
+  } catch (err) {
+    if (isNoServer(err)) return []
+    throw err
   }
+  if (!stdout.trim()) return []
+  return stdout
+    .trim()
+    .split('\n')
+    .map((line) => parseLine(line, hostname))
+    .filter((w): w is TmuxWindow => w !== null)
 }
 
 /**
@@ -107,8 +134,7 @@ export async function createWindow(
   exec: TmuxExecutor = defaultExec,
   hostname: string = os.hostname(),
 ): Promise<TmuxWindow> {
-  const displayName = name || 'bash'
-  let sessionName = `${PREFIX}${displayName}`
+  const sessionName = sessionNameFor(name || 'bash')
 
   // Handle name collisions by appending a number.
   let attempt = 0
@@ -132,21 +158,20 @@ export async function createWindow(
       if (name) {
         await exec('tmux', ['set', '-t', actualName, NAMED_OPTION, '1']).catch(() => {})
       }
-      await enableExtendedKeys(exec)
 
       const parsed = parseLine(stdout.trim(), hostname)
       if (!parsed) throw new Error(`Failed to parse new session output: ${stdout}`)
       // The -P line was printed before the option above was set.
       return { ...parsed, named: Boolean(name) }
-    } catch (e: any) {
-      if (e?.stderr?.includes('duplicate session') || e?.message?.includes('duplicate session')) {
+    } catch (err) {
+      if (isDuplicate(err)) {
         attempt++
         continue
       }
-      throw e
+      throw err
     }
   }
-  throw new Error(`Could not create session: too many name collisions for ${sessionName}`)
+  throw new ClientError(`Could not create session: too many name collisions for ${sessionName}`)
 }
 
 /**
@@ -155,11 +180,17 @@ export async function createWindow(
  * that as Shift+Enter and hands the pane a bare carriage return, so Claude
  * Code inside submits instead of inserting a newline. These are server
  * options (global to the tmux server) and idempotent; a tmux too old to
- * know them just keeps its defaults.
+ * know them just keeps its defaults. Returns false when the tmux server
+ * was not running to take them: the caller tries again once it is.
  */
-export async function enableExtendedKeys(exec: TmuxExecutor = defaultExec): Promise<void> {
-  await exec('tmux', ['set', '-s', 'extended-keys', 'always']).catch(() => {})
-  await exec('tmux', ['set', '-s', 'extended-keys-format', 'csi-u']).catch(() => {})
+export async function enableExtendedKeys(exec: TmuxExecutor = defaultExec): Promise<boolean> {
+  try {
+    await exec('tmux', ['set', '-s', 'extended-keys', 'always'])
+    await exec('tmux', ['set', '-s', 'extended-keys-format', 'csi-u'])
+    return true
+  } catch (err) {
+    return !isNoServer(err)
+  }
 }
 
 /**
@@ -225,9 +256,6 @@ export async function renameWindow(
   name: string,
   exec: TmuxExecutor = defaultExec,
 ): Promise<void> {
-  // tmux session names cannot contain periods or colons
-  const safeName = name.replace(/[.:]/g, '-')
-  if (!safeName) throw new Error('Invalid session name')
-  await exec('tmux', ['rename-session', '-t', `$${sessionId}`, `${PREFIX}${safeName}`])
+  await exec('tmux', ['rename-session', '-t', `$${sessionId}`, sessionNameFor(name)])
   await exec('tmux', ['set', '-t', `$${sessionId}`, NAMED_OPTION, '1'])
 }

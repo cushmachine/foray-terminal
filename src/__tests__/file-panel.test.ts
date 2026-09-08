@@ -15,7 +15,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { connect, startTestServer, tmpDir, waitForType, type Msg } from '../server/__tests__/helpers.ts'
+import { connect, startTestServer, tmpDir, waitForType } from '../server/__tests__/helpers.ts'
 import { createSaveKeymap } from '../MarkdownEditor.tsx'
 
 // ---------------------------------------------------------------------------
@@ -160,22 +160,6 @@ test('server rejects files:read path traversal with an error message', async () 
 // Test 5: files:watch -> on-disk change -> files:changed
 // ---------------------------------------------------------------------------
 
-/**
- * files:watch has no acknowledgement, so a write racing chokidar's initial
- * scan can go unseen; keep writing until the watcher reports it. Writes
- * are spaced past the 300 ms per-file debounce so they don't keep resetting it.
- */
-async function writeUntilChanged(ws: WebSocket, file: string, content: string): Promise<Msg> {
-  const changed = waitForType(ws, 'files:changed')
-  await fs.writeFile(file, content)
-  const retry = setInterval(() => void fs.writeFile(file, content), 500)
-  try {
-    return await changed
-  } finally {
-    clearInterval(retry)
-  }
-}
-
 test('server handles files:watch and pushes files:changed on external file changes', async () => {
   const { url, close } = await startTestServer()
   const dir = await tmpDir('nest-file-panel-')
@@ -185,8 +169,14 @@ test('server handles files:watch and pushes files:changed on external file chang
 
     const { ws } = await connect(url)
     try {
+      // A write before the watcher's initial scan is done can go unseen;
+      // files:watching says the scan is done.
+      const watching = waitForType(ws, 'files:watching')
       ws.send(JSON.stringify({ type: 'files:watch', cwd: dir }))
-      const changed = await writeUntilChanged(ws, file, 'updated externally')
+      assert.equal((await watching).cwd, dir)
+      const changedPromise = waitForType(ws, 'files:changed')
+      await fs.writeFile(file, 'updated externally')
+      const changed = await changedPromise
 
       assert.equal(changed.type, 'files:changed')
       assert.equal(changed.path, 'live.txt')
