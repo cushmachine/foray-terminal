@@ -3,11 +3,13 @@
 //
 // `reduceFileStore` is pure so the save flow and the changed-on-disk
 // conflict are unit tested without a DOM. `useFileStore` wires it to the
-// socket: the server forgets this connection's cwd and watcher when the
-// socket closes, so the hook re-establishes both on every reconnect.
+// socket: the listing and the watcher are held only while the panel is
+// showing (see `activation`), and the server forgets this connection's
+// cwd and watcher when the socket closes, so the hook re-establishes
+// both whenever the panel is shown on a live socket.
 
 import { useEffect, useMemo, useReducer, useRef } from 'react'
-import type { FileNode, ServerMessage } from '../shared/protocol'
+import type { ClientMessage, FileNode, ServerMessage } from '../shared/protocol'
 import { useSocketContext } from '../SocketContext'
 
 export interface DiskChange {
@@ -41,8 +43,14 @@ export interface FileStoreState {
 
 export type FileStoreAction =
   | { type: 'message'; msg: ServerMessage }
-  /** Reconnect or new cwd: the server's tree, watcher and contents are gone. */
+  /** A new cwd: the tree and every cached file are about another directory. */
   | { type: 'reset' }
+  /**
+   * The same cwd listed again (the panel shown again, or a reconnect): the
+   * tree stays in view until the fresh one arrives, and the cached files
+   * go, since they may have changed while nothing was watching.
+   */
+  | { type: 'refresh' }
   | { type: 'select'; path: string | null }
   | { type: 'toggle-dir'; path: string }
   | { type: 'edit' }
@@ -146,11 +154,24 @@ function reduceMessage(state: FileStoreState, msg: ServerMessage): FileStoreStat
   switch (msg.type) {
     case 'files:tree':
       return { ...state, tree: msg.entries, truncated: msg.truncated === true, treeError: null }
-    case 'files:content':
-      return {
+    case 'files:content': {
+      const next: FileStoreState = {
         ...withContent(state, msg.path, msg.content),
         fileError: msg.path === state.openFile ? null : state.fileError,
       }
+      // Read again after a spell with no watcher (the panel was hidden),
+      // the open file can turn out changed under an edit in progress: the
+      // same conflict a files:changed reports. The cached copy is what the
+      // edit started from; a read matching the edit is our own save.
+      const cached = state.contents[msg.path]
+      if (
+        msg.path === state.openFile && state.editing
+        && cached !== undefined && msg.content !== cached && msg.content !== state.editContent
+      ) {
+        next.diskChange = { path: msg.path, content: msg.content }
+      }
+      return next
+    }
     case 'files:changed': {
       // Cache every watched file, open or not, so reopening is instant.
       const next: FileStoreState = {
@@ -194,8 +215,7 @@ export function reduceFileStore(state: FileStoreState, action: FileStoreAction):
     case 'message':
       return reduceMessage(state, action.msg)
     case 'reset':
-      // The edit in progress survives a reconnect; everything the server
-      // held does not.
+      // The edit in progress survives; everything about the directory does not.
       return {
         ...state,
         tree: null,
@@ -205,6 +225,15 @@ export function reduceFileStore(state: FileStoreState, action: FileStoreAction):
         fileError: null,
         removed: false,
       }
+    case 'refresh': {
+      // The open file's copy stays so the re-read that follows can tell a
+      // change on disk from the content the edit started with.
+      const { openFile } = state
+      const contents = openFile !== null && openFile in state.contents
+        ? { [openFile]: state.contents[openFile] }
+        : {}
+      return { ...state, contents, fileError: null, removed: false }
+    }
     case 'select':
       return { ...state, ...NOT_EDITING, openFile: action.path, fileError: null, removed: false }
     case 'toggle-dir':
@@ -251,9 +280,25 @@ export interface FileStoreActions {
 export type FileStore = FileStoreState & FileStoreActions
 
 /**
- * The panel's state, bound to the socket. `active` gates the server side:
- * nothing is listed or watched until the panel has been shown once, so a
- * page that never opens it costs the server no directory walk.
+ * What the hook sends when the panel is shown on a live socket. `listed`
+ * is the cwd whose tree the store holds (null for none): the same cwd is
+ * refreshed behind the tree in view, another one starts over. The open
+ * file is read again either way; its cached copy may be stale.
+ */
+export function activation(listed: string | null, cwd: string, openFile: string | null): {
+  action: 'reset' | 'refresh'
+  messages: ClientMessage[]
+} {
+  const messages: ClientMessage[] = [{ type: 'files:tree', cwd }, { type: 'files:watch', cwd }]
+  if (openFile !== null) messages.push({ type: 'files:read', path: openFile })
+  return { action: listed === cwd ? 'refresh' : 'reset', messages }
+}
+
+/**
+ * The panel's state, bound to the socket. `active` is whether the panel is
+ * showing: the server lists and watches only for a panel in view, so a
+ * hidden one costs no directory walk and no pushed file contents. The
+ * tree, the expansion and any edit in progress are kept while hidden.
  */
 export function useFileStore(cwd: string, openFile: string | null, active: boolean): FileStore {
   const { send, onMessage, status } = useSocketContext()
@@ -280,17 +325,21 @@ export function useFileStore(cwd: string, openFile: string | null, active: boole
     }
   }, [openFile])
 
-  // List and watch whenever the target directory changes or the socket
-  // comes back after a drop. Only the connected state re-runs it, so a
-  // disconnect does not wipe the tree the user is looking at.
+  // The cwd whose tree the store holds, so showing the panel again for
+  // the same directory refreshes behind the tree rather than blanking it.
+  const listedRef = useRef<string | null>(null)
+
+  // List and watch while the panel is showing on a live socket; stop
+  // watching when it is hidden. A cwd change while hidden sends nothing
+  // until the panel is next shown. Only the connected state re-runs it,
+  // so a disconnect does not wipe the tree the user is looking at.
   const connected = status === 'connected'
   useEffect(() => {
     if (!connected || !active) return
-    dispatch({ type: 'reset' })
-    sendRef.current({ type: 'files:tree', cwd })
-    sendRef.current({ type: 'files:watch', cwd })
-    const file = openFileRef.current
-    if (file) sendRef.current({ type: 'files:read', path: file })
+    const { action, messages } = activation(listedRef.current, cwd, openFileRef.current)
+    listedRef.current = cwd
+    dispatch({ type: action })
+    for (const msg of messages) sendRef.current(msg)
     return () => {
       sendRef.current({ type: 'files:unwatch' })
     }

@@ -119,15 +119,26 @@ export function pendingCreateAfter(pending: boolean, msg: ServerMessage): boolea
 export interface SessionsState {
   sessions: Session[]
   active: number | null
+  /** This client asked for a session and is waiting for it; see pendingCreateAfter. */
+  pendingCreate: boolean
+  /**
+   * Counts the times this client picked a session to look at: a tap in the
+   * list, or the arrival of one it asked for. A list or a kill moving the
+   * active session does not count. App brings the terminal into view when
+   * it changes.
+   */
+  picked: number
 }
+
+export const NO_SESSIONS: SessionsState = { sessions: [], active: null, pendingCreate: false, picked: 0 }
 
 export type SessionsAction =
   | { type: 'select'; id: number }
+  /** This client asked the server for a session. */
+  | { type: 'create' }
   | {
       type: 'message'
       msg: ServerMessage
-      /** True when this client asked for the session a session:created carries. */
-      own: boolean
       /** The stored last-session id, consulted when a list arrives. */
       savedRaw: string | null
     }
@@ -136,21 +147,34 @@ export type SessionsAction =
  * The list and the active session move together: a kill or a new list
  * that removes the active session must pick a replacement in the same
  * step, so there is never a render pointing at a session that is gone.
- * Returns the same state reference when nothing changed.
+ * Every server message goes through here, errors included, so the create
+ * flag clears on a failed create. Returns the same state reference when
+ * nothing changed.
  */
 export function reduceSessions(state: SessionsState, action: SessionsAction): SessionsState {
   if (action.type === 'select') {
-    return state.active === action.id ? state : { ...state, active: action.id }
+    // Picking the session already in view still counts: on a phone that
+    // closes the drawer.
+    return { ...state, active: action.id, picked: state.picked + 1 }
+  }
+  if (action.type === 'create') {
+    return state.pendingCreate ? state : { ...state, pendingCreate: true }
   }
   const { msg } = action
+  const own = state.pendingCreate && msg.type === 'session:created'
+  const pendingCreate = pendingCreateAfter(state.pendingCreate, msg)
   const sessions = applySessionMessage(state.sessions, msg)
   let active = state.active
+  let picked = state.picked
   switch (msg.type) {
     case 'session:list':
       active = activeAfterList(sessions, state.active, action.savedRaw)
       break
     case 'session:created':
-      if (action.own) active = msg.window.id
+      if (own) {
+        active = msg.window.id
+        picked++
+      }
       break
     case 'session:killed':
       active = nextActiveAfterKill(state.sessions, state.active, msg.windowId)
@@ -158,6 +182,9 @@ export function reduceSessions(state: SessionsState, action: SessionsAction): Se
     default:
       break
   }
-  if (sessions === state.sessions && active === state.active) return state
-  return { sessions, active }
+  if (
+    sessions === state.sessions && active === state.active
+    && pendingCreate === state.pendingCreate && picked === state.picked
+  ) return state
+  return { sessions, active, pendingCreate, picked }
 }

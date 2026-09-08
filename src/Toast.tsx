@@ -1,4 +1,22 @@
 import { useEffect } from 'react'
+import type { ErrorMessage } from './shared/protocol'
+
+/** Plain words for the requests whose failures reach the toast. */
+const REQUEST_LABELS: Partial<Record<ErrorMessage['request'], string>> = {
+  'session:create': 'create the session',
+  'session:kill': 'kill the session',
+  'session:rename': 'rename the session',
+  'session:list': 'list the sessions',
+  'terminal:attach': 'attach',
+  'client:hello': 'introduce this page to the server',
+  ping: 'reach the server',
+}
+
+/** The toast for a failed request: what could not be done, then why. */
+export function failureText(msg: ErrorMessage): string {
+  const label = REQUEST_LABELS[msg.request] ?? `handle ${msg.request}`
+  return `Could not ${label}: ${msg.message}`
+}
 
 interface ToastProps {
   message: string | null

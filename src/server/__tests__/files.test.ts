@@ -11,7 +11,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import chokidar, { type ChokidarOptions, type FSWatcher } from 'chokidar'
 import { getTree, readFile, writeFile, watchDir, type Watcher } from '../files.ts'
+import type { Logger } from '../log.ts'
 import type { FileNode } from '../../shared/protocol.ts'
 import { connect, handleTestConnection, startTestServer, tmpDir, until, waitForType } from './helpers.ts'
 
@@ -90,7 +92,7 @@ test('getTree: respects .gitignore', async () => {
   }
 })
 
-test('getTree: always skips node_modules, .git, dist, .DS_Store', async () => {
+test('getTree: always skips node_modules, .git, dist, .DS_Store and tool caches, anywhere', async () => {
   const dir = await tmpDir()
   try {
     await fs.mkdir(path.join(dir, 'src'), { recursive: true })
@@ -102,14 +104,17 @@ test('getTree: always skips node_modules, .git, dist, .DS_Store', async () => {
     await fs.mkdir(path.join(dir, 'dist'), { recursive: true })
     await fs.writeFile(path.join(dir, 'dist', 'bundle.js'), '')
     await fs.writeFile(path.join(dir, '.DS_Store'), '')
+    await fs.mkdir(path.join(dir, 'src', '__pycache__'), { recursive: true })
+    await fs.writeFile(path.join(dir, 'src', '__pycache__', 'a.pyc'), '')
+    await fs.mkdir(path.join(dir, '.venv', 'lib'), { recursive: true })
+    await fs.writeFile(path.join(dir, '.venv', 'lib', 'x.py'), '')
 
     const { entries } = await getTree(dir)
     const names = collectNames(entries)
 
-    assert.ok(!names.includes('node_modules'))
-    assert.ok(!names.includes('.git'))
-    assert.ok(!names.includes('dist'))
-    assert.ok(!names.includes('.DS_Store'))
+    for (const skipped of ['node_modules', '.git', 'dist', '.DS_Store', '__pycache__', 'a.pyc', '.venv', 'x.py']) {
+      assert.ok(!names.includes(skipped), `${skipped} is listed`)
+    }
     assert.ok(names.includes('src'))
     assert.ok(names.includes('a.ts'))
   } finally {
@@ -248,12 +253,18 @@ test('getTree stops at the node cap and says so', async () => {
   }
 })
 
-test('files:tree carries the truncation flag and skips root dot-dirs', async () => {
+// A home directory has .cache, .npm and friends (huge) next to .claude
+// (what the user came to read): the skip-list names the heavy ones and
+// other dot-directories are shown.
+test('files:tree carries the truncation flag, skips the heavy dot-dirs and shows the rest', async () => {
   const dir = await tmpDir()
   const { url, close } = await startTestServer()
   try {
     await fs.mkdir(path.join(dir, '.cache'))
     await fs.writeFile(path.join(dir, '.cache', 'junk'), '')
+    await fs.mkdir(path.join(dir, '.npm'))
+    await fs.mkdir(path.join(dir, '.claude', 'projects'), { recursive: true })
+    await fs.writeFile(path.join(dir, '.claude', 'projects', 'memory.md'), '')
     await fs.mkdir(path.join(dir, 'src', '.hidden'), { recursive: true })
     await fs.writeFile(path.join(dir, 'src', '.hidden', 'kept'), '')
     await fs.writeFile(path.join(dir, '.env'), '')
@@ -265,7 +276,9 @@ test('files:tree carries the truncation flag and skips root dot-dirs', async () 
     const entries = msg.entries as FileNode[]
 
     assert.equal(msg.truncated, false)
-    assert.equal(entries.find((n) => n.name === '.cache'), undefined, 'root dot-dirs are skipped')
+    assert.equal(entries.find((n) => n.name === '.cache'), undefined, '.cache is on the skip-list')
+    assert.equal(entries.find((n) => n.name === '.npm'), undefined, '.npm is on the skip-list')
+    assert.ok(findNode(entries, 'memory.md'), '.claude and its contents are shown')
     assert.ok(entries.find((n) => n.name === '.env'), 'root dot-files stay')
     assert.ok(findNode(entries, '.hidden'), 'dot-dirs below the root stay')
     ws.close()
@@ -301,8 +314,44 @@ test('files:tree and files:watch reject a relative cwd', async () => {
 })
 
 // ---------------------------------------------------------------------------
-// Watching: the ack, deletes
+// Watching: the ack, deletes, failures
 // ---------------------------------------------------------------------------
+
+// chokidar reports inotify's watch limit (ENOSPC) and unreadable
+// directories as 'error' events. An EventEmitter with no 'error' listener
+// throws on emit, from inside chokidar's fs callback: an unhandled
+// rejection, and the server exits.
+test('watchDir: a watcher error is logged, not thrown', async () => {
+  const dir = await tmpDir()
+  const errors: unknown[][] = []
+  const logger: Logger = { log: () => {}, error: (...args) => errors.push(args) }
+  let fsw: FSWatcher | undefined
+  let options: ChokidarOptions | undefined
+  const watch: typeof chokidar.watch = (paths, opts) => {
+    options = opts
+    fsw = chokidar.watch(paths, opts)
+    return fsw
+  }
+  let watcher: Watcher | undefined
+  try {
+    watcher = watchDir(dir, { onChange: () => {}, onRemove: () => {} }, { logger, watch, maxDepth: 5 })
+    await watcher.ready
+    assert.ok(fsw)
+    const failure = Object.assign(new Error('ENOSPC: System limit for number of file watchers reached'), { code: 'ENOSPC' })
+    assert.doesNotThrow(() => fsw!.emit('error', failure))
+    assert.equal(errors.length, 1)
+    assert.equal(errors[0][1], failure)
+
+    // The walk lists a file under four directories at most (depth 5); the
+    // watcher stops there too, and a directory it may not read is skipped
+    // rather than reported.
+    assert.equal(options?.depth, 4)
+    assert.equal(options?.ignorePermissionErrors, true)
+  } finally {
+    watcher?.close()
+    await fs.rm(dir, { recursive: true, force: true })
+  }
+})
 
 test('deleting a watched file produces files:removed, not a logged error', { timeout: 15_000 }, async () => {
   const dir = await tmpDir()

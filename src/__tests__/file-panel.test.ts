@@ -12,16 +12,19 @@
 //     (no DOM available in this test runner)
 //  7. The panel's store reducer: tree, expansion, the save flow, the
 //     changed-on-disk conflict, removed files, error routing
-//  8. Escape target filtering and the panel width clamp
+//  8. The hook's server side: what showing the panel sends, and what a
+//     hidden panel costs (nothing)
+//  9. Escape target filtering and the panel width clamp
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { connect, startTestServer, tmpDir, waitForType } from '../server/__tests__/helpers.ts'
+import { connect, handleTestConnection, startTestServer, tmpDir, until, waitForType } from '../server/__tests__/helpers.ts'
 import { createSaveKeymap, docReplacement } from '../MarkdownEditor.tsx'
 import {
   INITIAL_FILE_STORE,
+  activation,
   insertFile,
   reduceFileStore,
   removeNode,
@@ -321,11 +324,49 @@ test('store: save without an edit in progress is a no-op', () => {
   assert.equal(run([{ type: 'save' }], state), state)
 })
 
-test('store: the edit survives a reconnect reset; the cache does not', () => {
+test('store: the edit survives a reset; the tree and the cache do not', () => {
   const state = run([{ type: 'reset' }], editingReadme())
   assert.equal(state.editing, true)
   assert.equal(state.editContent, '# hi there')
   assert.deepEqual(state.contents, {})
+  assert.equal(state.tree, null)
+})
+
+// Showing the panel again for the same directory: the tree stays up until
+// the fresh one lands, so reopening is instant; cached files go, since
+// nothing watched them while the panel was hidden.
+test('store: refresh keeps the tree and the open file\'s copy, drops the other cached files', () => {
+  const state = run([
+    msg({ type: 'files:content', path: 'docs/a.md', content: 'a' }),
+    { type: 'refresh' },
+  ], editingReadme())
+  assert.deepEqual(state.tree, TREE)
+  assert.deepEqual(state.contents, { 'README.md': '# hi' })
+  assert.equal(state.editing, true)
+  assert.equal(state.editContent, '# hi there')
+  const nothingOpen = run([{ type: 'select', path: null }, { type: 'refresh' }], state)
+  assert.deepEqual(nothingOpen.contents, {})
+})
+
+test('store: a re-read that finds the open file changed under an edit is the disk conflict', () => {
+  const changed = run([msg({ type: 'files:content', path: 'README.md', content: '# from disk' })], editingReadme())
+  assert.deepEqual(changed.diskChange, { path: 'README.md', content: '# from disk' })
+  assert.equal(changed.editContent, '# hi there')
+  assert.equal(changed.contents['README.md'], '# from disk')
+
+  const same = run([msg({ type: 'files:content', path: 'README.md', content: '# hi' })], editingReadme())
+  assert.equal(same.diskChange, null, 'unchanged on disk')
+  const ours = run([
+    { type: 'save' },
+    msg({ type: 'files:content', path: 'README.md', content: '# hi there' }),
+  ], editingReadme())
+  assert.equal(ours.diskChange, null, 'our own save read back')
+  const first = run([
+    { type: 'select', path: 'docs/a.md' },
+    { type: 'edit' },
+    msg({ type: 'files:content', path: 'docs/a.md', content: 'x' }),
+  ])
+  assert.equal(first.diskChange, null, 'the first read has nothing to differ from')
 })
 
 test('store: files:changed while editing raises the conflict notice; reload takes the disk copy', () => {
@@ -435,7 +476,57 @@ test('store: edit and cancel', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Test 8: editor sync, Escape targets, panel width
+// Test 8: the hook's server side
+// ---------------------------------------------------------------------------
+
+test('activation: the same cwd is refreshed behind the tree; another one starts over', () => {
+  const first = activation(null, '/work', null)
+  assert.equal(first.action, 'reset')
+  assert.deepEqual(first.messages, [{ type: 'files:tree', cwd: '/work' }, { type: 'files:watch', cwd: '/work' }])
+
+  const again = activation('/work', '/work', 'README.md')
+  assert.equal(again.action, 'refresh')
+  assert.deepEqual(again.messages, [
+    { type: 'files:tree', cwd: '/work' },
+    { type: 'files:watch', cwd: '/work' },
+    { type: 'files:read', path: 'README.md' },
+  ], 'the open file is read again: its copy may be stale')
+
+  assert.equal(activation('/work', '/other', null).action, 'reset')
+})
+
+// The hook sends files:unwatch when the panel is hidden and files:watch
+// when it is shown again; the server side of that pairing.
+test('a change while unwatched is not pushed; watching again resumes the pushes', { timeout: 15_000 }, async () => {
+  const dir = await tmpDir()
+  const conn = handleTestConnection()
+  const acks = () => conn.sent.filter((m) => m.type === 'files:watching').length
+  const changes = () => conn.sent.filter((m) => m.type === 'files:changed').map((m) => m.path)
+  try {
+    await fs.writeFile(path.join(dir, 'a.txt'), 'a')
+    conn.socket.receive({ type: 'files:watch', cwd: dir })
+    await until(() => acks() === 1, 'the first files:watching ack', 10_000)
+
+    conn.socket.receive({ type: 'files:unwatch' })
+    await fs.writeFile(path.join(dir, 'a.txt'), 'unseen')
+    // Longer than the watcher's debounce; a push would have arrived.
+    await new Promise((resolve) => setTimeout(resolve, 600))
+    assert.deepEqual(changes(), [], 'nothing is pushed to a client that stopped watching')
+
+    conn.socket.receive({ type: 'files:watch', cwd: dir })
+    await until(() => acks() === 2, 'the second files:watching ack', 10_000)
+    await fs.writeFile(path.join(dir, 'a.txt'), 'seen')
+    await until(() => changes().length > 0, 'the change to be pushed', 3000)
+    assert.deepEqual(changes(), ['a.txt'])
+    assert.deepEqual(conn.errors, [])
+  } finally {
+    conn.socket.emit('close')
+    await fs.rm(dir, { recursive: true, force: true })
+  }
+})
+
+// ---------------------------------------------------------------------------
+// Test 9: editor sync, Escape targets, panel width
 // ---------------------------------------------------------------------------
 
 test('docReplacement: equal content is a no-op, otherwise the whole doc is replaced', () => {

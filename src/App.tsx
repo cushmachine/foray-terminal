@@ -8,7 +8,7 @@ import { FilePanel } from './files/FilePanel'
 import { useSocket } from './hooks/useSocket'
 import { SocketProvider } from './SocketContext'
 import { useAppHeight } from './hooks/useAppHeight'
-import { openedWith, pendingCreateAfter, reduceSessions, type SessionsState } from './sessionState'
+import { NO_SESSIONS, openedWith, reduceSessions } from './sessionState'
 import { NO_MODIFIERS, shortcutAction, type Modifiers } from './keys'
 import {
   FILE_PANEL_DEFAULT_WIDTH,
@@ -35,7 +35,7 @@ import {
 } from './storage'
 import { terminalRegistry } from './terminalRegistry'
 import { TopBar } from './TopBar'
-import { Toast } from './Toast'
+import { Toast, failureText } from './Toast'
 import { VersionBanner } from './VersionBanner'
 import { readPageBuild, versionNotice, type VersionNotice } from './version'
 
@@ -51,16 +51,11 @@ function useFontSize(isMobile: boolean): [number, (size: number) => void] {
   return [fontSize, setFontSize]
 }
 
-const NO_SESSIONS: SessionsState = { sessions: [], active: null }
-
 export function App() {
   const socket = useSocket()
   const { onMessage, send, status } = socket
 
-  const [{ sessions, active: activeSession }, dispatchSessions] = useReducer(reduceSessions, NO_SESSIONS)
-  // Set when this client asks for a session, so that only this device
-  // switches to the one that arrives (see pendingCreateAfter).
-  const pendingCreate = useRef(false)
+  const [{ sessions, active: activeSession, picked }, dispatchSessions] = useReducer(reduceSessions, NO_SESSIONS)
   // Sessions whose terminal has been mounted (see openedWith).
   const [opened, setOpened] = useState<number[]>([])
   // windowId -> number of attached clients, from session:ownership broadcasts.
@@ -128,6 +123,14 @@ export function App() {
     setOpened(prev => openedWith(prev, activeSession))
   }, [activeSession])
 
+  // A session this client picked (a tap in the list, or the one it asked
+  // for arriving) is there to be looked at; and on a phone the "+ new
+  // session" button lives in the drawer, which would hide the new terminal
+  // while xterm needs it visible to measure its font.
+  useEffect(() => {
+    if (picked > 0) applyPanelAction('select-session')
+  }, [picked, applyPanelAction])
+
   // Remember the active session so the next page load reopens it.
   useEffect(() => {
     if (activeSession !== null) storageSet(LAST_SESSION_KEY, String(activeSession))
@@ -149,36 +152,30 @@ export function App() {
         setNotice(next && next.text === dismissedNotice.current ? null : next)
         return
       }
-      // Errors the file panel (files:*) and the terminals (terminal:*, shown
-      // as the exited overlay) do not own go to the toast so a failed
-      // session op isn't silent.
-      if (msg.type === 'error') {
-        if (!msg.request.startsWith('files:') && !msg.request.startsWith('terminal:')) {
-          setToast(`${msg.request} failed: ${msg.message}`)
-        }
-        return
-      }
       if (msg.type === 'session:ownership') {
         const next: Record<number, number> = {}
         for (const entry of msg.ownership) next[entry.windowId] = entry.clients
         setOwnership(next)
         return
       }
-      const own = pendingCreate.current && msg.type === 'session:created'
-      pendingCreate.current = pendingCreateAfter(pendingCreate.current, msg)
-      if (!msg.type.startsWith('session:')) return
+      // Errors the file panel (files:*) and the terminals (terminal:*, shown
+      // as the exited overlay) do not own go to the toast so a failed
+      // session op isn't silent. The reducer sees every error too: a
+      // failed create must clear the wait for it.
+      if (msg.type === 'error') {
+        if (!msg.request.startsWith('files:') && !msg.request.startsWith('terminal:')) {
+          setToast(failureText(msg))
+        }
+      } else if (!msg.type.startsWith('session:')) {
+        return
+      }
       dispatchSessions({
         type: 'message',
         msg,
-        own,
         savedRaw: msg.type === 'session:list' ? storageGet(LAST_SESSION_KEY) : null,
       })
-      // You created it to look at it; and on a phone the "+ new session"
-      // button lives in the drawer, which would hide the new terminal
-      // while xterm needs it visible to measure its font.
-      if (own) applyPanelAction('select-session')
     })
-  }, [onMessage, applyPanelAction])
+  }, [onMessage])
 
   // The toolbar and the Composer act on the active terminal through the
   // registry; neither knows about sessions or the socket.
@@ -197,11 +194,12 @@ export function App() {
 
   const selectSession = useCallback((id: number) => {
     dispatchSessions({ type: 'select', id })
-    applyPanelAction('select-session')
-  }, [applyPanelAction])
+  }, [])
 
+  // The reducer notes the wait so only this device switches to the session
+  // that arrives.
   const createSession = useCallback(() => {
-    pendingCreate.current = true
+    dispatchSessions({ type: 'create' })
     send({ type: 'session:create' })
   }, [send])
 
@@ -341,7 +339,7 @@ export function App() {
               ))}
             </div>
 
-            {/* File panel: mounted once so its tree, expansion, watcher and any edit in progress survive toggles */}
+            {/* File panel: mounted once so its tree, expansion and any edit in progress survive toggles */}
             <FilePanel
               open={isMobile ? mobileView === 'files' : filePanelOpen}
               openFile={openFile}

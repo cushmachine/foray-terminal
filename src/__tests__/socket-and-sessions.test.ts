@@ -20,6 +20,7 @@ import {
   type WebSocketLike,
 } from '../hooks/useSocket.ts'
 import {
+  NO_SESSIONS,
   activeAfterList,
   applySessionMessage,
   displayName,
@@ -27,7 +28,10 @@ import {
   pendingCreateAfter,
   reduceSessions,
   type Session,
+  type SessionsAction,
+  type SessionsState,
 } from '../sessionState.ts'
+import { failureText } from '../Toast.tsx'
 import type { ServerMessage, TmuxWindow } from '../shared/protocol.ts'
 
 // ---------------------------------------------------------------------------
@@ -308,35 +312,80 @@ test('pendingCreateAfter: survives unrelated messages and errors for other reque
   assert.equal(pendingCreateAfter(true, other), true)
 })
 
-test('reduceSessions: a list picks the active session; select changes it', () => {
-  const listed = reduceSessions({ sessions: [], active: null }, {
-    type: 'message', msg: { type: 'session:list', windows: THREE }, own: false, savedRaw: '2',
-  })
-  assert.deepEqual(listed, { sessions: THREE, active: 2 })
+/** A reducer state with nothing pending and nothing picked yet. */
+function state(sessions: Session[], active: number | null, pendingCreate = false): SessionsState {
+  return { sessions, active, pendingCreate, picked: 0 }
+}
+
+function message(msg: ServerMessage, savedRaw: string | null = null): SessionsAction {
+  return { type: 'message', msg, savedRaw }
+}
+
+const CREATE_FAILED = { type: 'error', message: 'tmux said no', request: 'session:create' } as ServerMessage
+
+test('reduceSessions: a list picks the active session; select changes it and counts as a pick', () => {
+  const listed = reduceSessions(NO_SESSIONS, message({ type: 'session:list', windows: THREE }, '2'))
+  assert.deepEqual(listed, { sessions: THREE, active: 2, pendingCreate: false, picked: 0 })
   const selected = reduceSessions(listed, { type: 'select', id: 3 })
   assert.equal(selected.active, 3)
-  assert.equal(reduceSessions(selected, { type: 'select', id: 3 }), selected, 'no change, same reference')
+  assert.equal(selected.picked, 1)
+  const again = reduceSessions(selected, { type: 'select', id: 3 })
+  assert.equal(again.picked, 2, 'picking the session in view still counts (it closes the drawer)')
 })
 
-test('reduceSessions: killing the active session picks a replacement in the same step', () => {
-  const next = reduceSessions({ sessions: THREE, active: 2 }, {
-    type: 'message', msg: { type: 'session:killed', windowId: 2 }, own: false, savedRaw: null,
-  })
+test('reduceSessions: killing the active session picks a replacement in the same step, not a pick', () => {
+  const next = reduceSessions(state(THREE, 2), message({ type: 'session:killed', windowId: 2 }))
   assert.deepEqual(next.sessions.map((s) => s.id), [1, 3])
   assert.equal(next.active, 3)
+  assert.equal(next.picked, 0)
 })
 
 test('reduceSessions: only the client that asked for a session switches to it', () => {
-  const state = { sessions: [session(1)], active: 1 }
   const msg: ServerMessage = { type: 'session:created', window: session(2) }
-  assert.equal(reduceSessions(state, { type: 'message', msg, own: false, savedRaw: null }).active, 1)
-  assert.equal(reduceSessions(state, { type: 'message', msg, own: true, savedRaw: null }).active, 2)
+  const other = reduceSessions(state([session(1)], 1), message(msg))
+  assert.equal(other.active, 1)
+  assert.equal(other.picked, 0)
+
+  const asked = reduceSessions(state([session(1)], 1), { type: 'create' })
+  assert.equal(asked.pendingCreate, true)
+  assert.equal(reduceSessions(asked, { type: 'create' }), asked, 'asking twice is one wait')
+  const arrived = reduceSessions(asked, message(msg))
+  assert.equal(arrived.active, 2)
+  assert.equal(arrived.picked, 1, 'the arrival of the session asked for is a pick')
+  assert.equal(arrived.pendingCreate, false)
 })
 
-test('reduceSessions: unrelated messages return the same state', () => {
-  const state = { sessions: THREE, active: 1 }
-  const msg: ServerMessage = { type: 'terminal:output', windowId: 1, data: 'x' }
-  assert.equal(reduceSessions(state, { type: 'message', msg, own: false, savedRaw: null }), state)
+// The real bug: App used to return early on every error, so the flag
+// never cleared on a failed create and the next session anyone else made
+// yanked this device into it. The reducer sees the error now.
+test('reduceSessions: a failed create clears the flag, so a later session from elsewhere is not taken', () => {
+  const asked = reduceSessions(state([session(1)], 1), { type: 'create' })
+  const failed = reduceSessions(asked, message(CREATE_FAILED))
+  assert.equal(failed.pendingCreate, false)
+  assert.equal(failed.sessions, asked.sessions)
+  const theirs = reduceSessions(failed, message({ type: 'session:created', window: session(2) }))
+  assert.equal(theirs.active, 1, 'someone else\'s session does not switch this device')
+  assert.equal(theirs.picked, 0)
+})
+
+test('reduceSessions: an error for another request leaves the flag; unrelated messages return the same state', () => {
+  const asked = state(THREE, 1, true)
+  const other = { type: 'error', message: 'no such file', request: 'files:read' } as ServerMessage
+  assert.equal(reduceSessions(asked, message(other)), asked)
+  const idle = state(THREE, 1)
+  assert.equal(reduceSessions(idle, message(CREATE_FAILED)), idle, 'an error with nothing pending changes nothing')
+  const output: ServerMessage = { type: 'terminal:output', windowId: 1, data: 'x' }
+  assert.equal(reduceSessions(idle, message(output)), idle)
+})
+
+// ---------------------------------------------------------------------------
+// The toast for a failed session op
+// ---------------------------------------------------------------------------
+
+test('failureText: a failed request is described in plain words, then the reason', () => {
+  assert.equal(failureText({ type: 'error', message: 'tmux said no', request: 'session:create' }), 'Could not create the session: tmux said no')
+  assert.equal(failureText({ type: 'error', message: 'Name is blank', request: 'session:rename', windowId: 1 }), 'Could not rename the session: Name is blank')
+  assert.equal(failureText({ type: 'error', message: 'Invalid message', request: 'unknown' }), 'Could not handle unknown: Invalid message')
 })
 
 // ---------------------------------------------------------------------------

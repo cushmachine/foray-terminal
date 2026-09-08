@@ -134,7 +134,9 @@ export interface FilesUnwatchMessage {
  * Liveness probe. Browsers can't send WebSocket ping frames, so the client
  * sends this as an ordinary message and expects a `pong` back. No reply
  * within the client's timeout means the connection is dead (a phone that
- * changed networks, say) even though the socket still reports open.
+ * changed networks, say) even though the socket still reports open. It is
+ * answered at once, ahead of the connection's in-order queue, so a slow
+ * request in front of it is not mistaken for a dead connection.
  */
 export interface PingMessage {
   type: 'ping'

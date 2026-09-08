@@ -422,6 +422,18 @@ export function waitForOutput(ws: WebSocket, windowId: number, needle: string, t
   })
 }
 
+/**
+ * Resolve once everything sent on `ws` before this call has been handled.
+ * The connection answers in order, so the server:hello to a client:hello
+ * queued last proves the rest is done. A ping would not do: it is answered
+ * ahead of the queue.
+ */
+export async function settled(ws: WebSocket): Promise<void> {
+  const hello = waitForType(ws, 'server:hello')
+  ws.send(JSON.stringify({ type: 'client:hello', build: null }))
+  await hello
+}
+
 /** Connect to a server and resolve once its welcome (session:list) has arrived. */
 export async function connect(url: string, timeoutMs = 5000): Promise<{ ws: WebSocket; welcome: Msg }> {
   const ws = new WebSocket(wsUrl(url))

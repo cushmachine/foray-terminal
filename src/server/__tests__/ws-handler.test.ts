@@ -174,12 +174,16 @@ test('safeErrorMessage: anything else is generic and leaks nothing', () => {
 // Dispatch
 // ---------------------------------------------------------------------------
 
-/** Send `msg` and resolve once it has been handled: the pong to a ping queued behind it. */
+/**
+ * Send `msg` and resolve once it has been handled: the server:hello to a
+ * client:hello queued behind it. (Not a ping: that is answered ahead of
+ * the queue.)
+ */
 async function handled(conn: HandledConnection, msg: object): Promise<void> {
-  const pongs = conn.sent.filter((m) => m.type === 'pong').length
+  const hellos = conn.sent.filter((m) => m.type === 'server:hello').length
   conn.socket.receive(msg)
-  conn.socket.receive({ type: 'ping' })
-  await until(() => conn.sent.filter((m) => m.type === 'pong').length > pongs, `${JSON.stringify(msg)} to be handled`)
+  conn.socket.receive({ type: 'client:hello', build: null })
+  await until(() => conn.sent.filter((m) => m.type === 'server:hello').length > hellos, `${JSON.stringify(msg)} to be handled`)
 }
 
 /** Messages of `type` sent to the client so far. */
@@ -193,9 +197,10 @@ async function attached(conn: HandledConnection, windowId: number, size: object 
 
 test('dispatch: ping answers pong and client:hello answers server:hello', async () => {
   const conn = handleTestConnection({ serverBuild: 'srv-1', servedClientBuild: async () => 'cli-1' })
+  conn.socket.receive({ type: 'ping' })
+  await until(() => sentOf(conn, 'pong').length === 1, 'the pong')
   await handled(conn, { type: 'client:hello', build: 'cli-0' })
-  assert.deepEqual(sentOf(conn, 'server:hello'), [{ type: 'server:hello', serverBuild: 'srv-1', clientBuild: 'cli-1' }])
-  assert.equal(sentOf(conn, 'pong').length, 1)
+  assert.deepEqual(sentOf(conn, 'server:hello')[0], { type: 'server:hello', serverBuild: 'srv-1', clientBuild: 'cli-1' })
   conn.socket.emit('close')
 })
 
@@ -431,11 +436,11 @@ test('errors: a rejected payload is answered with request "unknown" plus whateve
 test('errors: unparseable text is answered, not fatal, and the connection goes on', async () => {
   const conn = handleTestConnection()
   conn.socket.emit('message', Buffer.from('{not json'))
-  await handled(conn, { type: 'ping' })
+  await handled(conn, { type: 'session:list' })
   const [err] = sentOf(conn, 'error')
   assert.equal(err.request, 'unknown')
   assert.equal(err.message, 'Operation failed', 'the parser\'s message is not the client\'s business')
-  assert.equal(sentOf(conn, 'pong').length, 2, 'later messages are still handled')
+  assert.equal(sentOf(conn, 'session:list').length, 1, 'later messages are still handled')
   conn.socket.emit('close')
 })
 

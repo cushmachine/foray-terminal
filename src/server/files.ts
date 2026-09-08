@@ -8,10 +8,24 @@ import path from 'node:path'
 import chokidar from 'chokidar'
 import type { FileNode } from '../shared/protocol.ts'
 import { ClientError } from './errors.ts'
+import { SILENT, type Logger } from './log.ts'
 
-/** Directory/file names that are always excluded from the tree and watcher, regardless of .gitignore. */
-const ALWAYS_SKIP = new Set(['node_modules', '.git', 'dist', '.DS_Store'])
+/**
+ * Names excluded from the tree and the watcher wherever they appear,
+ * regardless of .gitignore: build output, dependency stores and the caches
+ * tools keep under a home directory, which are huge and never what the
+ * panel is for. Other dot-directories (.claude, .github) are shown.
+ */
+const ALWAYS_SKIP = new Set([
+  'node_modules', '.git', 'dist', '.DS_Store',
+  '.cache', '.npm', '.local', '.cargo', '.rustup', '.nvm', '.pnpm-store', '.playwright',
+  '.venv', '__pycache__',
+])
 
+/**
+ * How deep the tree goes: directories at this depth are listed but their
+ * contents are not read. The watcher stops at the same place.
+ */
 const DEFAULT_MAX_DEPTH = 5
 
 /**
@@ -32,23 +46,13 @@ export function resolveRoot(cwd: string): string {
 }
 
 /**
- * Whether the tree and the watcher leave `fullPath` (under `root`) out.
- * Beyond ALWAYS_SKIP anywhere in the path, dot-directories directly under
- * the root are skipped (.cache, .npm, .local under a home directory) along
- * with everything inside them; dot-files at the root (.gitignore, .env)
- * stay. `isDir` is unknown on chokidar's first look at a path; it asks
- * again with stats before watching it.
+ * Whether the tree and the watcher leave `fullPath` (under `root`) out: it
+ * is, or is inside, something in ALWAYS_SKIP.
  */
-function isSkipped(root: string, fullPath: string, isDir: boolean | undefined): boolean {
+function isSkipped(root: string, fullPath: string): boolean {
   const rel = path.relative(root, fullPath)
   if (rel === '') return false
-  const segments = rel.split(path.sep)
-  if (segments.some((segment) => ALWAYS_SKIP.has(segment))) return true
-  if (segments[0].startsWith('.')) {
-    if (segments.length > 1) return true
-    if (isDir) return true
-  }
-  return false
+  return rel.split(path.sep).some((segment) => ALWAYS_SKIP.has(segment))
 }
 
 // ---------------------------------------------------------------------------
@@ -160,7 +164,7 @@ async function walk(
     if (!isDir && !isFile) continue // skip symlinks, sockets, etc.
 
     const fullPath = path.join(dir, entry.name)
-    if (isSkipped(root, fullPath, isDir)) continue
+    if (isSkipped(root, fullPath)) continue
     const relPath = toPosixPath(path.relative(root, fullPath))
 
     if (gitignore.isIgnored(relPath, isDir)) continue
@@ -197,8 +201,7 @@ export interface Tree {
  * Recursively list the directory tree rooted at `cwd`.
  *
  * - Respects a top-level .gitignore (if present) using a simplified matcher.
- * - Always skips node_modules, .git, dist, .DS_Store, regardless of
- *   .gitignore, and dot-directories directly under the root.
+ * - Always skips the names in ALWAYS_SKIP, regardless of .gitignore.
  * - Directories are sorted before files; each group is alphabetical.
  * - `maxDepth` (default 5) bounds recursion: directories at the max depth
  *   are still listed, but their contents are not read.
@@ -313,19 +316,36 @@ export interface WatchEvents {
 
 const WATCH_DEBOUNCE_MS = 300
 
+export interface WatchOptions {
+  /** Where watcher failures are reported. */
+  logger?: Logger
+  /** How the underlying watcher is made; a test substitutes its own. */
+  watch?: typeof chokidar.watch
+  /** Depth of the tree the watcher mirrors; see DEFAULT_MAX_DEPTH. */
+  maxDepth?: number
+}
+
 /**
  * Watch `cwd` recursively for file changes, debounced 300ms per file: a
  * burst of events on one path is reported once, as whatever happened last.
+ * Watcher failures (inotify's watch limit, an unreadable directory) are
+ * logged and otherwise ignored: chokidar raises them as an 'error' event,
+ * which with no listener would throw and take the process down.
  */
-export function watchDir(cwd: string, events: WatchEvents): Watcher {
+export function watchDir(cwd: string, events: WatchEvents, options: WatchOptions = {}): Watcher {
+  const { logger = SILENT, watch = chokidar.watch, maxDepth = DEFAULT_MAX_DEPTH } = options
   const root = path.resolve(cwd)
   const pending = new Map<string, { timer: NodeJS.Timeout; kind: 'change' | 'remove' }>()
 
-  const watcher = chokidar.watch(root, {
+  const watcher = watch(root, {
     ignoreInitial: true,
-    ignored: (filePath: string, stats?: { isDirectory(): boolean }) =>
-      isSkipped(root, filePath, stats?.isDirectory()),
+    ignored: (filePath: string) => isSkipped(root, filePath),
+    // The tree lists a file at `maxDepth` levels below the root, that is
+    // under `maxDepth - 1` directories; chokidar counts the directories.
+    depth: maxDepth - 1,
+    ignorePermissionErrors: true,
   })
+  watcher.on('error', (err) => logger.error('watch error:', err))
 
   const handleEvent = (kind: 'change' | 'remove') => (filePath: string) => {
     const relPath = toPosixPath(path.relative(root, filePath))

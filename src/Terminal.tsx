@@ -159,6 +159,9 @@ export function Terminal({
           overflowY: 'auto',
           overscrollBehavior: 'contain',
           WebkitOverflowScrolling: 'touch',
+          // Pan and pinch stay; a double tap (a quick y, then Enter) must
+          // not zoom the terminal now that the page is zoomable.
+          touchAction: 'manipulation',
           background: 'var(--bg)',
         }}
       >

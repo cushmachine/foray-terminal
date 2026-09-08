@@ -1,4 +1,4 @@
-import { useCallback, useState, lazy, Suspense, type ReactNode } from 'react'
+import { useCallback, lazy, Suspense, type ReactNode } from 'react'
 import { MarkdownRenderer } from '../MarkdownRenderer'
 import { useEscape } from '../hooks/useEscape'
 import { FILE_PANEL_MAX_WIDTH, FILE_PANEL_MIN_WIDTH, clampFilePanelWidth } from '../mobile'
@@ -7,7 +7,7 @@ import { ResizeHandle } from './ResizeHandle'
 import { useFileStore } from './useFileStore'
 
 interface FilePanelProps {
-  /** Whether the panel is showing. It stays mounted while hidden so the tree, expansion and watcher survive toggles. */
+  /** Whether the panel is showing. It stays mounted while hidden so the tree, expansion and any edit survive toggles; the watcher does not. */
   open: boolean
   openFile: string | null
   onOpenFile: (path: string) => void
@@ -76,12 +76,7 @@ export function FilePanel({
   onResize,
   cwd,
 }: FilePanelProps) {
-  // Nothing is listed or watched until the panel is first shown; after
-  // that it keeps its server-side state while hidden.
-  const [everOpened, setEverOpened] = useState(open)
-  if (open && !everOpened) setEverOpened(true)
-
-  const files = useFileStore(cwd, openFile, everOpened)
+  const files = useFileStore(cwd, openFile, open)
   useEscape(onClosePanel, open)
 
   const fileContent = openFile !== null ? files.contents[openFile] : undefined

@@ -18,20 +18,24 @@ interface Case {
   /** Required field with the wrong type; absent for types with no fields. */
   bad?: Record<string, unknown>
   good: Record<string, unknown>
-  /** Reply that proves `good` was handled; absent means a following ping's pong proves it. */
+  /** Reply that proves `good` was handled; absent means the barrier behind it proves it. */
   reply?: string
 }
 
-/** Send `msg` then a ping; resolve with the messages that arrived before the pong. */
-async function sendThenPong(ws: WebSocket, msg: object): Promise<Msg[]> {
+/**
+ * Send `msg` then a client:hello; resolve with the messages that arrived
+ * before the server:hello, which the in-order queue answers last. (A ping
+ * would not do: it is answered ahead of the queue.)
+ */
+async function sendThenSettle(ws: WebSocket, msg: object): Promise<Msg[]> {
   const seen: Msg[] = []
   const done = waitForMessage(ws, (m) => {
-    if (m.type === 'pong') return true
+    if (m.type === 'server:hello') return true
     seen.push(m)
     return false
   })
   ws.send(JSON.stringify(msg))
-  ws.send(JSON.stringify({ type: 'ping' }))
+  ws.send(JSON.stringify({ type: 'client:hello', build: null }))
   await done
   return seen
 }
@@ -67,8 +71,8 @@ test('every client message type rejects a wrong-typed field and accepts a well-f
 
     for (const [type, c] of Object.entries(cases)) {
       if (c.bad) {
-        // Messages are handled in order, so the pong proves the verdict is in.
-        const errors = (await sendThenPong(ws, { type, ...c.bad })).filter((m) => m.type === 'error')
+        // Messages are handled in order, so the barrier proves the verdict is in.
+        const errors = (await sendThenSettle(ws, { type, ...c.bad })).filter((m) => m.type === 'error')
         assert.ok(errors.length > 0, `${type}: a wrong-typed field was accepted`)
         assert.ok(
           errors.some((e) => String(e.message).includes(type)),
@@ -82,7 +86,7 @@ test('every client message type rejects a wrong-typed field and accepts a well-f
         const got = await answer
         assert.equal(got.type, c.reply, `${type}: well-formed message was rejected: ${got.message}`)
       } else {
-        const before = await sendThenPong(ws, { type, ...c.good })
+        const before = await sendThenSettle(ws, { type, ...c.good })
         const rejected = before.find((m) => m.type === 'error')
         assert.equal(rejected, undefined, `${type}: well-formed message was rejected: ${rejected?.message}`)
       }
@@ -99,7 +103,7 @@ test('an unknown message type and a message without one are rejected', async () 
   try {
     const { ws } = await connect(url)
     for (const payload of [{ type: 'session:explode', windowId: 0 }, { windowId: 0 }, 'just a string', 42]) {
-      const [err] = (await sendThenPong(ws, payload as object)).filter((m) => m.type === 'error')
+      const [err] = (await sendThenSettle(ws, payload as object)).filter((m) => m.type === 'error')
       assert.ok(err, `${JSON.stringify(payload)} was accepted`)
       assert.match(String(err.message), /^Invalid message/)
       assert.equal(err.request, 'unknown')

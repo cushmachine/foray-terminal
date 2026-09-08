@@ -3,7 +3,8 @@
 // Owns one client's attachments (pty, history tracker and timers per
 // window), its file-panel state, and the validation and dispatch of its
 // messages. Messages on one socket are handled one at a time, in order, so
-// an input that follows an attach finds the pty it was typed into.
+// an input that follows an attach finds the pty it was typed into. The one
+// exception is the liveness ping, answered at once.
 
 import type { WebSocket } from 'ws'
 import { MAX_HISTORY_LINES, type ClientMessage, type ErrorMessage, type ServerMessage } from '../shared/protocol.ts'
@@ -213,6 +214,11 @@ function correlation(raw: unknown): Pick<ErrorMessage, 'request' | 'windowId' | 
   if (typeof msg.windowId === 'number') fields.windowId = msg.windowId
   if (typeof msg.path === 'string') fields.path = msg.path
   return fields
+}
+
+/** A well-formed ping; anything else, ping-shaped or not, goes through the queue. */
+function isPing(raw: unknown): boolean {
+  return typeof raw === 'object' && raw !== null && (raw as { type?: unknown }).type === 'ping'
 }
 
 function clamp(value: number, max: number): number {
@@ -486,7 +492,7 @@ export function handleConnection(ws: WebSocket, deps: ConnectionDeps): Connectio
         onRemove: (removedPath) => {
           send({ type: 'files:removed', path: removedPath })
         },
-      })
+      }, { logger: log })
       currentWatcher = watcher
       // The ack is not awaited: a big directory's initial scan must not
       // hold up the terminal input queued behind it.
@@ -500,11 +506,9 @@ export function handleConnection(ws: WebSocket, deps: ConnectionDeps): Connectio
     },
   }
 
-  const handle = async (text: string): Promise<void> => {
+  const handle = async (raw: unknown): Promise<void> => {
     if (closed) return
-    let raw: unknown
     try {
-      raw = JSON.parse(text)
       const msg = validateMessage(raw)
       const handler = handlers[msg.type] as (msg: ClientMessage) => void | Promise<void>
       await handler(msg)
@@ -519,8 +523,22 @@ export function handleConnection(ws: WebSocket, deps: ConnectionDeps): Connectio
   // message cannot stall the rest.
   let queue: Promise<void> = welcome().catch((err) => log.error('welcome failed:', err))
   ws.on('message', (data) => {
-    const text = data.toString()
-    queue = queue.then(() => handle(text))
+    let raw: unknown
+    try {
+      raw = JSON.parse(data.toString())
+    } catch (err) {
+      log.error('message handling error:', err)
+      send({ type: 'error', message: safeErrorMessage(err), request: 'unknown' })
+      return
+    }
+    // The ping measures the connection, not the queue: answered ahead of
+    // it, so a tmux call stalled in front of it cannot look to the client
+    // like a dead socket and cost it a reconnect.
+    if (isPing(raw)) {
+      send({ type: 'pong' })
+      return
+    }
+    queue = queue.then(() => handle(raw))
   })
 
   ws.on('close', () => {

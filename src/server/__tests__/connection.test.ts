@@ -10,7 +10,7 @@ import crypto from 'node:crypto'
 import net from 'node:net'
 import type { TmuxExecutor } from '../tmux.ts'
 import {
-  connect, fakeTmux, handleTestConnection, startTestServer, until, waitForMessage, waitForType,
+  connect, fakeTmux, handleTestConnection, settled, startTestServer, until, waitForMessage, waitForType,
 } from './helpers.ts'
 
 // ---------------------------------------------------------------------------
@@ -18,8 +18,8 @@ import {
 // ---------------------------------------------------------------------------
 
 // Messages on one socket are handled in order, so a keystroke that follows
-// an attach finds the pty it was typed into, and a pong proves everything
-// sent before the ping is done.
+// an attach finds the pty it was typed into (and `settled` can prove
+// everything sent before it is done).
 test('input sent right after attach reaches the pty', async () => {
   const { url, close, tmux, ptys } = await startTestServer()
   tmux.add('shell')
@@ -27,9 +27,7 @@ test('input sent right after attach reaches the pty', async () => {
     const { ws } = await connect(url)
     ws.send(JSON.stringify({ type: 'terminal:attach', windowId: 0 }))
     ws.send(JSON.stringify({ type: 'terminal:input', windowId: 0, data: 'ls\r' }))
-    const pong = waitForType(ws, 'pong')
-    ws.send(JSON.stringify({ type: 'ping' }))
-    await pong
+    await settled(ws)
 
     assert.equal(ptys.length, 1)
     assert.deepEqual(ptys[0].writes, ['ls\r'], 'the input that followed the attach was written to its pty')
@@ -46,15 +44,53 @@ test('two attaches for one window on one connection leave one live pty', async (
     const { ws } = await connect(url)
     ws.send(JSON.stringify({ type: 'terminal:attach', windowId: 0 }))
     ws.send(JSON.stringify({ type: 'terminal:attach', windowId: 0 }))
-    const pong = waitForType(ws, 'pong')
-    ws.send(JSON.stringify({ type: 'ping' }))
-    await pong
+    await settled(ws)
 
     const live = ptys.filter((p) => !p.killed)
     assert.equal(live.length, 1, `expected one live pty, found ${live.length} of ${ptys.length} spawned`)
     assert.equal(ptys[0].killed, true, 'the first attach\'s pty is killed by the second')
     ws.close()
   } finally {
+    await close()
+  }
+})
+
+// The client drops a socket whose ping goes unanswered for 10 s. tmux can
+// take longer than that to answer an attach's history query on a loaded
+// box; the ping must not wait behind it.
+test('a ping is answered while an attach is still waiting on tmux', async () => {
+  const tmux = fakeTmux()
+  tmux.add('shell')
+  let gated = false
+  let release!: () => void
+  const gate = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const exec: TmuxExecutor = async (cmd, args) => {
+    if (args[0] === 'display-message' && !gated) {
+      gated = true
+      await gate
+    }
+    return tmux.exec(cmd, args)
+  }
+  const { url, close } = await startTestServer({ tmuxExec: exec })
+  try {
+    const { ws } = await connect(url)
+    ws.send(JSON.stringify({ type: 'terminal:attach', windowId: 0 }))
+    await until(() => gated, 'the attach to reach tmux')
+
+    const pong = waitForType(ws, 'pong', 1000)
+    ws.send(JSON.stringify({ type: 'ping' }))
+    assert.deepEqual(await pong, { type: 'pong' })
+    assert.equal(gated, true, 'tmux is still being waited on')
+
+    // The attach behind it finishes as usual once tmux answers.
+    const history = waitForType(ws, 'terminal:history')
+    release()
+    assert.equal((await history).windowId, 0)
+    ws.close()
+  } finally {
+    release()
     await close()
   }
 })
@@ -198,10 +234,8 @@ test('terminal:detach kills the pty and releases ownership', async () => {
     // Awaited below; if the assertion before it fails, its timeout must not
     // surface as a stray rejection after the test ended.
     ownership.catch(() => {})
-    const pong = waitForType(ws, 'pong')
     ws.send(JSON.stringify({ type: 'terminal:detach', windowId: 0 }))
-    ws.send(JSON.stringify({ type: 'ping' }))
-    await pong
+    await settled(ws)
     assert.equal(ptys[0].killed, true, 'detach kills the pty')
     assert.deepEqual((await ownership).ownership, [], 'detach releases ownership')
     ws.close()
@@ -225,10 +259,8 @@ test('a pty exit sends terminal:exited and drops the handle', async () => {
     assert.equal((await exited).windowId, 0)
 
     // Input after the exit has nowhere to go.
-    const pong = waitForType(ws, 'pong')
     ws.send(JSON.stringify({ type: 'terminal:input', windowId: 0, data: 'late\r' }))
-    ws.send(JSON.stringify({ type: 'ping' }))
-    await pong
+    await settled(ws)
     assert.deepEqual(ptys[0].writes, [], 'no writes into an exited pty')
     ws.close()
   } finally {
