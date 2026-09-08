@@ -7,6 +7,7 @@
 //
 // Every test that sends input creates its own tmux session first; the
 // session active on load may be someone's live shell.
+import { execFileSync } from 'node:child_process'
 import { test, expect, type Page } from '@playwright/test'
 import {
   MOBILE,
@@ -67,6 +68,7 @@ async function rowAlignment(page: Page, text: string): Promise<number> {
 async function composerOpacity(page: Page): Promise<string> {
   return page.locator('[data-composer]').evaluate((el) => getComputedStyle(el).opacity)
 }
+
 
 /** Create a session through the mobile drawer, then close the drawer. */
 async function createMobileSession(page: Page, name: string): Promise<void> {
@@ -230,6 +232,59 @@ test.describe('keyboard behavior on mobile', () => {
       await expect.poll(() => scrollGap(page), { timeout: 5_000 }).toBeGreaterThanOrEqual(cellH - 2)
       await page.getByTestId('terminal-area').click()
       await expect.poll(() => scrollGap(page), { timeout: 5_000 }).toBeLessThan(4)
+    } finally {
+      await page.setViewportSize(MOBILE)
+      await killMobileSession(page, name).catch(() => {})
+    }
+  })
+
+  // A reconnect (the phone slept, the socket died) replaces the scrollback
+  // with a fresh copy. When lines were trimmed from the top meanwhile, the
+  // text under the viewport must stay the same text, not the same pixel.
+  test('reconnect keeps the same text under a scrolled-up view', async ({ page }) => {
+    await page.goto('/')
+    const name = uniqueName('kb-anchor')
+    const scroll = () => active(page).getByTestId('terminal-scroll')
+    const historyRows = () => scroll().locator('> div:first-child > div')
+    /** Text of the first scrollback row whose bottom edge is below the viewport top. */
+    const topRowText = () => scroll().evaluate((el) => {
+      const rows = Array.from(el.firstElementChild?.children ?? []) as HTMLElement[]
+      const base = el.getBoundingClientRect().top - el.scrollTop
+      const row = rows.find((r) => r.getBoundingClientRect().bottom - base > el.scrollTop)
+      return row?.textContent ?? null
+    })
+    try {
+      await createMobileSession(page, name)
+      await expectTerminalReady(page)
+      await page.setViewportSize({ width: MOBILE.width, height: 500 })
+      await page.waitForTimeout(400)
+
+      // Fill the scrollback past the client's cap so a later reset trims the top.
+      await page.getByTestId('terminal-area').click()
+      await page.evaluate(() => {
+        window.dispatchEvent(new CustomEvent('nest:sendkeys', { detail: 'seq 1 3200\r' }))
+      })
+      await expectTerminalText(page, '3200', 20_000)
+      await expect.poll(() => historyRows().count(), { timeout: 20_000 }).toBeGreaterThanOrEqual(2990)
+      const firstBefore = await historyRows().first().textContent()
+
+      // Scroll up into the middle of the scrollback.
+      await scroll().evaluate((el) => { el.scrollTop = Math.round(el.scrollHeight / 2) })
+      await page.waitForTimeout(200)
+      const before = await topRowText()
+      expect(before).toMatch(/^\d+$/)
+
+      // Lose the socket, and add lines to the pane while it is down.
+      await page.evaluate(() => {
+        (window as unknown as { __nestSocket: { drop: (ms: number) => void } }).__nestSocket.drop(3000)
+      })
+      execFileSync('tmux', ['send-keys', '-t', `nest_${name}`, 'seq 1 400; echo AFTER-DROP', 'Enter'])
+
+      // Reconnected: the scrollback was replaced and its top trimmed…
+      await expectTerminalText(page, 'AFTER-DROP', 20_000)
+      await expect.poll(() => historyRows().first().textContent(), { timeout: 20_000 }).not.toBe(firstBefore)
+      // …and the same text still sits at the top of the viewport.
+      await expect.poll(topRowText, { timeout: 5_000 }).toBe(before)
     } finally {
       await page.setViewportSize(MOBILE)
       await killMobileSession(page, name).catch(() => {})

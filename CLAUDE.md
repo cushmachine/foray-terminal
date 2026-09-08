@@ -6,6 +6,10 @@ Run `npm run deploy` to build and restart the app. It runs `scripts/deploy.sh`, 
 
 Prod runs from the checkout with `tsx` and builds with `vite`, so the dev dependencies must be installed on the box (`npm install`, never `--omit=dev`).
 
+## Sessions live in nest-tmux.service
+
+The tmux server that holds every session runs in its own systemd unit, `nest-tmux.service` (`scripts/systemd/`, installed by `scripts/ensure-tmux-unit.sh` from `start.sh`), not under pm2. So a deploy, a pm2 crash, or an OOM teardown of pm2 leaves sessions alive. Never `systemctl stop` or `restart nest-tmux`: that kills every session. To recover lost sessions, find their uuids in `~/.claude/activity.log` and run `claude --resume <uuid>` inside a new `nest_<name>` tmux session.
+
 ## Build & check
 
 - `npm run build` — typecheck (both client and server tsconfigs) then vite build

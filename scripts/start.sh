@@ -13,6 +13,11 @@
 set -u
 cd "$(dirname "$0")/.."
 
+# Put the tmux server (and every session in it) in its own systemd unit
+# rather than under pm2, so restarting or OOM-tearing-down pm2 cannot kill
+# sessions. See scripts/systemd/nest-tmux.service.
+scripts/ensure-tmux-unit.sh || echo "[start] tmux unit setup failed; sessions will run under pm2" >&2
+
 STAGE=dist.next
 if npx vite build --outDir "$STAGE" --emptyOutDir; then
   rm -rf dist && mv "$STAGE" dist
