@@ -10,6 +10,16 @@ import type { UploadStatus } from '../hooks/useImageUpload'
 
 const COPIED_FLASH_MS = 1500
 
+/** A layer over the whole screen with its content centred. */
+const cover: CSSProperties = {
+  position: 'absolute',
+  inset: 0,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  zIndex: 'var(--z-overlay)',
+}
+
 const selectButton: CSSProperties = {
   flexShrink: 0,
   height: 32,
@@ -203,17 +213,7 @@ export function DetachedOverlay({ reason, onReattach }: DetachedOverlayProps) {
   return (
     <div
       data-testid="terminal-detached"
-      style={{
-        position: 'absolute',
-        inset: 0,
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 14,
-        background: 'rgba(10, 10, 12, 0.88)',
-        zIndex: 'var(--z-overlay)',
-      }}
+      style={{ ...cover, flexDirection: 'column', gap: 14, background: 'rgba(10, 10, 12, 0.88)' }}
     >
       <div
         style={{
@@ -240,17 +240,12 @@ export function ConnectionOverlay({ reconnecting }: { reconnecting: boolean }) {
   return (
     <div
       style={{
-        position: 'absolute',
-        inset: 0,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
+        ...cover,
         background: 'rgba(10, 10, 12, 0.72)',
         color: 'var(--text-dim)',
         fontSize: 13,
         letterSpacing: '0.04em',
         pointerEvents: 'none',
-        zIndex: 'var(--z-overlay)',
       }}
     >
       {reconnecting ? 'reconnecting…' : 'connecting…'}

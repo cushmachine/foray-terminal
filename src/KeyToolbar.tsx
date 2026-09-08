@@ -12,12 +12,6 @@ import {
 import { terminalRegistry } from './terminalRegistry'
 
 interface KeyToolbarProps {
-  /** Send raw bytes to the active terminal. */
-  onSend: (data: string) => void
-  /** Paste text into the active terminal (honours bracketed paste). */
-  onPaste: (text: string) => void
-  /** Upload images to the active terminal. */
-  onUpload: (files: File[]) => void
   modifiers: Modifiers
   onToggleModifier: (which: 'ctrl' | 'alt') => void
   isMobile: boolean
@@ -44,14 +38,8 @@ interface PressState {
   timer: ReturnType<typeof setTimeout> | null
 }
 
-export function KeyToolbar({
-  onSend,
-  onPaste,
-  onUpload,
-  modifiers,
-  onToggleModifier,
-  isMobile,
-}: KeyToolbarProps) {
+/** The keys act on the active terminal through the registry; the sticky modifiers are App state. */
+export function KeyToolbar({ modifiers, onToggleModifier, isMobile }: KeyToolbarProps) {
   const [pressed, setPressed] = useState<string | null>(null)
   const [showMore, setShowMore] = useState(false)
   const press = useRef<PressState | null>(null)
@@ -87,9 +75,10 @@ export function KeyToolbar({
 
   const activate = useCallback((key: KeyDef) => {
     haptic()
+    const terminal = terminalRegistry.active()
     switch (key.kind) {
       case 'key':
-        if (key.data !== undefined) onSend(key.data)
+        if (key.data !== undefined) terminal?.sendKeys(key.data)
         break
       case 'ctrl':
       case 'alt':
@@ -102,7 +91,7 @@ export function KeyToolbar({
         fileInput.current?.click()
         break
       case 'select':
-        terminalRegistry.active()?.toggleSelectMode()
+        terminal?.toggleSelectMode()
         break
       case 'paste': {
         // Must run inside the user gesture; browsers refuse otherwise.
@@ -110,7 +99,7 @@ export function KeyToolbar({
         if (!clipboard?.readText) return
         clipboard.readText().then(
           (text) => {
-            if (text) onPaste(text)
+            if (text) terminalRegistry.active()?.paste(text)
           },
           () => {
             // Permission denied or nothing readable: the terminal stays as it was.
@@ -119,7 +108,7 @@ export function KeyToolbar({
         break
       }
     }
-  }, [onSend, onPaste, onToggleModifier])
+  }, [onToggleModifier])
 
   const clearPress = useCallback(() => {
     const current = press.current
@@ -188,8 +177,8 @@ export function KeyToolbar({
     const files = Array.from(e.target.files ?? [])
     // Reset so picking the same photo twice in a row still fires change.
     e.target.value = ''
-    if (files.length > 0) onUpload(files)
-  }, [onUpload])
+    if (files.length > 0) terminalRegistry.active()?.upload(files)
+  }, [])
 
   const isActive = (key: KeyDef): boolean => {
     if (key.kind === 'ctrl') return modifiers.ctrl

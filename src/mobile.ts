@@ -172,11 +172,8 @@ export type PanelAction =
   | 'close-sidebar'
   /** The file panel button or shortcut: a phone flips views, desktop toggles the panel. */
   | 'toggle-files'
-  | 'open-files'
   /** A file was picked in the tree. */
   | 'open-file'
-  /** The open file was closed, back to the tree (desktop) or the terminal (phone). */
-  | 'close-file'
   /** A session was picked, or the one this client created arrived. */
   | 'select-session'
   | 'show-terminal'
@@ -218,12 +215,8 @@ export function resolvePanels(
     case 'toggle-files':
       if (isMobile) return view(state.mobileView === 'files' ? 'terminal' : 'files')
       return withFiles(!state.filePanelOpen)
-    case 'open-files':
-      return withFiles(true)
     case 'open-file':
       return isMobile ? view('files', false) : withFiles(true)
-    case 'close-file':
-      return isMobile ? view('terminal') : state
     case 'select-session':
       return isMobile ? view('terminal', false) : state
     case 'show-terminal':

@@ -7,29 +7,13 @@
 // has loaded (a module script waits for the stylesheets before it) and
 // the values are what the rest of the page is already painted with.
 
+import type { ThemeColors } from './ansi'
+
 /** xterm's ITheme, minus the keys Nest leaves at xterm's defaults. */
-export interface TerminalTheme {
-  background: string
-  foreground: string
+export interface TerminalTheme extends ThemeColors {
   cursor: string
   cursorAccent: string
   selectionBackground: string
-  black: string
-  red: string
-  green: string
-  yellow: string
-  blue: string
-  magenta: string
-  cyan: string
-  white: string
-  brightBlack: string
-  brightRed: string
-  brightGreen: string
-  brightYellow: string
-  brightBlue: string
-  brightMagenta: string
-  brightCyan: string
-  brightWhite: string
 }
 
 const COLOR_VARS: Record<keyof TerminalTheme, string> = {

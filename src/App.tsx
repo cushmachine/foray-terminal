@@ -177,14 +177,11 @@ export function App() {
     })
   }, [onMessage, applyPanelAction])
 
-  // Toolbar and Composer actions go to the active terminal through the
+  // The toolbar and the Composer act on the active terminal through the
   // registry; neither knows about sessions or the socket.
   useEffect(() => {
     terminalRegistry.setActive(activeSession)
   }, [activeSession])
-  const sendKeys = useCallback((data: string) => terminalRegistry.active()?.sendKeys(data), [])
-  const pasteText = useCallback((text: string) => terminalRegistry.active()?.paste(text), [])
-  const uploadFiles = useCallback((files: File[]) => terminalRegistry.active()?.upload(files), [])
   const submitText = useCallback((text: string) => terminalRegistry.active()?.submit(text), [])
 
   // Sticky Ctrl/Alt from the toolbar. Armed here, applied by the active
@@ -216,17 +213,6 @@ export function App() {
   const handleOpenFile = useCallback((path: string) => {
     setOpenFile(path)
     applyPanelAction('open-file')
-  }, [applyPanelAction])
-
-  // Back to the tree: the panel stays where it is on both layouts.
-  const handleCloseFile = useCallback(() => {
-    setOpenFile(null)
-  }, [])
-
-  // Hide the panel (desktop) or return to the terminal (phone); the open
-  // file and any edit in progress survive, since the panel stays mounted.
-  const handleClosePanel = useCallback(() => {
-    applyPanelAction('toggle-files')
   }, [applyPanelAction])
 
   // Edge swipe opens the drawer; a leftward swipe closes it. Decided on
@@ -352,13 +338,13 @@ export function App() {
               ))}
             </div>
 
-            {/* File panel: mounted once so its tree, expansion and watcher survive toggles */}
+            {/* File panel: mounted once so its tree, expansion, watcher and any edit in progress survive toggles */}
             <FilePanel
               open={isMobile ? mobileView === 'files' : filePanelOpen}
               openFile={openFile}
               onOpenFile={handleOpenFile}
-              onCloseFile={handleCloseFile}
-              onClosePanel={handleClosePanel}
+              onCloseFile={() => setOpenFile(null)}
+              onClosePanel={() => applyPanelAction('toggle-files')}
               isMobile={isMobile}
               width={filePanelWidth}
               onResize={setFilePanelWidth}
@@ -377,14 +363,7 @@ export function App() {
 
           {/* Key toolbar: always on touch layouts, opt-in on desktop (TopBar toggle). */}
           {toolbarVisible && (
-            <KeyToolbar
-              onSend={sendKeys}
-              onPaste={pasteText}
-              onUpload={uploadFiles}
-              modifiers={modifiers}
-              onToggleModifier={toggleModifier}
-              isMobile={isMobile}
-            />
+            <KeyToolbar modifiers={modifiers} onToggleModifier={toggleModifier} isMobile={isMobile} />
           )}
         </div>
       </div>

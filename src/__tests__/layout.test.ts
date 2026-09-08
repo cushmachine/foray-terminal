@@ -47,7 +47,7 @@ test('#6 resolvePanels: below the tablet threshold the sidebar and file panel ar
   const narrow = TABLET_MAX_WIDTH - 1
   assert.deepEqual(resolvePanels(desktop(true, false), 'toggle-files', narrow, false), desktop(false, true))
   assert.deepEqual(resolvePanels(desktop(false, true), 'toggle-sidebar', narrow, false), desktop(true, false))
-  assert.deepEqual(resolvePanels(desktop(true, false), 'open-files', narrow, false), desktop(false, true))
+  assert.deepEqual(resolvePanels(desktop(true, false), 'open-file', narrow, false), desktop(false, true))
   assert.deepEqual(resolvePanels(desktop(false, true), 'open-sidebar', narrow, false), desktop(true, false))
   // Closing never opens the other one.
   assert.deepEqual(resolvePanels(desktop(false, true), 'toggle-files', narrow, false), desktop(false, false))
@@ -58,7 +58,6 @@ test('#6 resolvePanels: at desktop widths both panels can be open', () => {
   const wide = TABLET_MAX_WIDTH
   assert.deepEqual(resolvePanels(desktop(true, false), 'toggle-files', wide, false), desktop(true, true))
   assert.deepEqual(resolvePanels(desktop(true, true), 'toggle-sidebar', wide, false), desktop(false, true))
-  assert.deepEqual(resolvePanels(desktop(true, true), 'open-files', wide, false), desktop(true, true))
   assert.deepEqual(resolvePanels(desktop(true, true), 'open-file', wide, false), desktop(true, true))
 })
 
@@ -80,11 +79,6 @@ test('resolvePanels: selecting a session on a phone shows the terminal and close
   assert.equal(next.sidebarOpen, false)
 })
 
-test('resolvePanels: closing a file on a phone returns to the terminal', () => {
-  const start: PanelState = { sidebarOpen: false, filePanelOpen: false, mobileView: 'files' }
-  assert.equal(resolvePanels(start, 'close-file', PHONE, true).mobileView, 'terminal')
-})
-
 test('resolvePanels: toggle-files on a phone flips the view', () => {
   const start: PanelState = { sidebarOpen: false, filePanelOpen: false, mobileView: 'terminal' }
   const files = resolvePanels(start, 'toggle-files', PHONE, true)
@@ -103,7 +97,6 @@ test('resolvePanels: on desktop mobileView is left alone and the sidebar stays p
   const start: PanelState = { sidebarOpen: true, filePanelOpen: false, mobileView: 'terminal' }
   assert.equal(resolvePanels(start, 'open-file', DESKTOP, false).mobileView, 'terminal')
   assert.equal(resolvePanels(start, 'select-session', DESKTOP, false), start)
-  assert.equal(resolvePanels(start, 'close-file', DESKTOP, false), start)
   assert.equal(resolvePanels(start, 'show-files', DESKTOP, false), start)
 })
 

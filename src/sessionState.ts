@@ -108,17 +108,11 @@ export function nextActiveAfterKill(
  * session that arrives. It clears when the session arrives or when the
  * create fails; otherwise the next session anyone else creates would yank
  * this device into it.
- *
- * `request` on error messages says which request failed. Until every
- * server fills it in, an error without it is taken as the create's.
  */
 export function pendingCreateAfter(pending: boolean, msg: ServerMessage): boolean {
   if (!pending) return false
   if (msg.type === 'session:created') return false
-  if (msg.type === 'error') {
-    const request = 'request' in msg ? (msg as { request?: unknown }).request : undefined
-    return request !== undefined && request !== 'session:create'
-  }
+  if (msg.type === 'error') return msg.request !== 'session:create'
   return pending
 }
 

@@ -220,23 +220,22 @@ export class SocketManager {
   }
 
   /**
-   * Detach from the current socket without waiting on a close handshake the
-   * far end may never answer. Returns the socket for the caller to close.
+   * Drop the current socket without waiting on a close handshake the far
+   * end may never answer: its handlers are removed first, so its close
+   * event never reaches scheduleReconnect.
    */
-  private detach(): WebSocketLike | null {
+  private detach(): void {
     const ws = this.ws
     this.ws = null
     this.clearConnectTimer()
     this.stopHeartbeat()
-    if (ws) {
-      ws.onopen = ws.onclose = ws.onerror = ws.onmessage = null
-      try {
-        ws.close()
-      } catch {
-        // A socket that is already gone can throw here; nothing to do.
-      }
+    if (!ws) return
+    ws.onopen = ws.onclose = ws.onerror = ws.onmessage = null
+    try {
+      ws.close()
+    } catch {
+      // A socket that is already gone can throw here; nothing to do.
     }
-    return ws
   }
 
   /**

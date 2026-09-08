@@ -20,7 +20,7 @@ export interface TerminalActions {
   toggleSelectMode(): void
 }
 
-export class TerminalRegistry {
+class TerminalRegistry {
   private readonly terminals = new Map<number, TerminalActions>()
   private activeId: number | null = null
 

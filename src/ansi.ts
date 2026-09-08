@@ -17,7 +17,7 @@ export interface Palette {
   background: string
 }
 
-/** The shape of TerminalTheme in theme.ts; extra keys such as `cursor` are fine. */
+/** The 16 ANSI colours plus the defaults; theme.ts extends it with the cursor and selection. */
 export interface ThemeColors {
   foreground: string
   background: string

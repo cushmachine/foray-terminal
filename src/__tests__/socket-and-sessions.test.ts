@@ -283,11 +283,6 @@ test('pendingCreateAfter: survives unrelated messages and errors for other reque
   assert.equal(pendingCreateAfter(true, other), true)
 })
 
-test('pendingCreateAfter: an error without a request field is taken as the create failing', () => {
-  const bare = { type: 'error', message: 'tmux said no' } as ServerMessage
-  assert.equal(pendingCreateAfter(true, bare), false)
-})
-
 test('reduceSessions: a list picks the active session; select changes it', () => {
   const listed = reduceSessions({ sessions: [], active: null }, {
     type: 'message', msg: { type: 'session:list', windows: THREE }, own: false, savedRaw: '2',

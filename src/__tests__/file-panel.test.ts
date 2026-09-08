@@ -288,15 +288,13 @@ test('store: toggle-dir expands and collapses; expansion survives a reset', () =
   assert.ok(!closed.expanded.has('docs'))
 })
 
-test('store: select marks an uncached file loading and leaves a cached one alone', () => {
-  const loading = run([{ type: 'select', path: 'README.md' }])
-  assert.equal(loading.loadingPath, 'README.md')
+test('store: a file\'s content stays cached across deselect and reselect', () => {
   const cached = run([
+    { type: 'select', path: 'README.md' },
     msg({ type: 'files:content', path: 'README.md', content: '# hi' }),
     { type: 'select', path: null },
     { type: 'select', path: 'README.md' },
-  ], loading)
-  assert.equal(cached.loadingPath, null)
+  ])
   assert.equal(cached.contents['README.md'], '# hi')
 })
 
@@ -328,7 +326,6 @@ test('store: the edit survives a reconnect reset; the cache does not', () => {
   assert.equal(state.editing, true)
   assert.equal(state.editContent, '# hi there')
   assert.deepEqual(state.contents, {})
-  assert.equal(state.loadingPath, 'README.md')
 })
 
 test('store: files:changed while editing raises the conflict notice; reload takes the disk copy', () => {
@@ -405,7 +402,6 @@ test('store: errors route by request; a write failure keeps the edit', () => {
     msg({ type: 'error', message: 'nope', request: 'files:read', path: 'README.md' }),
   ])
   assert.equal(readFail.fileError, 'nope')
-  assert.equal(readFail.loadingPath, null)
   assert.equal(readFail.treeError, null)
 
   const treeFail = run([msg({ type: 'error', message: 'bad cwd', request: 'files:tree' })])

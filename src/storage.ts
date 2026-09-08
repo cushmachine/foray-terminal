@@ -6,14 +6,13 @@
 
 /** The session this device last looked at, reopened on the next page load. */
 export const LAST_SESSION_KEY = 'nest:lastSession'
-/** Prefix for the Composer's unsent text, one entry per session id. */
-export const DRAFT_KEY_PREFIX = 'nest:draft:'
 export const FONT_SIZE_KEY = 'nest:fontSize'
 /** The desktop key-toolbar choice ('true' | 'false'); touch layouts ignore it. */
 export const KEY_TOOLBAR_KEY = 'nest:keyToolbar'
 
+/** The Composer's unsent text, one entry per session id. */
 export function draftKeyFor(sessionId: number): string {
-  return `${DRAFT_KEY_PREFIX}${sessionId}`
+  return `nest:draft:${sessionId}`
 }
 
 export function storageGet(key: string): string | null {

@@ -24,7 +24,6 @@ export interface FileStoreState {
   treeError: string | null
   /** Contents by relative path, kept fresh by the watcher. */
   contents: Record<string, string>
-  loadingPath: string | null
   /** A files:read failure for the open file. */
   fileError: string | null
   /** Expanded directories; survives reconnects and panel toggles. */
@@ -59,7 +58,6 @@ export const INITIAL_FILE_STORE: FileStoreState = {
   truncated: false,
   treeError: null,
   contents: {},
-  loadingPath: null,
   fileError: null,
   expanded: new Set(),
   editing: false,
@@ -88,7 +86,7 @@ function compareNodes(a: FileNode, b: FileNode): number {
   return a.name.localeCompare(b.name)
 }
 
-export function toggleIn(set: ReadonlySet<string>, path: string): ReadonlySet<string> {
+function toggleIn(set: ReadonlySet<string>, path: string): ReadonlySet<string> {
   const next = new Set(set)
   if (next.has(path)) next.delete(path)
   else next.add(path)
@@ -139,22 +137,24 @@ function insertAt(nodes: FileNode[], segments: string[], prefix: string): FileNo
 // Reducer
 // ---------------------------------------------------------------------------
 
+/** The store with `content` cached for `path`. */
+function withContent(state: FileStoreState, path: string, content: string): FileStoreState {
+  return { ...state, contents: { ...state.contents, [path]: content } }
+}
+
 function reduceMessage(state: FileStoreState, msg: ServerMessage): FileStoreState {
   switch (msg.type) {
     case 'files:tree':
       return { ...state, tree: msg.entries, truncated: msg.truncated === true, treeError: null }
     case 'files:content':
       return {
-        ...state,
-        contents: { ...state.contents, [msg.path]: msg.content },
-        loadingPath: state.loadingPath === msg.path ? null : state.loadingPath,
+        ...withContent(state, msg.path, msg.content),
         fileError: msg.path === state.openFile ? null : state.fileError,
       }
     case 'files:changed': {
       // Cache every watched file, open or not, so reopening is instant.
       const next: FileStoreState = {
-        ...state,
-        contents: { ...state.contents, [msg.path]: msg.content },
+        ...withContent(state, msg.path, msg.content),
         tree: state.tree ? insertFile(state.tree, msg.path) : state.tree,
       }
       if (msg.path !== state.openFile) return next
@@ -172,7 +172,6 @@ function reduceMessage(state: FileStoreState, msg: ServerMessage): FileStoreStat
         contents,
         tree: state.tree ? removeNode(state.tree, msg.path) : state.tree,
         removed: msg.path === state.openFile ? true : state.removed,
-        loadingPath: state.loadingPath === msg.path ? null : state.loadingPath,
       }
     }
     case 'files:saved':
@@ -182,7 +181,7 @@ function reduceMessage(state: FileStoreState, msg: ServerMessage): FileStoreStat
       // Only this panel's own requests; terminal and session errors are not ours to show.
       if (!msg.request.startsWith('files:')) return state
       if (msg.request === 'files:write') return { ...state, saving: false, saveError: msg.message }
-      if (msg.request === 'files:read') return { ...state, loadingPath: null, fileError: msg.message }
+      if (msg.request === 'files:read') return { ...state, fileError: msg.message }
       return { ...state, treeError: msg.message }
     }
     default:
@@ -203,19 +202,11 @@ export function reduceFileStore(state: FileStoreState, action: FileStoreAction):
         truncated: false,
         treeError: null,
         contents: {},
-        loadingPath: state.openFile,
         fileError: null,
         removed: false,
       }
     case 'select':
-      return {
-        ...state,
-        ...NOT_EDITING,
-        openFile: action.path,
-        loadingPath: action.path !== null && state.contents[action.path] === undefined ? action.path : null,
-        fileError: null,
-        removed: false,
-      }
+      return { ...state, ...NOT_EDITING, openFile: action.path, fileError: null, removed: false }
     case 'toggle-dir':
       return { ...state, expanded: toggleIn(state.expanded, action.path) }
     case 'edit':
@@ -232,12 +223,7 @@ export function reduceFileStore(state: FileStoreState, action: FileStoreAction):
       if (state.openFile === null || !state.editing) return state
       // Cache the saved text now so the preview is right the moment the
       // editor closes; the watcher's echo confirms it.
-      return {
-        ...state,
-        saving: true,
-        saveError: null,
-        contents: { ...state.contents, [state.openFile]: state.editContent },
-      }
+      return { ...withContent(state, state.openFile, state.editContent), saving: true, saveError: null }
     case 'cancel-edit':
       return { ...state, ...NOT_EDITING }
     case 'reload-from-disk':
