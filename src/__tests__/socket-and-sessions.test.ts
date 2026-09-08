@@ -19,7 +19,15 @@ import {
   type SocketManagerOptions,
   type WebSocketLike,
 } from '../hooks/useSocket.ts'
-import { applySessionMessage, displayName } from '../sessionState.ts'
+import {
+  activeAfterList,
+  applySessionMessage,
+  displayName,
+  nextActiveAfterKill,
+  pendingCreateAfter,
+  reduceSessions,
+  type Session,
+} from '../sessionState.ts'
 import type { ServerMessage, TmuxWindow } from '../shared/protocol.ts'
 
 // ---------------------------------------------------------------------------
@@ -206,6 +214,102 @@ test('applySessionMessage: unrelated messages are a no-op (same reference back)'
 })
 
 // ---------------------------------------------------------------------------
+// Test 2b: which session is active
+// ---------------------------------------------------------------------------
+
+function session(id: number): Session {
+  return { id, name: `s${id}`, cwd: '/root', title: '', command: 'bash', named: false }
+}
+
+const THREE = [session(1), session(2), session(3)]
+
+test('activeAfterList: keeps a choice that still exists', () => {
+  assert.equal(activeAfterList(THREE, 2, '3'), 2)
+})
+
+test('activeAfterList: reopens the stored session on the first list, else the first listed', () => {
+  assert.equal(activeAfterList(THREE, null, '3'), 3)
+  assert.equal(activeAfterList(THREE, null, '9'), 1)
+  assert.equal(activeAfterList(THREE, null, 'garbage'), 1)
+  assert.equal(activeAfterList(THREE, null, null), 1)
+  assert.equal(activeAfterList([], null, '1'), null)
+})
+
+test('activeAfterList: an active session missing from the list falls back the same way', () => {
+  assert.equal(activeAfterList(THREE, 7, '2'), 2)
+  assert.equal(activeAfterList(THREE, 7, null), 1)
+})
+
+test('nextActiveAfterKill: killing another session leaves the active one alone', () => {
+  assert.equal(nextActiveAfterKill(THREE, 2, 3), 2)
+  assert.equal(nextActiveAfterKill(THREE, null, 3), null)
+})
+
+test('nextActiveAfterKill: killing the active session moves to a neighbour in creation order', () => {
+  assert.equal(nextActiveAfterKill(THREE, 2, 2), 3, 'the next newer session')
+  assert.equal(nextActiveAfterKill(THREE, 3, 3), 2, 'the newest older one when nothing is newer')
+  assert.equal(nextActiveAfterKill([session(3), session(1), session(2)], 1, 1), 2, 'creation order, not list order')
+})
+
+test('nextActiveAfterKill: killing the last session leaves nothing active', () => {
+  assert.equal(nextActiveAfterKill([session(1)], 1, 1), null)
+})
+
+// The create flag: only the device that asked for a session switches to
+// it. If the create fails the flag must clear, or the next session anyone
+// else creates would yank this device into it.
+
+test('pendingCreateAfter: clears when the session arrives and on an error answering session:create', () => {
+  assert.equal(pendingCreateAfter(true, { type: 'session:created', window: WIN_B }), false)
+  const failed = { type: 'error', message: 'tmux said no', request: 'session:create' } as ServerMessage
+  assert.equal(pendingCreateAfter(true, failed), false)
+  assert.equal(pendingCreateAfter(false, { type: 'session:created', window: WIN_B }), false)
+})
+
+test('pendingCreateAfter: survives unrelated messages and errors for other requests', () => {
+  assert.equal(pendingCreateAfter(true, { type: 'session:renamed', windowId: 1, name: 'x' }), true)
+  assert.equal(pendingCreateAfter(true, { type: 'terminal:output', windowId: 0, data: 'hi' }), true)
+  const other = { type: 'error', message: 'no such file', request: 'files:read' } as ServerMessage
+  assert.equal(pendingCreateAfter(true, other), true)
+})
+
+test('pendingCreateAfter: an error without a request field is taken as the create failing', () => {
+  const bare = { type: 'error', message: 'tmux said no' } as ServerMessage
+  assert.equal(pendingCreateAfter(true, bare), false)
+})
+
+test('reduceSessions: a list picks the active session; select changes it', () => {
+  const listed = reduceSessions({ sessions: [], active: null }, {
+    type: 'message', msg: { type: 'session:list', windows: THREE }, own: false, savedRaw: '2',
+  })
+  assert.deepEqual(listed, { sessions: THREE, active: 2 })
+  const selected = reduceSessions(listed, { type: 'select', id: 3 })
+  assert.equal(selected.active, 3)
+  assert.equal(reduceSessions(selected, { type: 'select', id: 3 }), selected, 'no change, same reference')
+})
+
+test('reduceSessions: killing the active session picks a replacement in the same step', () => {
+  const next = reduceSessions({ sessions: THREE, active: 2 }, {
+    type: 'message', msg: { type: 'session:killed', windowId: 2 }, own: false, savedRaw: null,
+  })
+  assert.deepEqual(next.sessions.map((s) => s.id), [1, 3])
+  assert.equal(next.active, 3)
+})
+
+test('reduceSessions: only the client that asked for a session switches to it', () => {
+  const state = { sessions: [session(1)], active: 1 }
+  const msg: ServerMessage = { type: 'session:created', window: session(2) }
+  assert.equal(reduceSessions(state, { type: 'message', msg, own: false, savedRaw: null }).active, 1)
+  assert.equal(reduceSessions(state, { type: 'message', msg, own: true, savedRaw: null }).active, 2)
+})
+
+test('reduceSessions: unrelated messages return the same state', () => {
+  const state = { sessions: THREE, active: 1 }
+  const msg: ServerMessage = { type: 'terminal:output', windowId: 1, data: 'x' }
+  assert.equal(reduceSessions(state, { type: 'message', msg, own: false, savedRaw: null }), state)
+})
+
+// ---------------------------------------------------------------------------
 // Test 3: send() queues while disconnected, flushes on open
 // ---------------------------------------------------------------------------
 
@@ -213,18 +317,44 @@ test('SocketManager.send: queues messages while disconnected, flushes in order o
   const { manager, instances } = makeManager()
   const sock = instances[0]
 
-  manager.send({ type: 'terminal:attach', windowId: 0 })
-  manager.send({ type: 'terminal:input', windowId: 0, data: 'ls\n' })
+  assert.equal(manager.send({ type: 'client:hello', build: 'abc' }), true)
+  assert.equal(manager.send({ type: 'session:kill', windowId: 0 }), true)
 
   assert.deepEqual(sock.sent, [], 'nothing should be sent before the socket opens')
 
   sock.triggerOpen()
 
   assert.equal(sock.sent.length, 2)
-  assert.deepEqual(JSON.parse(sock.sent[0]), { type: 'terminal:attach', windowId: 0 })
-  assert.deepEqual(JSON.parse(sock.sent[1]), { type: 'terminal:input', windowId: 0, data: 'ls\n' })
+  assert.deepEqual(JSON.parse(sock.sent[0]), { type: 'client:hello', build: 'abc' })
+  assert.deepEqual(JSON.parse(sock.sent[1]), { type: 'session:kill', windowId: 0 })
 
   manager.close()
+})
+
+// A terminal message sent while the socket is down is stale by the time
+// the socket is back: every terminal re-attaches on connect, and a
+// replayed attach or resize from before the drop would produce a second
+// pty or a resize for a size that is gone.
+test('SocketManager.send: terminal:* sent while closed is refused and not replayed; client:hello still queues', () => {
+  const { manager, instances } = makeManager()
+  const sock = instances[0]
+
+  assert.equal(manager.send({ type: 'terminal:attach', windowId: 0, cols: 80, rows: 24 }), false)
+  assert.equal(manager.send({ type: 'client:hello', build: 'abc' }), true)
+
+  sock.triggerOpen()
+  assert.deepEqual(sentTypes(sock), ['client:hello'], 'only the hello is replayed on open')
+
+  assert.equal(manager.send({ type: 'terminal:input', windowId: 0, data: 'x' }), true)
+  assert.deepEqual(sentTypes(sock), ['client:hello', 'terminal:input'])
+
+  manager.close()
+})
+
+test('SocketManager.send: after close() nothing is queued', () => {
+  const { manager } = makeManager()
+  manager.close()
+  assert.equal(manager.send({ type: 'client:hello', build: 'abc' }), false)
 })
 
 test('SocketManager.send: sends immediately once connected', () => {
@@ -232,10 +362,10 @@ test('SocketManager.send: sends immediately once connected', () => {
   const sock = instances[0]
   sock.triggerOpen()
 
-  manager.send({ type: 'session:list' })
+  assert.equal(manager.send({ type: 'session:create' }), true)
 
   assert.equal(sock.sent.length, 1)
-  assert.deepEqual(JSON.parse(sock.sent[0]), { type: 'session:list' })
+  assert.deepEqual(JSON.parse(sock.sent[0]), { type: 'session:create' })
 
   manager.close()
 })

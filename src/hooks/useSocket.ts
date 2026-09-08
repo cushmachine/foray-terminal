@@ -2,8 +2,8 @@
 //
 // `SocketManager` is a framework-agnostic class that owns the actual
 // connection lifecycle: connect, reconnect with exponential backoff,
-// queue-until-open sends, an application-level heartbeat, and pub/sub for
-// incoming messages. It has no dependency on React or the DOM (beyond the
+// queue-until-open sends (except terminal traffic, see `send`), an
+// application-level heartbeat, and pub/sub for incoming messages. It has no dependency on React or the DOM (beyond the
 // ambient `WebSocket` type used as its default factory), so it can be
 // driven directly in tests with a mock socket.
 //
@@ -14,14 +14,15 @@
 // foreground or the browser reports being online again, since phones drop
 // sockets constantly and shouldn't have to wait out a backoff.
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import type { ClientMessage, ServerMessage } from '../shared/protocol'
 
 export type SocketStatus = 'connecting' | 'connected' | 'disconnected'
 
 export interface UseSocketReturn {
   status: SocketStatus
-  send: (msg: ClientMessage) => void
+  /** See SocketManager.send: false means the message was dropped. */
+  send: (msg: ClientMessage) => boolean
   onMessage: (handler: (msg: ServerMessage) => void) => () => void
 }
 
@@ -334,13 +335,29 @@ export class SocketManager {
     }
   }
 
-  /** Sends immediately if open, otherwise queues until the connection opens. */
-  send(msg: ClientMessage): void {
+  /**
+   * Sends immediately if open, otherwise queues until the connection opens.
+   * Returns false if the message was dropped instead.
+   *
+   * Terminal traffic is never queued: every terminal re-attaches when the
+   * socket comes back, so an attach, resize or keystroke from before the
+   * drop replayed on the new socket would spawn a second pty, resize it to
+   * a size that is gone, or type into the wrong moment. The hello and the
+   * session ops are still worth delivering late.
+   */
+  send(msg: ClientMessage): boolean {
     if (this.ws && this.ws.readyState === WS_OPEN) {
       this.ws.send(JSON.stringify(msg))
-    } else {
-      this.queue.push(msg)
+      return true
     }
+    if (this.closed || msg.type.startsWith('terminal:')) return false
+    this.queue.push(msg)
+    return true
+  }
+
+  /** True once close() has been called; the manager never dials again. */
+  get isClosed(): boolean {
+    return this.closed
   }
 
   /** Registers a handler for incoming server messages. Returns an unsubscribe function. */
@@ -372,14 +389,24 @@ function socketUrl(): string {
   return `${protocol}//${window.location.host}/ws`
 }
 
-/** Connects to the Nest WebSocket server and exposes status + send/receive. */
+/**
+ * Connects to the Nest WebSocket server and exposes status + send/receive.
+ *
+ * The manager is created during the first render, not in an effect, so a
+ * child's `onMessage` subscription in its own (earlier-running) effect
+ * lands on a live manager. The effect only wires the wake listeners and
+ * closes the manager on unmount; a manager found closed on re-run (React's
+ * strict-mode double mount) is replaced.
+ */
 export function useSocket(): UseSocketReturn {
-  const managerRef = useRef<SocketManager | null>(null)
-  const [status, setStatus] = useState<SocketStatus>('connecting')
+  const [manager, setManager] = useState(() => new SocketManager(socketUrl()))
+  const [status, setStatus] = useState<SocketStatus>(manager.status)
 
   useEffect(() => {
-    const manager = new SocketManager(socketUrl())
-    managerRef.current = manager
+    if (manager.isClosed) {
+      setManager(new SocketManager(socketUrl()))
+      return
+    }
     setStatus(manager.status)
     const unsubscribe = manager.onStatusChange(setStatus)
 
@@ -403,19 +430,14 @@ export function useSocket(): UseSocketReturn {
       window.removeEventListener('pageshow', wake)
       unsubscribe()
       manager.close()
-      managerRef.current = null
     }
-  }, [])
+  }, [manager])
 
-  const send = useCallback((msg: ClientMessage) => {
-    managerRef.current?.send(msg)
-  }, [])
-
-  const onMessage = useCallback((handler: (msg: ServerMessage) => void) => {
-    const manager = managerRef.current
-    if (!manager) return () => {}
-    return manager.onMessage(handler)
-  }, [])
+  const send = useCallback((msg: ClientMessage) => manager.send(msg), [manager])
+  const onMessage = useCallback(
+    (handler: (msg: ServerMessage) => void) => manager.onMessage(handler),
+    [manager],
+  )
 
   return { status, send, onMessage }
 }

@@ -9,8 +9,12 @@
 // terminal still types directly for quick y/n answers.
 //
 // The unsent text is saved per session (draftKey) so switching sessions —
-// or backgrounding the app — never loses what you were typing.
+// or backgrounding the app — never loses what you were typing. App mounts
+// one Composer per draftKey (`key={draftKey}`), so a session switch is an
+// unmount and a fresh mount: the draft is saved on the way out and read
+// on the way in.
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { storageGet, storageRemove, storageSet } from './storage'
 
 interface ComposerProps {
   /** Paste text into the active terminal and press Enter. Empty text just presses Enter. */
@@ -22,33 +26,21 @@ interface ComposerProps {
 /** Grow with the text up to about four lines, then scroll. */
 const MAX_HEIGHT = 96
 
-// localStorage throws in some private-browsing and embedded contexts; a lost
-// draft is not worth crashing the input bar over, so treat it as absent.
-function draftGet(key: string | null | undefined): string {
-  if (!key) return ''
-  try {
-    return window.localStorage.getItem(key) ?? ''
-  } catch {
-    return ''
-  }
+function readDraft(key: string | null): string {
+  return key ? storageGet(key) ?? '' : ''
 }
 
-function draftSet(key: string | null | undefined, value: string): void {
+function saveDraft(key: string | null, value: string): void {
   if (!key) return
-  try {
-    if (value) window.localStorage.setItem(key, value)
-    else window.localStorage.removeItem(key)
-  } catch {
-    // The draft just won't persist.
-  }
+  if (value) storageSet(key, value)
+  else storageRemove(key)
 }
 
 export function Composer({ onSubmit, draftKey = null }: ComposerProps) {
-  const [text, setText] = useState(() => draftGet(draftKey))
+  const [text, setText] = useState(() => readDraft(draftKey))
   const ref = useRef<HTMLTextAreaElement>(null)
-  // The draftKey this component last saved under, so a session switch can
-  // stash the old draft before loading the new one.
-  const prevKeyRef = useRef(draftKey)
+  const textRef = useRef(text)
+  textRef.current = text
 
   const fit = useCallback(() => {
     const el = ref.current
@@ -57,24 +49,22 @@ export function Composer({ onSubmit, draftKey = null }: ComposerProps) {
     el.style.height = `${Math.min(el.scrollHeight, MAX_HEIGHT)}px`
   }, [])
 
-  // Size the field to any draft restored on first mount.
+  // Size the field to any draft restored on mount.
   useEffect(() => {
     fit()
   }, [fit])
 
-  // Session switch: save the current draft under the old key, load the new.
+  // Save on unmount (a session switch remounts under a new key). Every
+  // change is also saved as it happens because a backgrounded PWA can be
+  // killed by the OS without ever unmounting.
   useEffect(() => {
-    if (prevKeyRef.current === draftKey) return
-    draftSet(prevKeyRef.current, text)
-    prevKeyRef.current = draftKey
-    setText(draftGet(draftKey))
-    requestAnimationFrame(fit)
-  }, [draftKey, text, fit])
+    return () => saveDraft(draftKey, textRef.current)
+  }, [draftKey])
 
   const submit = useCallback(() => {
     onSubmit(text.trim())
     setText('')
-    draftSet(draftKey, '')
+    saveDraft(draftKey, '')
     // Keep the field focused so the keyboard stays up between messages.
     requestAnimationFrame(() => {
       const el = ref.current
@@ -108,7 +98,7 @@ export function Composer({ onSubmit, draftKey = null }: ComposerProps) {
         onChange={(e) => {
           const value = e.target.value
           setText(value)
-          draftSet(draftKey, value)
+          saveDraft(draftKey, value)
           fit()
         }}
         onKeyDown={handleKeyDown}

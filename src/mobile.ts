@@ -1,6 +1,20 @@
-// Pure helpers behind the mobile layout: which viewports count as "mobile",
-// edge-swipe detection for the sidebar drawer, and the persisted terminal
-// font size. No DOM here so it can be unit tested; App.tsx wires it up.
+// The mobile layout's two axes, and the pure helpers behind them.
+//
+// Touch (`IS_TOUCH`, static): the device has a coarse pointer. Decides
+// input policy that never changes while the page lives: DOM renderer so
+// long-press selection works, fixed pty height under the soft keyboard,
+// the Composer instead of typing into xterm, no copy-on-select.
+//
+// Mobile (`useIsMobile`, live): the viewport is phone-sized, or a touch
+// device held in landscape. Decides layout: the drawer sidebar, the
+// terminal/files view toggle, panel exclusivity. It changes on rotation
+// and window resize, so it is state.
+//
+// A touch tablet in portrait is touch but not mobile; a narrow desktop
+// window is mobile but not touch. Everything below is DOM-free and unit
+// tested except the two axis readers themselves.
+
+import { useEffect, useState } from 'react'
 
 /** Viewports narrower than this get the phone layout (drawer sidebar, view toggle). */
 export const MOBILE_MAX_WIDTH = 768
@@ -26,6 +40,36 @@ export interface ViewportInfo {
 export function isMobileViewport({ width, height, coarse }: ViewportInfo): boolean {
   if (width < MOBILE_MAX_WIDTH) return true
   return coarse && height <= MOBILE_LANDSCAPE_MAX_HEIGHT
+}
+
+/** Touch-first device (`pointer: coarse`). Read once: it does not change while the page lives. */
+export const IS_TOUCH =
+  typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse)').matches
+
+/** The mobile axis right now; the initial value for state that must know it before the first effect. */
+export function detectMobile(): boolean {
+  if (typeof window === 'undefined') return false
+  if (typeof window.matchMedia === 'function') return window.matchMedia(MOBILE_MEDIA_QUERY).matches
+  return isMobileViewport({ width: window.innerWidth, height: window.innerHeight, coarse: IS_TOUCH })
+}
+
+/**
+ * Phone layout or desktop layout. Driven by a media query rather than a
+ * bare width check so a phone held in landscape (wide but very short, with
+ * a touch pointer) still gets the drawer sidebar instead of losing a third
+ * of its height to a fixed one.
+ */
+export function useIsMobile(): boolean {
+  const [isMobile, setIsMobile] = useState(detectMobile)
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return
+    const mql = window.matchMedia(MOBILE_MEDIA_QUERY)
+    const handler = () => setIsMobile(mql.matches)
+    handler()
+    mql.addEventListener('change', handler)
+    return () => mql.removeEventListener('change', handler)
+  }, [])
+  return isMobile
 }
 
 // ---------------------------------------------------------------------------
@@ -66,7 +110,6 @@ export function swipeAction(
 // Terminal font size
 // ---------------------------------------------------------------------------
 
-export const FONT_SIZE_KEY = 'nest:fontSize'
 export const MIN_FONT_SIZE = 10
 export const MAX_FONT_SIZE = 22
 
@@ -103,35 +146,86 @@ export function readFontSize(raw: string | null | undefined, fallback: number): 
  */
 export const TABLET_MAX_WIDTH = 1024
 
+/** Which of the two full-width views a phone shows; desktop shows both side by side. */
+export type MobileView = 'terminal' | 'files'
+
 export interface PanelState {
   sidebarOpen: boolean
   filePanelOpen: boolean
+  /** Only read when the layout is mobile; desktop leaves it alone. */
+  mobileView: MobileView
 }
 
-export type PanelAction = 'toggle-sidebar' | 'toggle-files' | 'open-files'
+export type PanelAction =
+  | 'toggle-sidebar'
+  | 'open-sidebar'
+  | 'close-sidebar'
+  /** The file panel button or shortcut: a phone flips views, desktop toggles the panel. */
+  | 'toggle-files'
+  | 'open-files'
+  /** A file was picked in the tree. */
+  | 'open-file'
+  /** The open file was closed, back to the tree (desktop) or the terminal (phone). */
+  | 'close-file'
+  /** A session was picked, or the one this client created arrived. */
+  | 'select-session'
+  | 'show-terminal'
+  | 'show-files'
 
-/** The panel state after `action`, given the viewport width. */
-export function resolvePanels(state: PanelState, action: PanelAction, width: number): PanelState {
+/**
+ * The panel state after `action`. On desktop and tablet widths the sidebar
+ * and file panel are real panels, exclusive below TABLET_MAX_WIDTH. On a
+ * phone the sidebar is a drawer and the file panel is one of two views;
+ * a drawer is closed by anything that shows content behind it.
+ */
+export function resolvePanels(
+  state: PanelState,
+  action: PanelAction,
+  width: number,
+  isMobile: boolean,
+): PanelState {
   const exclusive = width < TABLET_MAX_WIDTH
+  const withSidebar = (sidebarOpen: boolean): PanelState => ({
+    ...state,
+    sidebarOpen,
+    filePanelOpen: exclusive && sidebarOpen ? false : state.filePanelOpen,
+  })
+  const withFiles = (filePanelOpen: boolean): PanelState => ({
+    ...state,
+    sidebarOpen: exclusive && filePanelOpen ? false : state.sidebarOpen,
+    filePanelOpen,
+  })
+  const view = (mobileView: MobileView, sidebarOpen = state.sidebarOpen): PanelState =>
+    ({ ...state, sidebarOpen, mobileView })
+
   switch (action) {
-    case 'toggle-sidebar': {
-      const sidebarOpen = !state.sidebarOpen
-      return { sidebarOpen, filePanelOpen: exclusive && sidebarOpen ? false : state.filePanelOpen }
-    }
-    case 'toggle-files': {
-      const filePanelOpen = !state.filePanelOpen
-      return { sidebarOpen: exclusive && filePanelOpen ? false : state.sidebarOpen, filePanelOpen }
-    }
+    case 'toggle-sidebar':
+      return withSidebar(!state.sidebarOpen)
+    case 'open-sidebar':
+      return withSidebar(true)
+    case 'close-sidebar':
+      return withSidebar(false)
+    case 'toggle-files':
+      if (isMobile) return view(state.mobileView === 'files' ? 'terminal' : 'files')
+      return withFiles(!state.filePanelOpen)
     case 'open-files':
-      return { sidebarOpen: exclusive ? false : state.sidebarOpen, filePanelOpen: true }
+      return withFiles(true)
+    case 'open-file':
+      return isMobile ? view('files', false) : withFiles(true)
+    case 'close-file':
+      return isMobile ? view('terminal') : state
+    case 'select-session':
+      return isMobile ? view('terminal', false) : state
+    case 'show-terminal':
+      return isMobile ? view('terminal') : state
+    case 'show-files':
+      return isMobile ? view('files') : state
   }
 }
 
 // ---------------------------------------------------------------------------
 // Key toolbar on desktop: off by default next to a physical keyboard
 // ---------------------------------------------------------------------------
-
-export const KEY_TOOLBAR_KEY = 'nest:keyToolbar'
 
 /**
  * Whether the key toolbar shows. Touch layouts always need it. On desktop

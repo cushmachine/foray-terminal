@@ -6,7 +6,7 @@ import { ClipboardAddon } from '@xterm/addon-clipboard'
 import { WebglAddon } from '@xterm/addon-webgl'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
-import type { UseSocketReturn } from './hooks/useSocket'
+import { useSocketContext } from './SocketContext'
 import { MAX_HISTORY_LINES } from './shared/protocol'
 import { imageFilesFromClipboard, pathToTerminalInput, pickImageFiles, uploadImage } from './imageUpload'
 import { canFit, nextResize, type TerminalDims } from './terminalSize'
@@ -19,7 +19,12 @@ import { snapshotText } from './selectMode'
 
 interface TerminalProps {
   windowId: number
-  socket: UseSocketReturn
+  /**
+   * Touch device (see IS_TOUCH in mobile.ts; static for the page's life).
+   * Drives the mobile-only terminal policy: DOM renderer, fixed pty height,
+   * composer-mode scroll inset.
+   */
+  touch?: boolean
   isActive?: boolean
   fontSize?: number
   modifiers?: Modifiers
@@ -37,9 +42,6 @@ const UPLOAD_ERROR_FLASH_MS = 4000
 // onSelectionChange fires continuously during a drag; copy once it settles.
 const COPY_ON_SELECT_MS = 120
 const COPIED_FLASH_MS = 1500
-// Touch device (phone/tablet). Drives the mobile-only terminal policy below:
-// DOM renderer, fixed pty height, composer-mode scroll inset.
-const COARSE = typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse)').matches
 const SEPARATOR = /^[\s─━═╌┄]+$/
 const PROMPT = /^\s*❯/
 
@@ -62,7 +64,7 @@ function isFileDrag(e: ReactDragEvent): boolean {
 
 export function Terminal({
   windowId,
-  socket,
+  touch = false,
   isActive,
   fontSize = 14,
   modifiers = NO_MODIFIERS,
@@ -81,7 +83,7 @@ export function Terminal({
   const fitRef = useRef<(() => void) | null>(null)
   const fontSizeRef = useRef(fontSize)
   fontSizeRef.current = fontSize
-  const { send, onMessage, status } = socket
+  const { send, onMessage, status } = useSocketContext()
   const everConnectedRef = useRef(false)
   const prevStatusRef = useRef<typeof status | null>(null)
   const [detached, setDetached] = useState(false)
@@ -139,7 +141,7 @@ export function Terminal({
 
   useEffect(() => {
     if (!isActive || !termRef.current) return
-    if (COARSE) {
+    if (touch) {
       const ta = document.querySelector<HTMLTextAreaElement>('[data-composer] textarea')
       if (ta) { ta.focus(); return }
     }
@@ -188,7 +190,7 @@ export function Terminal({
     // native long-press selection works on phones. WebGL paints to a canvas
     // where the browser can't select text at all.
     let webgl: WebglAddon | null = null
-    if (!COARSE) {
+    if (!touch) {
       try {
         webgl = new WebglAddon()
         webgl.onContextLoss(() => { webgl?.dispose(); webgl = null })
@@ -198,7 +200,7 @@ export function Terminal({
       }
     }
     requestAnimationFrame(() => {
-      if (COARSE) {
+      if (touch) {
         const ta = document.querySelector<HTMLTextAreaElement>('[data-composer] textarea')
         if (ta) { ta.focus(); return }
       }
@@ -244,7 +246,7 @@ export function Terminal({
     let fullH = 0
     let lastW = 0
     const scrollObserver = new ResizeObserver(() => {
-      if (COARSE) {
+      if (touch) {
         const w = scrollEl.clientWidth
         const h = scrollEl.clientHeight
         if (w !== lastW) { lastW = w; fullH = 0 }
@@ -267,7 +269,7 @@ export function Terminal({
     // focus: everything under the last real output row (prompt box, status bar,
     // trailing blanks). The cursor row is never output, so the walk starts above it.
     const bottomInset = (): number => {
-      if (!COARSE) return 0
+      if (!touch) return 0
       if (!document.querySelector('[data-composer]:focus-within')) return 0
       const buf = term.buffer.active
       const text = (r: number) => buf.getLine(r)?.translateToString(true) ?? ''
@@ -298,7 +300,7 @@ export function Terminal({
     // and refocuses the input too, and a reader scrolled up must stay put.
     let pinRaf = 0
     const onFocusChange = () => {
-      if (!COARSE) return
+      if (!touch) return
       cancelAnimationFrame(pinRaf)
       pinRaf = requestAnimationFrame(() => { if (stickRef.current) scrollToBottom(true) })
     }
@@ -589,7 +591,7 @@ export function Terminal({
     if (focused instanceof HTMLElement) focused.blur()
     return () => {
       setCopied(false)
-      if (COARSE) {
+      if (touch) {
         document.querySelector<HTMLTextAreaElement>('[data-composer] textarea')?.focus()
       } else {
         termRef.current?.focus()
@@ -672,7 +674,7 @@ export function Terminal({
           data-xterm-screen
           style={{
             width: '100%',
-            height: COARSE ? 'var(--xterm-full-h, 100%)' : '100%',
+            height: touch ? 'var(--xterm-full-h, 100%)' : '100%',
             padding: 8,
           }}
         />

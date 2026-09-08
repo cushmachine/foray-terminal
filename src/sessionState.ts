@@ -1,8 +1,8 @@
-// Pure session-list reducer.
+// Pure session bookkeeping: the session list, which session is active,
+// and the flag for a session this client asked for.
 //
-// Applies incoming ServerMessages to the client's session list. Extracted
-// out of App.tsx so this bookkeeping can be unit tested without React or a
-// DOM — see src/__tests__/chunkC.test.ts.
+// Extracted out of App.tsx so it can be unit tested without React or a
+// DOM (src/__tests__/socket-and-sessions.test.ts).
 
 import type { ServerMessage, TmuxWindow } from './shared/protocol'
 
@@ -47,7 +47,7 @@ export function applySessionMessage(sessions: Session[], msg: ServerMessage): Se
  * otherwise sort before bash-2; ids are allocated sequentially, so ascending
  * id is creation order. Returns a new array; the input is not mutated.
  */
-export function sortSessions(sessions: Session[]): Session[] {
+export function sortSessions(sessions: readonly Session[]): Session[] {
   return [...sessions].sort((a, b) => a.id - b.id)
 }
 
@@ -62,4 +62,108 @@ export function sortSessions(sessions: Session[]): Session[] {
 export function openedWith(opened: readonly number[], id: number | null): number[] {
   if (id === null || opened.includes(id)) return opened as number[]
   return [...opened, id]
+}
+
+/**
+ * The active session after a full list arrives. A still-existing choice is
+ * kept. Otherwise (first list of this page load, or the active session is
+ * gone) the session this device last looked at, from storage, is reopened
+ * if it still exists; failing that, the first listed one.
+ */
+export function activeAfterList(
+  windows: readonly Session[],
+  active: number | null,
+  savedRaw: string | null,
+): number | null {
+  if (active !== null && windows.some((w) => w.id === active)) return active
+  const saved = savedRaw !== null ? Number(savedRaw) : NaN
+  if (Number.isInteger(saved) && windows.some((w) => w.id === saved)) return saved
+  return windows[0]?.id ?? null
+}
+
+/**
+ * The active session after `killedId` is killed. `sessions` is the list
+ * before the kill. Killing another session changes nothing. Killing the
+ * active one moves to its neighbour in creation order (the next newer, or
+ * the newest older one) right away, rather than showing an empty terminal
+ * area until the next poll's list arrives.
+ */
+export function nextActiveAfterKill(
+  sessions: readonly Session[],
+  active: number | null,
+  killedId: number,
+): number | null {
+  if (active !== killedId) return active
+  const ordered = sortSessions(sessions)
+  const index = ordered.findIndex((s) => s.id === killedId)
+  const survivors = ordered.filter((s) => s.id !== killedId)
+  if (survivors.length === 0) return null
+  const neighbour = index === -1 ? survivors[0] : survivors[Math.min(index, survivors.length - 1)]
+  return neighbour.id
+}
+
+/**
+ * The "this client asked for a session" flag after `msg`. Set by the create
+ * button so that only this device, not every device, switches to the
+ * session that arrives. It clears when the session arrives or when the
+ * create fails; otherwise the next session anyone else creates would yank
+ * this device into it.
+ *
+ * `request` on error messages says which request failed. Until every
+ * server fills it in, an error without it is taken as the create's.
+ */
+export function pendingCreateAfter(pending: boolean, msg: ServerMessage): boolean {
+  if (!pending) return false
+  if (msg.type === 'session:created') return false
+  if (msg.type === 'error') {
+    const request = 'request' in msg ? (msg as { request?: unknown }).request : undefined
+    return request !== undefined && request !== 'session:create'
+  }
+  return pending
+}
+
+export interface SessionsState {
+  sessions: Session[]
+  active: number | null
+}
+
+export type SessionsAction =
+  | { type: 'select'; id: number }
+  | {
+      type: 'message'
+      msg: ServerMessage
+      /** True when this client asked for the session a session:created carries. */
+      own: boolean
+      /** The stored last-session id, consulted when a list arrives. */
+      savedRaw: string | null
+    }
+
+/**
+ * The list and the active session move together: a kill or a new list
+ * that removes the active session must pick a replacement in the same
+ * step, so there is never a render pointing at a session that is gone.
+ * Returns the same state reference when nothing changed.
+ */
+export function reduceSessions(state: SessionsState, action: SessionsAction): SessionsState {
+  if (action.type === 'select') {
+    return state.active === action.id ? state : { ...state, active: action.id }
+  }
+  const { msg } = action
+  const sessions = applySessionMessage(state.sessions, msg)
+  let active = state.active
+  switch (msg.type) {
+    case 'session:list':
+      active = activeAfterList(sessions, state.active, action.savedRaw)
+      break
+    case 'session:created':
+      if (action.own) active = msg.window.id
+      break
+    case 'session:killed':
+      active = nextActiveAfterKill(state.sessions, state.active, msg.windowId)
+      break
+    default:
+      break
+  }
+  if (sessions === state.sessions && active === state.active) return state
+  return { sessions, active }
 }

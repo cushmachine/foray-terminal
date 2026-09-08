@@ -1,7 +1,7 @@
 import { MONO_FONT } from './theme'
 import { displayName } from './sessionState'
 import type { Session } from './sessionState'
-import type { MobileView } from './App'
+import type { MobileView } from './mobile'
 
 interface TopBarProps {
   isMobile: boolean

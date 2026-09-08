@@ -5,7 +5,16 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { overflowHint, shortcutAction } from '../keys.ts'
-import { KEY_TOOLBAR_KEY, TABLET_MAX_WIDTH, readToolbarVisible, resolvePanels } from '../mobile.ts'
+import { TABLET_MAX_WIDTH, readToolbarVisible, resolvePanels, type PanelState } from '../mobile.ts'
+import { KEY_TOOLBAR_KEY } from '../storage.ts'
+
+const PHONE = 390
+const DESKTOP = 1440
+
+/** A desktop-layout panel state; the phone view is along for the ride. */
+function desktop(sidebarOpen: boolean, filePanelOpen: boolean): PanelState {
+  return { sidebarOpen, filePanelOpen, mobileView: 'terminal' }
+}
 
 test('#9 shortcutAction: Meta+B and Ctrl+Shift+B toggle the sidebar', () => {
   assert.equal(shortcutAction({ key: 'b', metaKey: true, ctrlKey: false, shiftKey: false, altKey: false }), 'toggle-sidebar')
@@ -36,18 +45,66 @@ test('#5 overflowHint says which edges have more content', () => {
 
 test('#6 resolvePanels: below the tablet threshold the sidebar and file panel are exclusive', () => {
   const narrow = TABLET_MAX_WIDTH - 1
-  assert.deepEqual(resolvePanels({ sidebarOpen: true, filePanelOpen: false }, 'toggle-files', narrow), { sidebarOpen: false, filePanelOpen: true })
-  assert.deepEqual(resolvePanels({ sidebarOpen: false, filePanelOpen: true }, 'toggle-sidebar', narrow), { sidebarOpen: true, filePanelOpen: false })
-  assert.deepEqual(resolvePanels({ sidebarOpen: true, filePanelOpen: false }, 'open-files', narrow), { sidebarOpen: false, filePanelOpen: true })
+  assert.deepEqual(resolvePanels(desktop(true, false), 'toggle-files', narrow, false), desktop(false, true))
+  assert.deepEqual(resolvePanels(desktop(false, true), 'toggle-sidebar', narrow, false), desktop(true, false))
+  assert.deepEqual(resolvePanels(desktop(true, false), 'open-files', narrow, false), desktop(false, true))
+  assert.deepEqual(resolvePanels(desktop(false, true), 'open-sidebar', narrow, false), desktop(true, false))
   // Closing never opens the other one.
-  assert.deepEqual(resolvePanels({ sidebarOpen: false, filePanelOpen: true }, 'toggle-files', narrow), { sidebarOpen: false, filePanelOpen: false })
+  assert.deepEqual(resolvePanels(desktop(false, true), 'toggle-files', narrow, false), desktop(false, false))
+  assert.deepEqual(resolvePanels(desktop(true, true), 'close-sidebar', narrow, false), desktop(false, true))
 })
 
 test('#6 resolvePanels: at desktop widths both panels can be open', () => {
   const wide = TABLET_MAX_WIDTH
-  assert.deepEqual(resolvePanels({ sidebarOpen: true, filePanelOpen: false }, 'toggle-files', wide), { sidebarOpen: true, filePanelOpen: true })
-  assert.deepEqual(resolvePanels({ sidebarOpen: true, filePanelOpen: true }, 'toggle-sidebar', wide), { sidebarOpen: false, filePanelOpen: true })
-  assert.deepEqual(resolvePanels({ sidebarOpen: true, filePanelOpen: true }, 'open-files', wide), { sidebarOpen: true, filePanelOpen: true })
+  assert.deepEqual(resolvePanels(desktop(true, false), 'toggle-files', wide, false), desktop(true, true))
+  assert.deepEqual(resolvePanels(desktop(true, true), 'toggle-sidebar', wide, false), desktop(false, true))
+  assert.deepEqual(resolvePanels(desktop(true, true), 'open-files', wide, false), desktop(true, true))
+  assert.deepEqual(resolvePanels(desktop(true, true), 'open-file', wide, false), desktop(true, true))
+})
+
+// On a phone the file panel is a view, not a panel: the actions below move
+// mobileView and close the drawer, and never touch filePanelOpen.
+
+test('resolvePanels: opening a file on a phone shows the files view and closes the drawer', () => {
+  const start: PanelState = { sidebarOpen: true, filePanelOpen: false, mobileView: 'terminal' }
+  const next = resolvePanels(start, 'open-file', PHONE, true)
+  assert.equal(next.mobileView, 'files')
+  assert.equal(next.sidebarOpen, false)
+  assert.equal(next.filePanelOpen, false)
+})
+
+test('resolvePanels: selecting a session on a phone shows the terminal and closes the drawer', () => {
+  const start: PanelState = { sidebarOpen: true, filePanelOpen: false, mobileView: 'files' }
+  const next = resolvePanels(start, 'select-session', PHONE, true)
+  assert.equal(next.mobileView, 'terminal')
+  assert.equal(next.sidebarOpen, false)
+})
+
+test('resolvePanels: closing a file on a phone returns to the terminal', () => {
+  const start: PanelState = { sidebarOpen: false, filePanelOpen: false, mobileView: 'files' }
+  assert.equal(resolvePanels(start, 'close-file', PHONE, true).mobileView, 'terminal')
+})
+
+test('resolvePanels: toggle-files on a phone flips the view', () => {
+  const start: PanelState = { sidebarOpen: false, filePanelOpen: false, mobileView: 'terminal' }
+  const files = resolvePanels(start, 'toggle-files', PHONE, true)
+  assert.equal(files.mobileView, 'files')
+  assert.equal(files.filePanelOpen, false, 'the desktop panel flag is not the phone view')
+  assert.equal(resolvePanels(files, 'toggle-files', PHONE, true).mobileView, 'terminal')
+})
+
+test('resolvePanels: the segmented control picks a view on a phone', () => {
+  const start: PanelState = { sidebarOpen: false, filePanelOpen: false, mobileView: 'terminal' }
+  assert.equal(resolvePanels(start, 'show-files', PHONE, true).mobileView, 'files')
+  assert.equal(resolvePanels({ ...start, mobileView: 'files' }, 'show-terminal', PHONE, true).mobileView, 'terminal')
+})
+
+test('resolvePanels: on desktop mobileView is left alone and the sidebar stays put', () => {
+  const start: PanelState = { sidebarOpen: true, filePanelOpen: false, mobileView: 'terminal' }
+  assert.equal(resolvePanels(start, 'open-file', DESKTOP, false).mobileView, 'terminal')
+  assert.equal(resolvePanels(start, 'select-session', DESKTOP, false), start)
+  assert.equal(resolvePanels(start, 'close-file', DESKTOP, false), start)
+  assert.equal(resolvePanels(start, 'show-files', DESKTOP, false), start)
 })
 
 test('#10 readToolbarVisible: always on for touch layouts, off by default on desktop, persisted choice wins', () => {

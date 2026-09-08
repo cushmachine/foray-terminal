@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect, lazy, Suspense } from 'react'
-import type { ClientMessage, ServerMessage, FileNode } from './shared/protocol'
-import type { SocketStatus } from './hooks/useSocket'
+import type { FileNode } from './shared/protocol'
+import { useSocketContext } from './SocketContext'
 import { MarkdownRenderer } from './MarkdownRenderer'
 import { MONO_FONT } from './theme'
 
@@ -13,16 +13,6 @@ interface FilePanelProps {
   onResize: (width: number) => void
   /** Working directory to list/watch. Resolved server-side; files:read/write paths are relative to this. */
   cwd: string
-  /** Send a protocol message to the server over the shared WebSocket. */
-  send: (msg: ClientMessage) => void
-  /** Subscribe to incoming protocol messages. Returns an unsubscribe function. */
-  onMessage: (handler: (msg: ServerMessage) => void) => () => void
-  /**
-   * Connection status. The server forgets this connection's cwd and file
-   * watcher when the socket closes, so the panel re-establishes both on
-   * every reconnect.
-   */
-  status: SocketStatus
 }
 
 // CodeMirror is a third of the bundle and only needed once a file is open.
@@ -160,7 +150,10 @@ function ResizeHandle({ onResize }: { onResize: (delta: number) => void }) {
   )
 }
 
-export function FilePanel({ openFile, onOpenFile, onClose, isMobile, width, onResize, cwd, send, onMessage, status }: FilePanelProps) {
+export function FilePanel({ openFile, onOpenFile, onClose, isMobile, width, onResize, cwd }: FilePanelProps) {
+  // The server forgets this connection's cwd and file watcher when the
+  // socket closes, so the panel re-establishes both on every reconnect.
+  const { send, onMessage, status } = useSocketContext()
   const [tree, setTree] = useState<FileNode[] | null>(null)
   const [treeError, setTreeError] = useState<string | null>(null)
   const [fileContents, setFileContents] = useState<Record<string, string>>({})
