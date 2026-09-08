@@ -1,47 +1,19 @@
 // Version handshake, server side: client:hello is answered with server:hello.
 //
-// Run with: npm run test:handshake
+// Run with: npx tsx --test src/server/__tests__/handshake.test.ts
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
-import os from 'node:os'
 import path from 'node:path'
-import { WebSocket as WsClient } from 'ws'
-import { startServer } from '../index.ts'
 import { describeCheckout, readServedClientBuild } from '../build.ts'
-
-type Msg = { type: string; [key: string]: unknown }
-
-/** Connect, wait for the welcome, then resolve with a way to await the next message of a type. */
-async function connect(url: string): Promise<{ ws: WsClient; next: (type: string) => Promise<Msg> }> {
-  const ws = new WsClient(url.replace(/^http/, 'ws') + '/ws')
-  const next = (type: string): Promise<Msg> =>
-    new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`timed out waiting for ${type}`)), 5000)
-      const onMessage = (data: unknown): void => {
-        const msg = JSON.parse(String(data)) as Msg
-        if (msg.type !== type) return
-        clearTimeout(timer)
-        ws.off('message', onMessage)
-        resolve(msg)
-      }
-      ws.on('message', onMessage)
-    })
-  const welcome = next('session:list')
-  await new Promise<void>((resolve, reject) => {
-    ws.once('open', resolve)
-    ws.once('error', reject)
-  })
-  await welcome
-  return { ws, next }
-}
+import { connect, startTestServer, tmpDir, waitForType } from './helpers.ts'
 
 test('client:hello is answered with server:hello carrying a server build', async () => {
-  const { url, close } = await startServer(0)
+  const { url, close } = await startTestServer()
   try {
-    const { ws, next } = await connect(url)
-    const reply = next('server:hello')
+    const { ws } = await connect(url)
+    const reply = waitForType(ws, 'server:hello')
     ws.send(JSON.stringify({ type: 'client:hello', build: 'test0000.abc' }))
     const hello = await reply
     assert.equal(typeof hello.serverBuild, 'string')
@@ -54,10 +26,10 @@ test('client:hello is answered with server:hello carrying a server build', async
 })
 
 test('client:hello with a non-string build is rejected as an invalid message', async () => {
-  const { url, close } = await startServer(0)
+  const { url, close } = await startTestServer()
   try {
-    const { ws, next } = await connect(url)
-    const reply = next('error')
+    const { ws } = await connect(url)
+    const reply = waitForType(ws, 'error')
     ws.send(JSON.stringify({ type: 'client:hello', build: 5 }))
     const err = await reply
     assert.ok(String(err.message).startsWith('Invalid message'), String(err.message))
@@ -70,7 +42,7 @@ test('client:hello with a non-string build is rejected as an invalid message', a
 test('describeCheckout reports a short sha (optionally -dirty) in a repo, unknown outside one', async () => {
   const here = describeCheckout()
   assert.match(here, /^[0-9a-f]{7,}(-dirty)?$/)
-  const empty = await fs.mkdtemp(path.join(os.tmpdir(), 'nest-nogit-'))
+  const empty = await tmpDir('nest-nogit-')
   try {
     assert.equal(describeCheckout(empty), 'unknown')
   } finally {
@@ -79,7 +51,7 @@ test('describeCheckout reports a short sha (optionally -dirty) in a repo, unknow
 })
 
 test('readServedClientBuild reads the stamped id from dist/index.html, null when absent', async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'nest-dist-'))
+  const root = await tmpDir('nest-dist-')
   try {
     assert.equal(await readServedClientBuild(root), null)
     await fs.writeFile(path.join(root, 'index.html'), '<html><head><meta name="nest-build" content="abc1234.k1"></head></html>')

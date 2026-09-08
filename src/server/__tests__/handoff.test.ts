@@ -1,99 +1,50 @@
-// Session handoff (multi-client ownership) + deployment config tests.
+// Session handoff (multi-client ownership), the production static server,
+// and connection liveness.
 //
-// Run with: npm run test:handoff
-// (executed directly via `tsx`, using node's built-in test runner)
+// Run with: npx tsx --test src/server/__tests__/handoff.test.ts
 //
 // Covers:
-//  1. terminal:attach ownership handoff — a second client attaching to a
+//  1. terminal:attach ownership handoff: a second client attaching to a
 //     window that already has a client detaches the first
 //  2. session:ownership broadcasts to all clients on attach and on disconnect
-//  3. `npm run build` produces client files (index.html + assets). Built
-//     into a temp directory, never <project-root>/dist: production serves
-//     dist/ straight from the checkout, so a test build there would deploy
-//     the working tree.
-//  4. the production server (NODE_ENV=production) serves the built client
-//     from dist/ under the current working directory — the fix for the
-//     __dirname-based path bug, plus a health-check sanity check
-//  5. connection liveness: `ping` gets a `pong`, a client that never answers
+//  3. the server serves a built client from its dist directory (static
+//     files, SPA fallback, the build id in server:hello) and serves no
+//     client at all when there is none to serve
+//  4. connection liveness: `ping` gets a `pong`, a client that never answers
 //     protocol pings is terminated, and terminal:attach passes its cols/rows
 //     through to the pty spawner
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
 import fs from 'node:fs/promises'
-import os from 'node:os'
 import path from 'node:path'
 import { WebSocket as WsClient } from 'ws'
-import { startServer } from '../index.ts'
-import type { PtySpawner } from '../pty-bridge.ts'
-
-const execFileAsync = promisify(execFile)
-
-/** Connect a WebSocket and resolve once the welcome message arrives. */
-async function connectAndWaitForWelcome(url: string): Promise<WebSocket> {
-  const wsUrl = url.replace(/^http/, 'ws') + '/ws'
-  const ws = new WebSocket(wsUrl)
-  await new Promise<void>((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error('timed out waiting for welcome')), 5000)
-    ws.addEventListener(
-      'message',
-      () => {
-        clearTimeout(timeout)
-        resolve()
-      },
-      { once: true },
-    )
-    ws.addEventListener('error', reject)
-  })
-  return ws
-}
-
-/** Wait for the next message of a given type on a socket (ignores others). */
-function waitForType(ws: WebSocket, type: string, timeoutMs = 5000): Promise<any> {
-  return new Promise((resolve, reject) => {
-    const timeout = setTimeout(
-      () => reject(new Error(`timed out waiting for message of type "${type}"`)),
-      timeoutMs,
-    )
-    const handler = (event: MessageEvent) => {
-      const msg = JSON.parse(event.data.toString())
-      if (msg.type === type) {
-        clearTimeout(timeout)
-        ws.removeEventListener('message', handler)
-        resolve(msg)
-      }
-    }
-    ws.addEventListener('message', handler)
-  })
-}
+import { connect, startTestServer, tmpDir, waitForType, wsUrl } from './helpers.ts'
 
 // ---------------------------------------------------------------------------
 // Test 1: second attach detaches the first client
 // ---------------------------------------------------------------------------
 
 test('terminal:attach: a second client taking a window detaches the first', async () => {
-  const { url, close } = await startServer(0)
+  const { url, close, tmux, ptys } = await startTestServer()
+  tmux.add('shell')
   try {
-    const ws1 = await connectAndWaitForWelcome(url)
-    const ws2 = await connectAndWaitForWelcome(url)
+    const { ws: ws1 } = await connect(url)
+    const { ws: ws2 } = await connect(url)
 
-    // ws1 attaches to window 0 first. There's no real tmux running in this
-    // test environment, so the pty spawn itself will fail — but ownership
-    // tracking should still register the attach (a session:ownership
-    // broadcast should still go out).
     const ws1Owns = waitForType(ws1, 'session:ownership')
     ws1.send(JSON.stringify({ type: 'terminal:attach', windowId: 0 }))
     await ws1Owns
+    assert.deepEqual(ptys.map((p) => p.args), [['attach-session', '-t', '$0']])
 
-    // ws2 attaches to the SAME window — ws1 should be told it was taken over.
+    // ws2 attaches to the SAME window: ws1 is told it was taken over.
     const detached = waitForType(ws1, 'terminal:detached')
     ws2.send(JSON.stringify({ type: 'terminal:attach', windowId: 0 }))
 
     const detachedMsg = await detached
     assert.equal(detachedMsg.windowId, 0)
     assert.equal(detachedMsg.reason, 'taken-over')
+    assert.equal(ptys.length, 2, 'each attach spawns its own pty')
 
     ws1.close()
     ws2.close()
@@ -107,10 +58,11 @@ test('terminal:attach: a second client taking a window detaches the first', asyn
 // ---------------------------------------------------------------------------
 
 test('session:ownership broadcasts to all clients on attach and on disconnect', async () => {
-  const { url, close } = await startServer(0)
+  const { url, close, tmux } = await startTestServer()
+  tmux.add('shell')
   try {
-    const ws1 = await connectAndWaitForWelcome(url)
-    const ws2 = await connectAndWaitForWelcome(url)
+    const { ws: ws1 } = await connect(url)
+    const { ws: ws2 } = await connect(url)
 
     const ws1Ownership = waitForType(ws1, 'session:ownership')
     const ws2Ownership = waitForType(ws2, 'session:ownership')
@@ -120,8 +72,7 @@ test('session:ownership broadcasts to all clients on attach and on disconnect', 
     assert.deepEqual(msg1.ownership, [{ windowId: 0, clients: 1 }])
     assert.deepEqual(msg2.ownership, [{ windowId: 0, clients: 1 }])
 
-    // ws1 disconnects — ws2 (still connected) should see an updated
-    // ownership snapshot with window 0 no longer listed.
+    // ws1 disconnects: ws2 sees a snapshot with window 0 no longer listed.
     const updatedOwnership = waitForType(ws2, 'session:ownership')
     ws1.close()
 
@@ -135,83 +86,68 @@ test('session:ownership broadcasts to all clients on attach and on disconnect', 
 })
 
 // ---------------------------------------------------------------------------
-// Test 3: `npm run build` produces client files (in a temp dir)
+// Test 3: the production static server
 // ---------------------------------------------------------------------------
 
-/**
- * Root of the temp build from test 3, holding a `dist/` for test 4 to serve.
- * Never <project-root>/dist: the production server serves that directory
- * straight from the checkout, so building there from a test silently
- * deploys whatever is in the working tree (it did, on 2026-09-06).
- */
-let builtRoot: string | null = null
+const INDEX_HTML =
+  '<!doctype html><html><head><meta name="nest-build" content="abc1234.k1"></head>' +
+  '<body><div id="root"></div></body></html>'
 
-test('npm run build produces index.html and JS/CSS assets', async () => {
-  const projectRoot = process.cwd()
-  builtRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'nest-build-'))
-  const distDir = path.join(builtRoot, 'dist')
-
-  // `npm run build -- <args>` appends the args to the script, so they land
-  // on `vite build` and redirect its output away from the live dist/.
-  await execFileAsync('npm', ['run', 'build', '--', '--outDir', distDir, '--emptyOutDir'], {
-    cwd: projectRoot,
-    maxBuffer: 20 * 1024 * 1024,
-  })
-
-  const indexHtml = await fs.readFile(path.join(distDir, 'index.html'), 'utf-8')
-  assert.ok(indexHtml.includes('<div id="root">'), 'index.html should contain the app root element')
-
-  const assetFiles = await fs.readdir(path.join(distDir, 'assets'))
-  assert.ok(assetFiles.some((f) => f.endsWith('.js')), 'assets should contain a .js bundle')
-  assert.ok(assetFiles.some((f) => f.endsWith('.css')), 'assets should contain a .css bundle')
-})
-
-// ---------------------------------------------------------------------------
-// Test 4: production server serves the built client from <cwd>/dist
-// ---------------------------------------------------------------------------
-
-test('production server serves the built client and responds to health checks', async (t) => {
-  if (!builtRoot) {
-    t.skip('needs the temp build from the previous test')
-    return
-  }
-  // The server resolves dist/ against process.cwd(), so serve the temp
-  // build by running from its root for the duration of this test.
-  const originalCwd = process.cwd()
-  const originalNodeEnv = process.env.NODE_ENV
-  process.chdir(builtRoot)
-  process.env.NODE_ENV = 'production'
+test('the server serves a built client from its dist dir, with the SPA fallback', async () => {
+  const root = await tmpDir('nest-dist-')
+  const dist = path.join(root, 'dist')
+  await fs.mkdir(path.join(dist, 'assets'), { recursive: true })
+  await fs.writeFile(path.join(dist, 'index.html'), INDEX_HTML)
+  await fs.writeFile(path.join(dist, 'assets', 'app.js'), 'console.log("app")')
+  const { url, close } = await startTestServer({ clientDist: dist })
   try {
-    const { url, close } = await startServer(0)
-    try {
-      const health = await fetch(`${url}/health`)
-      assert.equal(health.status, 200)
-      assert.deepEqual(await health.json(), { status: 'ok' })
+    const health = await fetch(`${url}/health`)
+    assert.equal(health.status, 200)
+    assert.deepEqual(await health.json(), { status: 'ok' })
 
-      const root = await fetch(`${url}/`)
-      assert.equal(root.status, 200)
-      const html = await root.text()
-      assert.ok(html.includes('<div id="root">'), 'production server should serve the built index.html')
-    } finally {
-      await close()
-    }
+    const index = await fetch(`${url}/`)
+    assert.equal(index.status, 200)
+    assert.equal(await index.text(), INDEX_HTML)
+
+    const asset = await fetch(`${url}/assets/app.js`)
+    assert.equal(asset.status, 200)
+    assert.equal(await asset.text(), 'console.log("app")')
+
+    // A client-side route reloads to index.html, not a 404.
+    const deep = await fetch(`${url}/some/client/route`)
+    assert.equal(deep.status, 200)
+    assert.equal(await deep.text(), INDEX_HTML)
+
+    // The version handshake reports the build id of that same index.html.
+    const { ws } = await connect(url)
+    const hello = waitForType(ws, 'server:hello')
+    ws.send(JSON.stringify({ type: 'client:hello', build: null }))
+    assert.equal((await hello).clientBuild, 'abc1234.k1')
+    ws.close()
   } finally {
-    process.env.NODE_ENV = originalNodeEnv
-    process.chdir(originalCwd)
-    await fs.rm(builtRoot, { recursive: true, force: true })
-    builtRoot = null
+    await close()
+    await fs.rm(root, { recursive: true, force: true })
   }
 })
 
+test('a server with no client dir serves the API only', async () => {
+  const { url, close } = await startTestServer()
+  try {
+    assert.equal((await fetch(`${url}/health`)).status, 200)
+    assert.equal((await fetch(`${url}/`)).status, 404)
+  } finally {
+    await close()
+  }
+})
 
 // ---------------------------------------------------------------------------
-// Test 5: liveness — ping/pong, dead-client termination, attach size
+// Test 4: liveness: ping/pong, dead-client termination, attach size
 // ---------------------------------------------------------------------------
 
 test('ping is answered with pong', async () => {
-  const { url, close } = await startServer(0)
+  const { url, close } = await startTestServer()
   try {
-    const ws = await connectAndWaitForWelcome(url)
+    const { ws } = await connect(url)
     const pong = waitForType(ws, 'pong')
     ws.send(JSON.stringify({ type: 'ping' }))
     assert.deepEqual(await pong, { type: 'pong' })
@@ -222,12 +158,11 @@ test('ping is answered with pong', async () => {
 })
 
 test('a client that never answers protocol pings is terminated', async () => {
-  const { url, close } = await startServer(0, { heartbeatIntervalMs: 50 })
+  const { url, close } = await startTestServer({ heartbeatIntervalMs: 50 })
   try {
     // The `ws` client can be told not to auto-reply to pings; the browser
     // and Node's built-in WebSocket always do, which is why they stay alive.
-    const wsUrl = url.replace(/^http/, 'ws') + '/ws'
-    const ws = new WsClient(wsUrl, { autoPong: false })
+    const ws = new WsClient(wsUrl(url), { autoPong: false })
     await new Promise<void>((resolve, reject) => {
       ws.once('message', () => resolve())
       ws.once('error', reject)
@@ -247,9 +182,9 @@ test('a client that never answers protocol pings is terminated', async () => {
 })
 
 test('a client that answers protocol pings stays connected across several ticks', async () => {
-  const { url, close } = await startServer(0, { heartbeatIntervalMs: 30 })
+  const { url, close } = await startTestServer({ heartbeatIntervalMs: 30 })
   try {
-    const ws = await connectAndWaitForWelcome(url)
+    const { ws } = await connect(url)
     let closedEarly = false
     ws.addEventListener('close', () => {
       closedEarly = true
@@ -263,25 +198,22 @@ test('a client that answers protocol pings stays connected across several ticks'
 })
 
 test('terminal:attach passes cols/rows through to the pty spawner', async () => {
-  const spawned: Array<{ cols: number; rows: number }> = []
-  const ptySpawner: PtySpawner = (_file, _args, options) => {
-    spawned.push({ cols: options.cols, rows: options.rows })
-    return { onData: () => {}, write: () => {}, resize: () => {}, kill: () => {} }
-  }
-  const { url, close } = await startServer(0, { ptySpawner })
+  const { url, close, tmux, ptys } = await startTestServer()
+  tmux.add('one')
+  tmux.add('two')
   try {
-    const ws = await connectAndWaitForWelcome(url)
+    const { ws } = await connect(url)
 
     const owned = waitForType(ws, 'session:ownership')
     ws.send(JSON.stringify({ type: 'terminal:attach', windowId: 0, cols: 100, rows: 30 }))
     await owned
-    assert.deepEqual(spawned, [{ cols: 100, rows: 30 }])
+    assert.deepEqual(ptys.map(({ cols, rows }) => ({ cols, rows })), [{ cols: 100, rows: 30 }])
 
     // Without a size the pty falls back to the historical 80x24.
     const ownedAgain = waitForType(ws, 'session:ownership')
     ws.send(JSON.stringify({ type: 'terminal:attach', windowId: 1 }))
     await ownedAgain
-    assert.deepEqual(spawned[1], { cols: 80, rows: 24 })
+    assert.deepEqual({ cols: ptys[1].cols, rows: ptys[1].rows }, { cols: 80, rows: 24 })
 
     ws.close()
   } finally {

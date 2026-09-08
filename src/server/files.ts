@@ -236,6 +236,8 @@ export async function writeFile(cwd: string, relativePath: string, content: stri
 
 export interface Watcher {
   close(): void
+  /** Resolves once the initial scan is done and changes are being reported. */
+  ready: Promise<void>
 }
 
 const WATCH_DEBOUNCE_MS = 300
@@ -273,8 +275,10 @@ export function watchDir(cwd: string, onChange: (path: string) => void): Watcher
   watcher.on('add', handleEvent)
   watcher.on('change', handleEvent)
   watcher.on('unlink', handleEvent)
+  const ready = new Promise<void>((resolve) => watcher.once('ready', resolve))
 
   return {
+    ready,
     close(): void {
       for (const timer of timers.values()) clearTimeout(timer)
       timers.clear()

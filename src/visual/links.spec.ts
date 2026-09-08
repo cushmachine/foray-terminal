@@ -16,8 +16,6 @@ import {
   expectTerminalText,
 } from './helpers.ts'
 
-const SCRATCH = '/tmp/claude-0/-root-GitHub-lifeos/90a908dc-7c4b-4b6d-98cf-a7ba7a8162bd/scratchpad'
-
 // Long enough to wrap on a ~48 column phone terminal.
 const URL = 'https://example.com/app/auth/cli/abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'
 
@@ -73,7 +71,6 @@ test.describe('terminal links on mobile', () => {
       await page.locator(`a.term-link[href="${URL}"]`).first().scrollIntoViewIfNeeded()
       await page.waitForTimeout(200)
       await expect(page.locator(`a.term-link[href="${URL}"]`).first()).toBeInViewport()
-      await page.screenshot({ path: `${SCRATCH}/links-history.png` })
     } finally {
       await killMobileSession(page, name).catch(() => {})
     }

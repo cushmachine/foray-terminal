@@ -7,7 +7,9 @@
 import path from 'node:path'
 import type { WebSocket } from 'ws'
 import { MAX_HISTORY_LINES, type ClientMessage, type ServerMessage } from '../shared/protocol.ts'
-import { listWindows, createWindow, killWindow, renameWindow, paneHistoryState, captureHistoryLines } from './tmux.ts'
+import {
+  listWindows, createWindow, killWindow, renameWindow, paneHistoryState, captureHistoryLines, type TmuxExecutor,
+} from './tmux.ts'
 import { planHistoryUpdate, alignHistory, nextTail } from './history.ts'
 import { attachToPane, type PtyHandle, type PtySpawner } from './pty-bridge.ts'
 import { getTree, readFile, writeFile, watchDir, type Watcher } from './files.ts'
@@ -56,6 +58,12 @@ interface HistoryTracker {
   resetNext: boolean
 }
 
+/** Where log lines go; `console` in production, a no-op under test. */
+export interface Logger {
+  log(...args: unknown[]): void
+  error(...args: unknown[]): void
+}
+
 /** Dependencies injected by the server for each connection. */
 export interface ConnectionDeps {
   /** Remote address string for logging. */
@@ -66,6 +74,9 @@ export interface ConnectionDeps {
   broadcast: (msg: ServerMessage) => void
   /** How ptys are spawned. */
   ptySpawner?: PtySpawner
+  /** How tmux is invoked; undefined means the real binary. */
+  tmuxExec?: TmuxExecutor
+  logger: Logger
   /**
    * Claim ownership of a window for this client. Sends terminal:detached
    * to any previously attached clients and broadcasts updated ownership.
@@ -155,7 +166,7 @@ function safeErrorMessage(err: unknown): string {
  */
 export function handleConnection(ws: WebSocket, deps: ConnectionDeps): void {
   const {
-    remoteAddress, send, broadcast, ptySpawner, claimWindow, releaseAllWindows,
+    remoteAddress, send, broadcast, ptySpawner, tmuxExec, logger, claimWindow, releaseAllWindows,
     userAgent, serverBuild, servedClientBuild,
   } = deps
 
@@ -207,7 +218,7 @@ export function handleConnection(ws: WebSocket, deps: ConnectionDeps): void {
     // answers; what came back then describes a client state that is gone.
     const stale = (): boolean => trackers.get(windowId) !== tracker
     try {
-      const state = await paneHistoryState(windowId)
+      const state = await paneHistoryState(windowId, tmuxExec)
       if (stale()) return
       const plan = planHistoryUpdate(reset ? null : tracker.known, state)
       if (plan.kind === 'none') {
@@ -217,7 +228,7 @@ export function handleConnection(ws: WebSocket, deps: ConnectionDeps): void {
         return
       }
       if (plan.kind === 'sync') {
-        const captured = await captureHistoryLines(windowId, Math.min(state.size, plan.count + HISTORY_TAIL))
+        const captured = await captureHistoryLines(windowId, Math.min(state.size, plan.count + HISTORY_TAIL), tmuxExec)
         if (stale()) return
         const fresh = alignHistory(tracker.sentTail, captured)
         if (fresh !== null) {
@@ -233,13 +244,13 @@ export function handleConnection(ws: WebSocket, deps: ConnectionDeps): void {
       }
       // Only the tail the client will keep. `known` still records the full
       // size so later syncs append from the right place.
-      const lines = await captureHistoryLines(windowId, Math.min(state.size, MAX_HISTORY_LINES))
+      const lines = await captureHistoryLines(windowId, Math.min(state.size, MAX_HISTORY_LINES), tmuxExec)
       if (stale()) return
       tracker.sentTail = nextTail([], lines, HISTORY_TAIL)
       tracker.known = state.size
       send({ type: 'terminal:history', windowId, lines, reset: true })
     } catch (err) {
-      console.error('[ws] history sync error:', err)
+      logger.error('[ws] history sync error:', err)
     } finally {
       tracker.running = false
       if (tracker.dirty && !stale()) scheduleHistory(windowId)
@@ -263,27 +274,27 @@ export function handleConnection(ws: WebSocket, deps: ConnectionDeps): void {
         }
         case 'client:hello': {
           // The one log line that says which bundle a device is running.
-          console.log(`[ws] hello from ${remoteAddress} build=${msg.build ?? 'none'} ua="${userAgent}"`)
+          logger.log(`[ws] hello from ${remoteAddress} build=${msg.build ?? 'none'} ua="${userAgent}"`)
           send({ type: 'server:hello', serverBuild, clientBuild: await servedClientBuild() })
           break
         }
         case 'session:list': {
-          const wins = await listWindows()
+          const wins = await listWindows(tmuxExec)
           send({ type: 'session:list', windows: wins })
           break
         }
         case 'session:create': {
-          const win = await createWindow(msg.name, msg.cwd)
+          const win = await createWindow(msg.name, msg.cwd, tmuxExec)
           broadcast({ type: 'session:created', window: win })
           break
         }
         case 'session:kill': {
-          await killWindow(msg.windowId)
+          await killWindow(msg.windowId, tmuxExec)
           broadcast({ type: 'session:killed', windowId: msg.windowId })
           break
         }
         case 'session:rename': {
-          await renameWindow(msg.windowId, msg.name)
+          await renameWindow(msg.windowId, msg.name, tmuxExec)
           broadcast({ type: 'session:renamed', windowId: msg.windowId, name: msg.name })
           break
         }
@@ -324,7 +335,7 @@ export function handleConnection(ws: WebSocket, deps: ConnectionDeps): void {
             )
             ptys.set(msg.windowId, handle)
           } catch (err) {
-            console.error('[ws] pty attach error:', err)
+            logger.error('[ws] pty attach error:', err)
             send({
               type: 'error',
               message: safeErrorMessage(err),
@@ -395,7 +406,7 @@ export function handleConnection(ws: WebSocket, deps: ConnectionDeps): void {
             } catch (err) {
               // E.g. the file was deleted rather than changed -- nothing to
               // send, but don't let it become an unhandled rejection.
-              console.error('[ws] files:watch change handling error:', err)
+              logger.error('[ws] files:watch change handling error:', err)
             }
           })
           break
@@ -411,7 +422,7 @@ export function handleConnection(ws: WebSocket, deps: ConnectionDeps): void {
           break
       }
     } catch (err) {
-      console.error('[ws] message handling error:', err)
+      logger.error('[ws] message handling error:', err)
       send({
         type: 'error',
         message: safeErrorMessage(err),
@@ -420,7 +431,7 @@ export function handleConnection(ws: WebSocket, deps: ConnectionDeps): void {
   })
 
   ws.on('close', () => {
-    console.log(`[ws] client disconnected (${remoteAddress})`)
+    logger.log(`[ws] client disconnected (${remoteAddress})`)
     // Clean up all pty handles for this connection.
     for (const handle of ptys.values()) {
       handle.kill()
@@ -443,6 +454,6 @@ export function handleConnection(ws: WebSocket, deps: ConnectionDeps): void {
   })
 
   ws.on('error', (err) => {
-    console.error('[ws] connection error:', err)
+    logger.error('[ws] connection error:', err)
   })
 }

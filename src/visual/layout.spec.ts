@@ -1,4 +1,4 @@
-// Layout and chrome: AUDIT.md items 5, 6, 9, 10.
+// Layout and chrome: top bar, panels and their toggles across viewports.
 import { test, expect } from '@playwright/test'
 import { DESKTOP, MOBILE, NARROW, TABLET } from './helpers.ts'
 

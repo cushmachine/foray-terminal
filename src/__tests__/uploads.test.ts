@@ -1,6 +1,6 @@
 // Image upload (drag-and-drop / paste -> ~/uploads -> shell) tests.
 //
-// Run with: npm run test:uploads
+// Run with: npx tsx --test src/__tests__/uploads.test.ts
 // (executed directly via `tsx`, using node's built-in test runner)
 //
 // Covers:
@@ -23,8 +23,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import os from 'node:os'
-import { startServer } from '../server/index.ts'
+import { startTestServer, tmpDir } from '../server/__tests__/helpers.ts'
 import {
   DEFAULT_MAX_UPLOAD_AGE_DAYS,
   purgeOldUploads,
@@ -53,10 +52,6 @@ function fakeImage(magic: number[], size = 64): Uint8Array<ArrayBuffer> {
   return buf
 }
 
-async function makeTmpDir(): Promise<string> {
-  return fs.mkdtemp(path.join(os.tmpdir(), 'nest-uploads-'))
-}
-
 /** POST bytes to /api/upload as multipart/form-data, the way the browser does. */
 async function postUpload(
   url: string,
@@ -74,10 +69,10 @@ async function postUpload(
 // ---------------------------------------------------------------------------
 
 test('POST /api/upload saves a PNG to the upload dir (creating it) and returns its absolute path', async () => {
-  const tmp = await makeTmpDir()
+  const tmp = await tmpDir('nest-uploads-')
   // Two levels deep and not yet created: the endpoint must mkdir -p it.
   const uploadDir = path.join(tmp, 'home', 'uploads')
-  const { url, close } = await startServer(0, { uploadDir })
+  const { url, close } = await startTestServer({ uploadDir })
   try {
     const bytes = fakeImage(PNG_MAGIC)
     const res = await postUpload(url, bytes, 'image/png')
@@ -94,9 +89,9 @@ test('POST /api/upload saves a PNG to the upload dir (creating it) and returns i
 })
 
 test('POST /api/upload rejects unsupported MIME types with 415 and writes nothing', async () => {
-  const tmp = await makeTmpDir()
+  const tmp = await tmpDir('nest-uploads-')
   const uploadDir = path.join(tmp, 'uploads')
-  const { url, close } = await startServer(0, { uploadDir })
+  const { url, close } = await startTestServer({ uploadDir })
   try {
     const res = await postUpload(url, fakeImage(PNG_MAGIC), 'text/plain')
     assert.equal(res.status, 415)
@@ -110,9 +105,9 @@ test('POST /api/upload rejects unsupported MIME types with 415 and writes nothin
 })
 
 test('POST /api/upload rejects bytes that are not an image, even with an image MIME type', async () => {
-  const tmp = await makeTmpDir()
+  const tmp = await tmpDir('nest-uploads-')
   const uploadDir = path.join(tmp, 'uploads')
-  const { url, close } = await startServer(0, { uploadDir })
+  const { url, close } = await startTestServer({ uploadDir })
   try {
     const notAnImage = new TextEncoder().encode('#!/bin/sh\necho definitely not a png\n')
     const res = await postUpload(url, notAnImage, 'image/png')
@@ -127,9 +122,9 @@ test('POST /api/upload rejects bytes that are not an image, even with an image M
 })
 
 test('POST /api/upload rejects files over 10MB with 413', async () => {
-  const tmp = await makeTmpDir()
+  const tmp = await tmpDir('nest-uploads-')
   const uploadDir = path.join(tmp, 'uploads')
-  const { url, close } = await startServer(0, { uploadDir })
+  const { url, close } = await startTestServer({ uploadDir })
   try {
     const res = await postUpload(url, fakeImage(PNG_MAGIC, MAX_UPLOAD_BYTES + 1), 'image/png')
     assert.equal(res.status, 413)
@@ -143,9 +138,9 @@ test('POST /api/upload rejects files over 10MB with 413', async () => {
 })
 
 test('POST /api/upload responds 400 when the file field is missing or misnamed', async () => {
-  const tmp = await makeTmpDir()
+  const tmp = await tmpDir('nest-uploads-')
   const uploadDir = path.join(tmp, 'uploads')
-  const { url, close } = await startServer(0, { uploadDir })
+  const { url, close } = await startTestServer({ uploadDir })
   try {
     const textOnly = new FormData()
     textOnly.append('note', 'no file here')
@@ -167,7 +162,7 @@ test('POST /api/upload responds 400 when the file field is missing or misnamed',
 // ---------------------------------------------------------------------------
 
 test('saveUpload: extension follows the image bytes, and same-second uploads get distinct names', async () => {
-  const tmp = await makeTmpDir()
+  const tmp = await tmpDir('nest-uploads-')
   try {
     const now = new Date(2026, 8, 3, 9, 45, 12) // 2026-09-03 09:45:12 local
     const first = await saveUpload(fakeImage(PNG_MAGIC), tmp, now)
@@ -262,9 +257,9 @@ test('pathToTerminalInput: plain paths get a trailing space; awkward paths are s
 })
 
 test('uploadImage: resolves with the saved path on success and throws the server error on failure', async () => {
-  const tmp = await makeTmpDir()
+  const tmp = await tmpDir('nest-uploads-')
   const uploadDir = path.join(tmp, 'uploads')
-  const { url, close } = await startServer(0, { uploadDir })
+  const { url, close } = await startTestServer({ uploadDir })
   try {
     // The browser calls fetch('/api/upload') relative to its origin; here we
     // point that at the test server.
@@ -312,7 +307,7 @@ async function waitUntil(check: () => Promise<boolean>, timeoutMs = 5000): Promi
 }
 
 test('purgeOldUploads: deletes files past the cutoff regardless of name, keeps newer files and subdirs', async () => {
-  const tmp = await makeTmpDir()
+  const tmp = await tmpDir('nest-uploads-')
   try {
     const now = new Date()
     const old = path.join(tmp, 'upload-2026-08-01-120000.png')
@@ -343,7 +338,7 @@ test('purgeOldUploads: deletes files past the cutoff regardless of name, keeps n
 })
 
 test('purgeOldUploads: a missing upload dir is not an error (nothing uploaded yet)', async () => {
-  const tmp = await makeTmpDir()
+  const tmp = await tmpDir('nest-uploads-')
   try {
     assert.deepEqual(await purgeOldUploads(path.join(tmp, 'never-created'), 7 * DAY), [])
   } finally {
@@ -353,7 +348,7 @@ test('purgeOldUploads: a missing upload dir is not an error (nothing uploaded ye
 
 /** A temp upload dir holding one 3-day-old file and one 1-day-old file. */
 async function makeAgedUploadDir(): Promise<{ tmp: string; uploadDir: string; old: string; fresh: string }> {
-  const tmp = await makeTmpDir()
+  const tmp = await tmpDir('nest-uploads-')
   const uploadDir = path.join(tmp, 'uploads')
   await fs.mkdir(uploadDir)
   const old = path.join(uploadDir, 'upload-2026-08-01-120000.png')
@@ -368,7 +363,7 @@ async function makeAgedUploadDir(): Promise<{ tmp: string; uploadDir: string; ol
 
 test('server sweeps the upload dir on its timer using maxUploadAgeDays', async () => {
   const { tmp, uploadDir, old, fresh } = await makeAgedUploadDir()
-  const { close } = await startServer(0, { uploadDir, maxUploadAgeDays: 2, uploadSweepIntervalMs: 50 })
+  const { close } = await startTestServer({ uploadDir, maxUploadAgeDays: 2, uploadSweepIntervalMs: 50 })
   try {
     await waitUntil(async () => !(await exists(old)))
     assert.equal(await exists(fresh), true, 'a 1-day-old file survives a 2-day cutoff')
@@ -381,7 +376,7 @@ test('server sweeps the upload dir on its timer using maxUploadAgeDays', async (
 test('server does not sweep immediately at startup (protects a real ~/uploads during short test runs)', async () => {
   const { tmp, uploadDir, old } = await makeAgedUploadDir()
   // Default interval (hours), so the first sweep is a minute out at the earliest.
-  const { close } = await startServer(0, { uploadDir, maxUploadAgeDays: 2 })
+  const { close } = await startTestServer({ uploadDir, maxUploadAgeDays: 2 })
   try {
     await new Promise((resolve) => setTimeout(resolve, 150))
     assert.equal(await exists(old), true)
@@ -393,7 +388,7 @@ test('server does not sweep immediately at startup (protects a real ~/uploads du
 
 test('server leaves the upload dir alone when maxUploadAgeDays is 0', async () => {
   const { tmp, uploadDir, old } = await makeAgedUploadDir()
-  const { close } = await startServer(0, { uploadDir, maxUploadAgeDays: 0, uploadSweepIntervalMs: 20 })
+  const { close } = await startTestServer({ uploadDir, maxUploadAgeDays: 0, uploadSweepIntervalMs: 20 })
   try {
     await new Promise((resolve) => setTimeout(resolve, 150))
     assert.equal(await exists(old), true)

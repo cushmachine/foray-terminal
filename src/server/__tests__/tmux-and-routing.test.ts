@@ -1,6 +1,6 @@
 // Tmux CLI wrapper, pty bridge, and server message routing tests.
 //
-// Run with: npm run test:tmux-and-routing
+// Run with: npx tsx --test src/server/__tests__/tmux-and-routing.test.ts
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -23,7 +23,7 @@ import {
   type PtyProcess,
 } from '../pty-bridge.ts'
 
-import { startServer } from '../index.ts'
+import { connect, startTestServer, waitForType } from './helpers.ts'
 
 /** Hostname passed to the parser; tmux initialises every pane title to this. */
 const HOST = 'testhost'
@@ -421,32 +421,16 @@ test('attachToPane handle.kill() calls pty.kill()', () => {
 // ---------------------------------------------------------------------------
 
 test('server sends session:list welcome and responds to session:list', async () => {
-  const { url, close } = await startServer(0)
+  const { url, close, tmux } = await startTestServer()
+  tmux.add('shell', { cwd: '/home/user' })
   try {
-    const wsUrl = url.replace(/^http/, 'ws') + '/ws'
-    const ws = new WebSocket(wsUrl)
+    const { ws, welcome } = await connect(url)
+    assert.equal(welcome.type, 'session:list')
+    assert.deepEqual(welcome.windows.map((w: any) => w.name), ['shell'])
 
-    const messages: Array<{ type: string; [key: string]: unknown }> = []
-
-    await new Promise<void>((resolve, reject) => {
-      ws.addEventListener('message', (event) => {
-        messages.push(JSON.parse(event.data.toString()))
-        if (messages.length === 1) {
-          ws.send(JSON.stringify({ type: 'session:list' }))
-        }
-        if (messages.length === 2) {
-          resolve()
-        }
-      })
-      ws.addEventListener('error', reject)
-      setTimeout(() => reject(new Error('test timed out waiting for messages')), 5000)
-    })
-
-    assert.equal(messages[0].type, 'session:list')
-    assert.ok(Array.isArray(messages[0].windows), 'welcome should include windows array')
-
-    assert.equal(messages[1].type, 'session:list')
-    assert.ok(Array.isArray(messages[1].windows), 'response should include windows array')
+    const reply = waitForType(ws, 'session:list')
+    ws.send(JSON.stringify({ type: 'session:list' }))
+    assert.deepEqual((await reply).windows, welcome.windows)
 
     ws.close()
   } finally {

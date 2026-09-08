@@ -1,6 +1,6 @@
 // sortSessions: AUDIT.md item 4.
 //
-// Run with: npm run test:sessions-sort
+// Run with: npx tsx --test src/__tests__/sessions-sort.test.ts
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'

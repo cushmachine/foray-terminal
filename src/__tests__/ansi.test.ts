@@ -1,6 +1,6 @@
 // ANSI colour renderer for history rows tests.
 //
-// Run with: npm run test:ansi
+// Run with: npx tsx --test src/__tests__/ansi.test.ts
 // (executed directly via `tsx`, using node's built-in test runner)
 //
 // Covers:

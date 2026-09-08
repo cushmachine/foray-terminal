@@ -1,4 +1,4 @@
-// Sidebar: AUDIT.md items 1, 3, 4, 7, 11.
+// Sidebar: drawer, session rows, rename and kill flows, footer.
 import { test, expect } from '@playwright/test'
 import { DESKTOP, MOBILE, createSession, killSession, openDrawer, sessionItem, uniqueName } from './helpers.ts'
 

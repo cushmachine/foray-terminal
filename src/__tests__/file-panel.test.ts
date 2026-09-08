@@ -1,7 +1,6 @@
 // File panel <-> WebSocket backend wiring tests.
 //
-// Run with: npm run test:file-panel
-// (executed directly via `tsx`, using node's built-in test runner)
+// Run with: npx tsx --test src/__tests__/file-panel.test.ts
 //
 // Covers:
 //  1. Server responds to files:tree with the real directory structure
@@ -16,68 +15,25 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import os from 'node:os'
-import { startServer } from '../server/index.ts'
+import { connect, startTestServer, tmpDir, waitForType, type Msg } from '../server/__tests__/helpers.ts'
 import { createSaveKeymap } from '../MarkdownEditor.tsx'
-
-async function makeTmpDir(): Promise<string> {
-  return fs.mkdtemp(path.join(os.tmpdir(), 'nest-file-panel-'))
-}
-
-/** Connect a WebSocket to the given server and resolve once the welcome message arrives. */
-async function connectAndWaitForWelcome(url: string): Promise<WebSocket> {
-  const wsUrl = url.replace(/^http/, 'ws') + '/ws'
-  const ws = new WebSocket(wsUrl)
-  await new Promise<void>((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error('timed out waiting for welcome')), 5000)
-    ws.addEventListener(
-      'message',
-      () => {
-        clearTimeout(timeout)
-        resolve()
-      },
-      { once: true },
-    )
-    ws.addEventListener('error', reject)
-  })
-  return ws
-}
-
-/** Send a message and wait for the next message whose `type` matches. */
-function waitForType(ws: WebSocket, type: string, timeoutMs = 5000): Promise<any> {
-  return new Promise((resolve, reject) => {
-    const timeout = setTimeout(
-      () => reject(new Error(`timed out waiting for message of type "${type}"`)),
-      timeoutMs,
-    )
-    const handler = (event: MessageEvent) => {
-      const msg = JSON.parse(event.data.toString())
-      if (msg.type === type) {
-        clearTimeout(timeout)
-        ws.removeEventListener('message', handler)
-        resolve(msg)
-      }
-    }
-    ws.addEventListener('message', handler)
-  })
-}
 
 // ---------------------------------------------------------------------------
 // Test 1: files:tree
 // ---------------------------------------------------------------------------
 
 test('server handles files:tree and returns the real directory structure', async () => {
-  const { url, close } = await startServer(0)
-  const tmpDir = await makeTmpDir()
+  const { url, close } = await startTestServer()
+  const dir = await tmpDir('nest-file-panel-')
   try {
-    await fs.writeFile(path.join(tmpDir, 'a.txt'), 'a')
-    await fs.mkdir(path.join(tmpDir, 'sub'))
-    await fs.writeFile(path.join(tmpDir, 'sub', 'b.md'), 'b')
+    await fs.writeFile(path.join(dir, 'a.txt'), 'a')
+    await fs.mkdir(path.join(dir, 'sub'))
+    await fs.writeFile(path.join(dir, 'sub', 'b.md'), 'b')
 
-    const ws = await connectAndWaitForWelcome(url)
+    const { ws } = await connect(url)
     try {
       const responsePromise = waitForType(ws, 'files:tree')
-      ws.send(JSON.stringify({ type: 'files:tree', cwd: tmpDir }))
+      ws.send(JSON.stringify({ type: 'files:tree', cwd: dir }))
       const response = await responsePromise
 
       assert.equal(response.type, 'files:tree')
@@ -94,7 +50,7 @@ test('server handles files:tree and returns the real directory structure', async
     }
   } finally {
     await close()
-    await fs.rm(tmpDir, { recursive: true, force: true })
+    await fs.rm(dir, { recursive: true, force: true })
   }
 })
 
@@ -103,15 +59,15 @@ test('server handles files:tree and returns the real directory structure', async
 // ---------------------------------------------------------------------------
 
 test('server handles files:read using the cwd from a prior files:tree request', async () => {
-  const { url, close } = await startServer(0)
-  const tmpDir = await makeTmpDir()
+  const { url, close } = await startTestServer()
+  const dir = await tmpDir('nest-file-panel-')
   try {
-    await fs.writeFile(path.join(tmpDir, 'notes.md'), '# Hello\n\nWorld')
+    await fs.writeFile(path.join(dir, 'notes.md'), '# Hello\n\nWorld')
 
-    const ws = await connectAndWaitForWelcome(url)
+    const { ws } = await connect(url)
     try {
       const treePromise = waitForType(ws, 'files:tree')
-      ws.send(JSON.stringify({ type: 'files:tree', cwd: tmpDir }))
+      ws.send(JSON.stringify({ type: 'files:tree', cwd: dir }))
       await treePromise
 
       const contentPromise = waitForType(ws, 'files:content')
@@ -126,7 +82,7 @@ test('server handles files:read using the cwd from a prior files:tree request', 
     }
   } finally {
     await close()
-    await fs.rm(tmpDir, { recursive: true, force: true })
+    await fs.rm(dir, { recursive: true, force: true })
   }
 })
 
@@ -135,13 +91,13 @@ test('server handles files:read using the cwd from a prior files:tree request', 
 // ---------------------------------------------------------------------------
 
 test('server handles files:write, then files:read reflects the new content', async () => {
-  const { url, close } = await startServer(0)
-  const tmpDir = await makeTmpDir()
+  const { url, close } = await startTestServer()
+  const dir = await tmpDir('nest-file-panel-')
   try {
-    const ws = await connectAndWaitForWelcome(url)
+    const { ws } = await connect(url)
     try {
       const treePromise = waitForType(ws, 'files:tree')
-      ws.send(JSON.stringify({ type: 'files:tree', cwd: tmpDir }))
+      ws.send(JSON.stringify({ type: 'files:tree', cwd: dir }))
       await treePromise
 
       const savedPromise = waitForType(ws, 'files:saved')
@@ -156,14 +112,14 @@ test('server handles files:write, then files:read reflects the new content', asy
       assert.equal(content.content, 'draft content')
 
       // Also verify it actually landed on disk.
-      const onDisk = await fs.readFile(path.join(tmpDir, 'draft.md'), 'utf-8')
+      const onDisk = await fs.readFile(path.join(dir, 'draft.md'), 'utf-8')
       assert.equal(onDisk, 'draft content')
     } finally {
       ws.close()
     }
   } finally {
     await close()
-    await fs.rm(tmpDir, { recursive: true, force: true })
+    await fs.rm(dir, { recursive: true, force: true })
   }
 })
 
@@ -172,13 +128,13 @@ test('server handles files:write, then files:read reflects the new content', asy
 // ---------------------------------------------------------------------------
 
 test('server rejects files:read path traversal with an error message', async () => {
-  const { url, close } = await startServer(0)
-  const tmpDir = await makeTmpDir()
+  const { url, close } = await startTestServer()
+  const dir = await tmpDir('nest-file-panel-')
   try {
-    const ws = await connectAndWaitForWelcome(url)
+    const { ws } = await connect(url)
     try {
       const treePromise = waitForType(ws, 'files:tree')
-      ws.send(JSON.stringify({ type: 'files:tree', cwd: tmpDir }))
+      ws.send(JSON.stringify({ type: 'files:tree', cwd: dir }))
       await treePromise
 
       const errorPromise = waitForType(ws, 'error')
@@ -187,12 +143,16 @@ test('server rejects files:read path traversal with an error message', async () 
 
       assert.equal(error.type, 'error')
       assert.ok(typeof error.message === 'string' && error.message.length > 0)
+      assert.ok(
+        error.message.includes('traversal') || error.message.includes('Invalid path'),
+        `error message should indicate path traversal rejection, got: ${error.message}`,
+      )
     } finally {
       ws.close()
     }
   } finally {
     await close()
-    await fs.rm(tmpDir, { recursive: true, force: true })
+    await fs.rm(dir, { recursive: true, force: true })
   }
 })
 
@@ -200,22 +160,33 @@ test('server rejects files:read path traversal with an error message', async () 
 // Test 5: files:watch -> on-disk change -> files:changed
 // ---------------------------------------------------------------------------
 
-test('server handles files:watch and pushes files:changed on external file changes', async () => {
-  const { url, close } = await startServer(0)
-  const tmpDir = await makeTmpDir()
+/**
+ * files:watch has no acknowledgement, so a write racing chokidar's initial
+ * scan can go unseen; keep writing until the watcher reports it. Writes
+ * are spaced past the 300 ms per-file debounce so they don't keep resetting it.
+ */
+async function writeUntilChanged(ws: WebSocket, file: string, content: string): Promise<Msg> {
+  const changed = waitForType(ws, 'files:changed')
+  await fs.writeFile(file, content)
+  const retry = setInterval(() => void fs.writeFile(file, content), 500)
   try {
-    await fs.writeFile(path.join(tmpDir, 'live.txt'), 'initial')
+    return await changed
+  } finally {
+    clearInterval(retry)
+  }
+}
 
-    const ws = await connectAndWaitForWelcome(url)
+test('server handles files:watch and pushes files:changed on external file changes', async () => {
+  const { url, close } = await startTestServer()
+  const dir = await tmpDir('nest-file-panel-')
+  try {
+    const file = path.join(dir, 'live.txt')
+    await fs.writeFile(file, 'initial')
+
+    const { ws } = await connect(url)
     try {
-      ws.send(JSON.stringify({ type: 'files:watch', cwd: tmpDir }))
-      // Give chokidar a moment to complete its initial scan (matches the
-      // pattern used in files.test.ts's watchDir test) before mutating the file.
-      await new Promise((resolve) => setTimeout(resolve, 500))
-
-      const changedPromise = waitForType(ws, 'files:changed')
-      await fs.writeFile(path.join(tmpDir, 'live.txt'), 'updated externally')
-      const changed = await changedPromise
+      ws.send(JSON.stringify({ type: 'files:watch', cwd: dir }))
+      const changed = await writeUntilChanged(ws, file, 'updated externally')
 
       assert.equal(changed.type, 'files:changed')
       assert.equal(changed.path, 'live.txt')
@@ -228,7 +199,7 @@ test('server handles files:watch and pushes files:changed on external file chang
     }
   } finally {
     await close()
-    await fs.rm(tmpDir, { recursive: true, force: true })
+    await fs.rm(dir, { recursive: true, force: true })
   }
 })
 

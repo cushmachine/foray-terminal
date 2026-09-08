@@ -1,4 +1,4 @@
-// Key passthrough through tmux, at the byte level. AUDIT.md item 18.
+// Key passthrough through tmux, at the byte level: Shift+Enter must reach the pane as CSI u.
 //
 // Run with: npm run test:keys   (requires tmux)
 //
@@ -12,6 +12,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { startServer } from '../server/index.ts'
+import { connect, waitForMessage, waitForOutput, waitForTypeOrError } from '../server/__tests__/helpers.ts'
 
 const SHIFT_ENTER_CSI_U = '\x1b[13;2u'
 
@@ -24,67 +25,10 @@ function hasTmux(): boolean {
   }
 }
 
-type Msg = { type: string; [key: string]: unknown }
-
-function connect(url: string): Promise<WebSocket> {
-  const ws = new WebSocket(url.replace(/^http/, 'ws') + '/ws')
-  return new Promise((resolve, reject) => {
-    ws.addEventListener('open', () => resolve(ws), { once: true })
-    ws.addEventListener('error', reject, { once: true })
-  })
-}
-
-function waitFor(ws: WebSocket, pred: (m: Msg) => boolean, timeoutMs = 8000): Promise<Msg> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      ws.removeEventListener('message', handler)
-      reject(new Error('timed out waiting for message'))
-    }, timeoutMs)
-    const handler = (ev: MessageEvent) => {
-      const msg = JSON.parse(String(ev.data)) as Msg
-      if (msg.type === 'error') {
-        clearTimeout(timer)
-        ws.removeEventListener('message', handler)
-        reject(new Error(`server error: ${String(msg.message)}`))
-        return
-      }
-      if (pred(msg)) {
-        clearTimeout(timer)
-        ws.removeEventListener('message', handler)
-        resolve(msg)
-      }
-    }
-    ws.addEventListener('message', handler)
-  })
-}
-
-/** Accumulate terminal:output for a window until it contains `needle`; on timeout, fail showing what arrived. */
-function waitForOutput(ws: WebSocket, windowId: number, needle: string, timeoutMs = 8000): Promise<string> {
-  return new Promise((resolve, reject) => {
-    let seen = ''
-    const timer = setTimeout(() => {
-      ws.removeEventListener('message', handler)
-      reject(new Error(`timed out waiting for ${JSON.stringify(needle)}; output so far: ${JSON.stringify(seen)}`))
-    }, timeoutMs)
-    const handler = (ev: MessageEvent) => {
-      const msg = JSON.parse(String(ev.data)) as Msg
-      if (msg.type !== 'terminal:output' || msg.windowId !== windowId) return
-      seen += String(msg.data)
-      if (seen.includes(needle)) {
-        clearTimeout(timer)
-        ws.removeEventListener('message', handler)
-        resolve(seen)
-      }
-    }
-    ws.addEventListener('message', handler)
-  })
-}
-
 test('Shift+Enter as CSI u reaches the pane unchanged', { skip: !hasTmux() && 'tmux not installed' }, async () => {
-  const { url, close } = await startServer(0)
-  const ws = await connect(url)
-  await waitFor(ws, (m) => m.type === 'session:list')
-  const created = waitFor(ws, (m) => m.type === 'session:created')
+  const { url, close } = await startServer(0, { quiet: true })
+  const { ws } = await connect(url)
+  const created = waitForTypeOrError(ws, 'session:created')
   ws.send(JSON.stringify({ type: 'session:create', name: `e2e-keys-${Date.now().toString(36)}` }))
   const windowId = ((await created).window as { id: number }).id
   try {
@@ -102,7 +46,7 @@ test('Shift+Enter as CSI u reaches the pane unchanged', { skip: !hasTmux() && 't
     assert.ok(out.includes('^[[13;2u'))
   } finally {
     ws.send(JSON.stringify({ type: 'terminal:input', windowId, data: '\x03' }))
-    const killed = waitFor(ws, (m) => m.type === 'session:killed' && m.windowId === windowId)
+    const killed = waitForMessage(ws, (m) => m.type === 'session:killed' && m.windowId === windowId)
     ws.send(JSON.stringify({ type: 'session:kill', windowId }))
     await killed.catch(() => {})
     ws.close()

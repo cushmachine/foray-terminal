@@ -1,7 +1,7 @@
 // WebSocket connection manager (SocketManager) and session-list reducer
 // (applySessionMessage) tests.
 //
-// Run with: npm run test:socket-and-sessions
+// Run with: npx tsx --test src/__tests__/socket-and-sessions.test.ts
 // (executed directly via `tsx`, using node's built-in test runner)
 //
 // SocketManager and applySessionMessage are framework-agnostic (no React,

@@ -1,6 +1,6 @@
 // Mobile optimization tests.
 //
-// Run with: npm run test:mobile
+// Run with: npx tsx --test src/__tests__/mobile.test.ts
 // (executed directly via `tsx`, using node's built-in test runner)
 //
 // Covers the pure, DOM-free pieces of the mobile work:

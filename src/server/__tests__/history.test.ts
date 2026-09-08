@@ -4,7 +4,7 @@
 // remember for the next alignment (nextTail). No tmux involved; the CLI
 // wrapper is covered in tmux-and-routing.test.ts.
 //
-// Run with: npm run test:history
+// Run with: npx tsx --test src/server/__tests__/history.test.ts
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'

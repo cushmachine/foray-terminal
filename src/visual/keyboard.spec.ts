@@ -141,17 +141,11 @@ test.describe('keyboard behavior on mobile', () => {
       expect(await rowAlignment(page, '80')).toBeLessThanOrEqual(2)
       // And the prompt row is under the fold.
       expect(await scrollGap(page)).toBeGreaterThanOrEqual(cellH - 2)
-      await page.screenshot({
-        path: '/tmp/claude-0/-root-GitHub-lifeos/90a908dc-7c4b-4b6d-98cf-a7ba7a8162bd/scratchpad/kb-composer.png',
-      })
 
       // Terminal: pinned to the true bottom, prompt visible.
       await page.getByTestId('terminal-area').click()
       await page.waitForTimeout(900)
       await expect.poll(() => scrollGap(page), { timeout: 5_000 }).toBeLessThan(4)
-      await page.screenshot({
-        path: '/tmp/claude-0/-root-GitHub-lifeos/90a908dc-7c4b-4b6d-98cf-a7ba7a8162bd/scratchpad/kb-terminal.png',
-      })
 
       // Claude-Code-shaped screen: output, separator, a ❯ prompt row with
       // the cursor on it, and a status line under it. Composer mode must
@@ -168,15 +162,9 @@ test.describe('keyboard behavior on mobile', () => {
       expect(await rowAlignment(page, 'LAST-OUTPUT')).toBeLessThanOrEqual(2)
       // separator + prompt + status (+ trailing row) parked below.
       expect(await scrollGap(page)).toBeGreaterThanOrEqual(4 * cellH - 2)
-      await page.screenshot({
-        path: '/tmp/claude-0/-root-GitHub-lifeos/90a908dc-7c4b-4b6d-98cf-a7ba7a8162bd/scratchpad/kb-composer-cc.png',
-      })
       await page.getByTestId('terminal-area').click()
       await page.waitForTimeout(900)
       await expect.poll(() => scrollGap(page), { timeout: 5_000 }).toBeLessThan(4)
-      await page.screenshot({
-        path: '/tmp/claude-0/-root-GitHub-lifeos/90a908dc-7c4b-4b6d-98cf-a7ba7a8162bd/scratchpad/kb-terminal-cc.png',
-      })
     } finally {
       await page.setViewportSize(MOBILE)
       await killMobileSession(page, name).catch(() => {})

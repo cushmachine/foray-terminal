@@ -1,6 +1,6 @@
 // Pure helpers behind AUDIT.md items 5, 6, 9, 10.
 //
-// Run with: npm run test:layout
+// Run with: npx tsx --test src/__tests__/layout.test.ts
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'

@@ -13,9 +13,9 @@ import { existsSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import { WebSocketServer, type WebSocket } from 'ws'
 import type { ServerMessage } from '../shared/protocol.ts'
-import { listWindows } from './tmux.ts'
+import { listWindows, type TmuxExecutor } from './tmux.ts'
 import type { PtySpawner } from './pty-bridge.ts'
-import { handleConnection } from './ws-handler.ts'
+import { handleConnection, type Logger } from './ws-handler.ts'
 import { describeCheckout, readServedClientBuild } from './build.ts'
 import {
   DAY_MS,
@@ -66,6 +66,23 @@ export interface ServerOptions {
   heartbeatIntervalMs?: number
   /** Override how ptys are spawned (tests inject a fake). */
   ptySpawner?: PtySpawner
+  /** Override how tmux is invoked (tests inject an in-memory fake). */
+  tmuxExec?: TmuxExecutor
+  /**
+   * Directory holding the built client to serve. Defaults to <cwd>/dist
+   * when NODE_ENV is production, and to nothing otherwise; an explicit
+   * value is served regardless of NODE_ENV (tests point it at a fixture).
+   */
+  clientDist?: string
+  /** Drop all log output (tests). */
+  quiet?: boolean
+}
+
+const SILENT: Logger = { log: () => {}, error: () => {} }
+
+/** Where the server's log lines go, per `ServerOptions.quiet`. */
+function loggerFor(options: ServerOptions): Logger {
+  return options.quiet ? SILENT : console
 }
 
 /** Send a protocol message to a single client, typed against ServerMessage. */
@@ -90,7 +107,7 @@ function broadcast(wss: WebSocketServer, message: ServerMessage): void {
  * the body (415), anything over MAX_UPLOAD_BYTES (413), bodies whose bytes
  * don't actually look like an image (415), and requests with no file (400).
  */
-function createUploadHandler(uploadDir: string): express.RequestHandler {
+function createUploadHandler(uploadDir: string, logger: Logger): express.RequestHandler {
   const receive = multer({
     storage: multer.memoryStorage(),
     limits: { fileSize: MAX_UPLOAD_BYTES, files: 1 },
@@ -115,7 +132,7 @@ function createUploadHandler(uploadDir: string): express.RequestHandler {
         return fail(400, err.message)
       }
       if (err) {
-        console.error('[upload] error receiving upload:', err)
+        logger.error('[upload] error receiving upload:', err)
         return fail(500, 'upload failed')
       }
       if (!req.file) return fail(400, `no file uploaded (expected multipart field "${UPLOAD_FIELD_NAME}")`)
@@ -126,7 +143,7 @@ function createUploadHandler(uploadDir: string): express.RequestHandler {
         res.json(body)
       } catch (saveErr) {
         if (saveErr instanceof UnsupportedImageError) return fail(415, saveErr.message)
-        console.error('[upload] error saving upload:', saveErr)
+        logger.error('[upload] error saving upload:', saveErr)
         fail(500, 'failed to save upload')
       }
     })
@@ -141,10 +158,10 @@ export function createApp(options: ServerOptions = {}): express.Express {
     res.json({ status: 'ok' })
   })
 
-  app.post('/api/upload', createUploadHandler(options.uploadDir ?? DEFAULT_UPLOAD_DIR))
+  app.post('/api/upload', createUploadHandler(options.uploadDir ?? DEFAULT_UPLOAD_DIR, loggerFor(options)))
 
-  const clientDist = clientDistDir()
-  if (process.env.NODE_ENV === 'production' && existsSync(clientDist)) {
+  const clientDist = servedClientDist(options)
+  if (clientDist && existsSync(clientDist)) {
     app.use(express.static(clientDist))
     // SPA fallback: any unmatched route serves index.html. Registered as
     // plain middleware (not a route pattern) to stay clear of Express 5's
@@ -170,10 +187,6 @@ export interface StartedServer {
 }
 
 /**
- * Start the Nest server. Pass port 0 to let the OS assign a free port
- * (used by tests so multiple suites can run without colliding).
- */
-/**
  * Where the built client lives. The server always runs from the project
  * root (`tsx src/server/index.ts`, via `npm run dev:server` or `npm start`),
  * and `vite build` writes to `<project-root>/dist`. Resolved against
@@ -184,11 +197,22 @@ function clientDistDir(): string {
   return path.resolve(process.cwd(), 'dist')
 }
 
+/** The client directory to serve, or null when this server serves no client. */
+function servedClientDist(options: ServerOptions): string | null {
+  if (options.clientDist) return options.clientDist
+  return process.env.NODE_ENV === 'production' ? clientDistDir() : null
+}
+
+/**
+ * Start the Nest server. Pass port 0 to let the OS assign a free port
+ * (used by tests so multiple suites can run without colliding).
+ */
 export function startServer(
   port: number = DEFAULT_PORT,
   options: ServerOptions = {},
 ): Promise<StartedServer> {
   const app = createApp(options)
+  const logger = loggerFor(options)
   // Read once: tsx runs the source as of now, until the next restart.
   const serverBuild = describeCheckout()
   const server = http.createServer(app)
@@ -206,7 +230,7 @@ export function startServer(
     if (polling || wss.clients.size === 0) return
     polling = true
     try {
-      const windows = await listWindows()
+      const windows = await listWindows(options.tmuxExec)
       const listing = JSON.stringify(windows)
       if (listing !== lastListing) {
         lastListing = listing
@@ -236,10 +260,10 @@ export function startServer(
     try {
       const deleted = await purgeOldUploads(uploadDir, maxUploadAgeDays * DAY_MS)
       if (deleted.length > 0) {
-        console.log(`[uploads] purged ${deleted.length} file(s) older than ${maxUploadAgeDays}d from ${uploadDir}`)
+        logger.log(`[uploads] purged ${deleted.length} file(s) older than ${maxUploadAgeDays}d from ${uploadDir}`)
       }
     } catch (err) {
-      console.error('[uploads] sweep failed:', err)
+      logger.error('[uploads] sweep failed:', err)
     }
   }
   let sweepTimer: ReturnType<typeof setTimeout> | null = null
@@ -303,7 +327,7 @@ export function startServer(
   wss.on('connection', async (ws, req) => {
     const remote = req.socket.remoteAddress ?? 'unknown'
     const userAgent = String(req.headers['user-agent'] ?? '').slice(0, 160)
-    console.log(`[ws] client connected from ${remote} ua="${userAgent}"`)
+    logger.log(`[ws] client connected from ${remote} ua="${userAgent}"`)
     alive.set(ws, true)
     ws.on('pong', () => alive.set(ws, true))
 
@@ -314,7 +338,7 @@ export function startServer(
     // indicators immediately — but omit it entirely when there's nothing to
     // report, so a freshly started server's welcome sequence stays a single
     // message.
-    const windows = await listWindows()
+    const windows = await listWindows(options.tmuxExec)
     lastListing = JSON.stringify(windows)
     send(ws, { type: 'session:list', windows })
     const initialOwnership = getOwnership()
@@ -327,6 +351,8 @@ export function startServer(
       send: (msg) => send(ws, msg),
       broadcast: (msg) => broadcast(wss, msg),
       ptySpawner: options.ptySpawner,
+      tmuxExec: options.tmuxExec,
+      logger,
       claimWindow: (windowId) => {
         const previousClients = windowClients.get(windowId)
         if (previousClients) {
@@ -345,7 +371,7 @@ export function startServer(
       },
       userAgent,
       serverBuild,
-      servedClientBuild: () => readServedClientBuild(clientDistDir()),
+      servedClientBuild: () => readServedClientBuild(options.clientDist ?? clientDistDir()),
     })
   })
 
@@ -357,7 +383,7 @@ export function startServer(
       const address = server.address()
       const actualPort = typeof address === 'object' && address ? address.port : port
       const url = `http://localhost:${actualPort}`
-      console.log(`[server] listening on ${url}`)
+      logger.log(`[server] listening on ${url}`)
 
       const close = (): Promise<void> =>
         new Promise<void>((resolveClose, rejectClose) => {

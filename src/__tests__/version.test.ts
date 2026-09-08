@@ -1,6 +1,6 @@
 // Version handshake, client side: build-id parsing and the drift notice.
 //
-// Run with: npm run test:version
+// Run with: npx tsx --test src/__tests__/version.test.ts
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
