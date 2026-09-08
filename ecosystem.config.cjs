@@ -2,8 +2,9 @@ module.exports = {
   apps: [{
     name: 'nest',
     // Builds the client, then execs the server (scripts/start.sh), so any
-    // restart is a deploy. Changes to THIS file need
-    // `pm2 restart ecosystem.config.cjs --update-env && pm2 save`.
+    // restart is a deploy. Deploy with `npm run deploy` (scripts/deploy.sh):
+    // it notices when this file changed and relaunches from it, which a
+    // plain `pm2 restart` does not.
     script: 'scripts/start.sh',
     interpreter: 'bash',
     env: {

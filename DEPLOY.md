@@ -7,12 +7,14 @@ cd ~/nest
 git pull
 npm install
 npm run typecheck
-pm2 restart nest 2>/dev/null || (pm2 start ecosystem.config.cjs && pm2 save)
+npm run deploy
 ```
 
-pm2 runs `scripts/start.sh`, which builds the client before starting the
-server, so a restart is a deploy. If `ecosystem.config.cjs` changed, apply
-it with `pm2 restart ecosystem.config.cjs --update-env && pm2 save`.
+`npm run deploy` runs `scripts/deploy.sh`: it restarts nest under pm2, or
+starts it if it is not running, and relaunches it from
+`ecosystem.config.cjs` when that file changed. pm2 runs `scripts/start.sh`,
+which builds the client before starting the server, so a restart is a
+deploy.
 
 ## Expose via Tailscale
 

@@ -2,7 +2,7 @@
 
 ## Deploy
 
-Run `npm run deploy` to build and restart the app. This is just `pm2 restart nest`: pm2 runs `scripts/start.sh`, which builds the client and then starts the server, so every restart is a full deploy and the server and page stamps always match. The app prompts connected clients to reload via `VersionBanner`. Do not use the dev server — we deploy straight to prod. Changes to `ecosystem.config.cjs` itself need `pm2 restart ecosystem.config.cjs --update-env && pm2 save`.
+Run `npm run deploy` to build and restart the app. It runs `scripts/deploy.sh`, which restarts nest under pm2, or relaunches it from `ecosystem.config.cjs` when that file changed (pm2 does not pick up a changed script or interpreter on a plain restart). pm2 runs `scripts/start.sh`, which builds the client and then starts the server, so every restart is a full deploy and the server and page stamps always match. The app prompts connected clients to reload via `VersionBanner`. Do not use the dev server — we deploy straight to prod. Never run `pm2 restart` or `pm2 start` by hand; use `npm run deploy`.
 
 ## Build & check
 

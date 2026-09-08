@@ -12,7 +12,7 @@
     "preview": "vite preview",
     "icons": "node scripts/make-icons.mjs",
     "start": "NODE_ENV=production tsx src/server/index.ts",
-    "deploy": "pm2 restart nest",
+    "deploy": "bash scripts/deploy.sh",
     "test": "npx tsx --test src/__tests__/*.test.ts src/server/__tests__/*.test.ts",
     "test:socket-and-sessions": "npx tsx src/__tests__/socket-and-sessions.test.ts",
     "test:file-panel": "npx tsx src/__tests__/file-panel.test.ts",
