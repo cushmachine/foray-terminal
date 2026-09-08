@@ -32,6 +32,7 @@ import {
   storageGet,
   storageSet,
 } from './storage'
+import { terminalRegistry } from './terminalRegistry'
 import { TopBar } from './TopBar'
 import { VersionBanner } from './VersionBanner'
 import { readPageBuild, versionNotice, type VersionNotice } from './version'
@@ -171,20 +172,15 @@ export function App() {
     })
   }, [onMessage, applyPanelAction])
 
-  // Toolbar actions reach the active terminal as window events; the
-  // toolbar knows nothing about sessions or the socket.
-  const sendKeys = useCallback((data: string) => {
-    window.dispatchEvent(new CustomEvent('nest:sendkeys', { detail: data }))
-  }, [])
-  const pasteText = useCallback((text: string) => {
-    window.dispatchEvent(new CustomEvent('nest:paste', { detail: text }))
-  }, [])
-  const uploadFiles = useCallback((files: File[]) => {
-    window.dispatchEvent(new CustomEvent('nest:upload', { detail: files }))
-  }, [])
-  const submitText = useCallback((text: string) => {
-    window.dispatchEvent(new CustomEvent('nest:submit', { detail: text }))
-  }, [])
+  // Toolbar and Composer actions go to the active terminal through the
+  // registry; neither knows about sessions or the socket.
+  useEffect(() => {
+    terminalRegistry.setActive(activeSession)
+  }, [activeSession])
+  const sendKeys = useCallback((data: string) => terminalRegistry.active()?.sendKeys(data), [])
+  const pasteText = useCallback((text: string) => terminalRegistry.active()?.paste(text), [])
+  const uploadFiles = useCallback((files: File[]) => terminalRegistry.active()?.upload(files), [])
+  const submitText = useCallback((text: string) => terminalRegistry.active()?.submit(text), [])
 
   // Sticky Ctrl/Alt from the toolbar. Armed here, applied by the active
   // terminal to its next input, then cleared.

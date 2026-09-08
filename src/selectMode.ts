@@ -8,7 +8,9 @@
 // into and focuses its textarea, which pops the keyboard. Every mobile
 // terminal that solves this does it the same way: snapshot the text into a
 // static element the browser owns, select there, then return to the live
-// screen. This module is the pure part; Terminal.tsx renders the overlay.
+// screen. This module is the pure part; overlays.tsx renders the overlay.
+
+import { joinWrapped } from './links'
 
 /** Scrollback rows followed by the screen's logical lines, trailing blanks dropped. */
 export function snapshotText(history: string[], screen: string[]): string {
@@ -16,4 +18,25 @@ export function snapshotText(history: string[], screen: string[]): string {
   let end = lines.length
   while (end > 0 && lines[end - 1].trim() === '') end--
   return lines.slice(0, end).join('\n')
+}
+
+/** What the screen walk needs of the xterm. */
+export interface ScreenLines {
+  readonly rows: number
+  readonly buffer: {
+    readonly active: {
+      getLine(y: number): { translateToString(trim?: boolean): string; isWrapped: boolean } | undefined
+    }
+  }
+}
+
+/** The visible screen as logical lines: rows xterm soft-wrapped are rejoined. */
+export function visibleLogicalLines(term: ScreenLines): string[] {
+  const buffer = term.buffer.active
+  const rows: { text: string; wrapped: boolean }[] = []
+  for (let i = 0; i < term.rows; i++) {
+    const line = buffer.getLine(i)
+    if (line) rows.push({ text: line.translateToString(true), wrapped: line.isWrapped })
+  }
+  return joinWrapped(rows)
 }

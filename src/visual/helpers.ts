@@ -10,7 +10,8 @@
 //   terminal (the active session's xterm container), version-banner.
 // Test hook: the active Terminal publishes its xterm instance as
 // window.__nest.term so tests can read the screen buffer, which the WebGL
-// renderer does not expose in the DOM.
+// renderer does not expose in the DOM, and its actions as
+// window.__nest.actions (terminalRegistry.ts) so tests can type into it.
 
 import { expect, type Page } from '@playwright/test'
 
@@ -76,6 +77,23 @@ export async function killSession(page: Page, name: string): Promise<void> {
 export async function openDrawer(page: Page): Promise<void> {
   await page.getByTestId('sidebar-toggle').click()
   await expect(page.getByTestId('sidebar')).toBeVisible()
+}
+
+type NestActions = { sendKeys(data: string): void; submit(text: string): void }
+type NestHook = { __nest?: { actions?: NestActions } }
+
+/** Send raw input to the active terminal, as a toolbar key would. */
+export async function sendKeys(page: Page, data: string): Promise<void> {
+  await page.evaluate((d) => {
+    (window as unknown as NestHook).__nest?.actions?.sendKeys(d)
+  }, data)
+}
+
+/** Paste text and press Enter in the active terminal, as the Composer would. */
+export async function submitText(page: Page, text: string): Promise<void> {
+  await page.evaluate((t) => {
+    (window as unknown as NestHook).__nest?.actions?.submit(t)
+  }, text)
 }
 
 /** Text of a line in the active terminal's screen buffer, via the test hook Terminal.tsx exposes. */

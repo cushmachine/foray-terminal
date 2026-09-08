@@ -17,6 +17,7 @@ import {
   uniqueName,
   expectTerminalReady,
   expectTerminalText,
+  sendKeys as typeKeys,
 } from './helpers.ts'
 
 type NestWindow = Window & { __nest?: { term?: { cols: number } } }
@@ -39,9 +40,7 @@ async function killMobileSession(page: Page, name: string): Promise<void> {
 
 async function sendKeys(page: Page, data: string): Promise<void> {
   await page.getByTestId('terminal-area').click()
-  await page.evaluate((d) => {
-    window.dispatchEvent(new CustomEvent('nest:sendkeys', { detail: d }))
-  }, data)
+  await typeKeys(page, data)
 }
 
 /**

@@ -10,6 +10,7 @@ import {
   type Modifiers,
 } from './keys'
 import { MONO_FONT } from './theme'
+import { terminalRegistry } from './terminalRegistry'
 
 interface KeyToolbarProps {
   /** Send raw bytes to the active terminal. */
@@ -102,7 +103,7 @@ export function KeyToolbar({
         fileInput.current?.click()
         break
       case 'select':
-        window.dispatchEvent(new CustomEvent('nest:select-mode'))
+        terminalRegistry.active()?.toggleSelectMode()
         break
       case 'paste': {
         // Must run inside the user gesture; browsers refuse otherwise.

@@ -50,10 +50,11 @@ test('#17 selecting text in the terminal puts it on the clipboard', async ({ pag
     await page.keyboard.press('Enter')
     await expectTerminalText(page, marker)
     // Select the echoed line the way a drag or long-press would: through
-    // xterm's selection, which fires the same selection-change event.
-    const rows = await terminalScreen(page)
-    const row = rows.findIndex((r, i) => r.trim() === marker && i > 0)
-    expect(row).toBeGreaterThan(-1)
+    // xterm's selection, which fires the same selection-change event. The
+    // marker shows on the command line first; wait for the output row.
+    const outputRow = async () => (await terminalScreen(page)).findIndex((r, i) => r.trim() === marker && i > 0)
+    await expect.poll(outputRow, { timeout: 10_000 }).toBeGreaterThan(-1)
+    const row = await outputRow()
     await page.evaluate(({ row, len }) => {
       const term = (window as unknown as { __nest: { term: { select(c: number, r: number, l: number): void } } }).__nest.term
       term.select(0, row, len)

@@ -17,6 +17,8 @@ import {
   uniqueName,
   expectTerminalReady,
   expectTerminalText,
+  sendKeys,
+  submitText,
 } from './helpers.ts'
 
 type NestWindow = Window & { __nest?: { term?: { rows: number } } }
@@ -126,9 +128,7 @@ test.describe('keyboard behavior on mobile', () => {
 
       // Fill the screen with output so the prompt sits below real content.
       await page.getByTestId('terminal-area').click()
-      await page.evaluate(() => {
-        window.dispatchEvent(new CustomEvent('nest:sendkeys', { detail: 'seq 1 80\r' }))
-      })
+      await sendKeys(page, 'seq 1 80\r')
       await expectTerminalText(page, '80')
 
       const cellH = await cellHeight(page)
@@ -152,11 +152,7 @@ test.describe('keyboard behavior on mobile', () => {
       // Claude-Code-shaped screen: output, separator, a ❯ prompt row with
       // the cursor on it, and a status line under it. Composer mode must
       // park separator + prompt + status (+ the row after) below the fold.
-      await page.evaluate(() => {
-        window.dispatchEvent(new CustomEvent('nest:sendkeys', {
-          detail: "printf 'LAST-OUTPUT\\n────────\\n❯ \\nSTATUS-LINE\\n\\033[2A'\r",
-        }))
-      })
+      await sendKeys(page, "printf 'LAST-OUTPUT\\n────────\\n❯ \\nSTATUS-LINE\\n\\033[2A'\r")
       await expectTerminalText(page, 'STATUS-LINE')
       await page.locator('[data-composer] textarea').focus()
       await page.waitForTimeout(900)
@@ -190,9 +186,7 @@ test.describe('keyboard behavior on mobile', () => {
       await page.setViewportSize({ width: MOBILE.width, height: 500 })
       await page.waitForTimeout(400)
       await page.getByTestId('terminal-area').click()
-      await page.evaluate(() => {
-        window.dispatchEvent(new CustomEvent('nest:sendkeys', { detail: 'seq 1 80\r' }))
-      })
+      await sendKeys(page, 'seq 1 80\r')
       await expectTerminalText(page, '80')
       await page.locator('[data-composer] textarea').focus()
       await page.waitForTimeout(900)
@@ -214,9 +208,7 @@ test.describe('keyboard behavior on mobile', () => {
       expect(Math.abs((await scrollTop()) - target)).toBeLessThanOrEqual(2)
 
       // Output arriving while scrolled up does not pull the view down either.
-      await page.evaluate(() => {
-        window.dispatchEvent(new CustomEvent('nest:submit', { detail: 'echo AFTER-WAKE' }))
-      })
+      await submitText(page, 'echo AFTER-WAKE')
       await expectTerminalText(page, 'AFTER-WAKE')
       await page.waitForTimeout(300)
       expect(Math.abs((await scrollTop()) - target)).toBeLessThanOrEqual(2)
@@ -261,9 +253,7 @@ test.describe('keyboard behavior on mobile', () => {
 
       // Fill the scrollback past the client's cap so a later reset trims the top.
       await page.getByTestId('terminal-area').click()
-      await page.evaluate(() => {
-        window.dispatchEvent(new CustomEvent('nest:sendkeys', { detail: 'seq 1 3200\r' }))
-      })
+      await sendKeys(page, 'seq 1 3200\r')
       await expectTerminalText(page, '3200', 20_000)
       await expect.poll(() => historyRows().count(), { timeout: 20_000 }).toBeGreaterThanOrEqual(2990)
       const firstBefore = await historyRows().first().textContent()
@@ -323,9 +313,7 @@ test.describe('keyboard behavior on mobile', () => {
       await createMobileSession(page, name)
       await expectTerminalReady(page)
       await page.getByTestId('terminal-area').click()
-      await page.evaluate(() => {
-        window.dispatchEvent(new CustomEvent('nest:sendkeys', { detail: "printf 'select-me %s\\n' marker-42\r" }))
-      })
+      await sendKeys(page, "printf 'select-me %s\\n' marker-42\r")
       await expectTerminalText(page, 'select-me marker-42')
 
       const selectBtn = page.getByRole('button', { name: 'Select text' })
