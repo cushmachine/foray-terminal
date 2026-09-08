@@ -83,6 +83,17 @@ export function createSaveKeymap(onSave: (() => void) | undefined): KeyBinding[]
   ]
 }
 
+/**
+ * The change that turns the editor's document into `next`, or null when
+ * they already agree. Applied when content arrives from outside (a reload
+ * from disk); the parent echoing back what was just typed is a no-op, so
+ * the view is never rebuilt or disturbed by a keystroke.
+ */
+export function docReplacement(current: string, next: string): { from: number; to: number; insert: string } | null {
+  if (current === next) return null
+  return { from: 0, to: current.length, insert: next }
+}
+
 interface MarkdownEditorProps {
   content: string
   onChange?: (content: string) => void
@@ -90,9 +101,16 @@ interface MarkdownEditorProps {
   readOnly?: boolean
 }
 
+/**
+ * One CodeMirror view per mounted editor. The parent keys the component on
+ * the file path, so switching files remounts; content changes on the same
+ * file are dispatched into the live view instead.
+ */
 export function MarkdownEditor({ content, onChange, onSave, readOnly }: MarkdownEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
+  const contentRef = useRef(content)
+  contentRef.current = content
   const onChangeRef = useRef(onChange)
   onChangeRef.current = onChange
   const onSaveRef = useRef(onSave)
@@ -102,7 +120,7 @@ export function MarkdownEditor({ content, onChange, onSave, readOnly }: Markdown
     if (!containerRef.current) return
 
     const state = EditorState.create({
-      doc: content,
+      doc: contentRef.current,
       extensions: [
         theme,
         syntaxHighlighting(highlights),
@@ -134,8 +152,14 @@ export function MarkdownEditor({ content, onChange, onSave, readOnly }: Markdown
       view.destroy()
       viewRef.current = null
     }
-    // Only recreate when switching between files or read-only mode
-  }, [readOnly, content])
+  }, [readOnly])
+
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view) return
+    const changes = docReplacement(view.state.doc.toString(), content)
+    if (changes) view.dispatch({ changes })
+  }, [content])
 
   return (
     <div ref={containerRef} style={{ height: '100%', width: '100%' }} />

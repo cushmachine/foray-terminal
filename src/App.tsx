@@ -4,13 +4,14 @@ import { Sidebar } from './Sidebar'
 import { Terminal } from './Terminal'
 import { KeyToolbar } from './KeyToolbar'
 import { Composer } from './Composer'
-import { FilePanel } from './FilePanel'
+import { FilePanel } from './files/FilePanel'
 import { useSocket } from './hooks/useSocket'
 import { SocketProvider } from './SocketContext'
 import { useAppHeight } from './hooks/useAppHeight'
 import { openedWith, pendingCreateAfter, reduceSessions, type SessionsState } from './sessionState'
 import { NO_MODIFIERS, shortcutAction, type Modifiers } from './keys'
 import {
+  FILE_PANEL_DEFAULT_WIDTH,
   IS_TOUCH,
   clampFontSize,
   defaultFontSize,
@@ -34,6 +35,7 @@ import {
 } from './storage'
 import { terminalRegistry } from './terminalRegistry'
 import { TopBar } from './TopBar'
+import { Toast } from './Toast'
 import { VersionBanner } from './VersionBanner'
 import { readPageBuild, versionNotice, type VersionNotice } from './version'
 
@@ -78,7 +80,10 @@ export function App() {
   // decision (touch layouts always show it).
   const [toolbarChoice, setToolbarChoice] = useState(() => storageGet(KEY_TOOLBAR_KEY))
   const [openFile, setOpenFile] = useState<string | null>(null)
-  const [filePanelWidth, setFilePanelWidth] = useState(320)
+  const [filePanelWidth, setFilePanelWidth] = useState(FILE_PANEL_DEFAULT_WIDTH)
+  // A failure nothing else shows (a rejected session op); see Toast.
+  const [toast, setToast] = useState<string | null>(null)
+  const dismissToast = useCallback(() => setToast(null), [])
 
   const isMobile = useIsMobile()
   // Listeners installed once (the socket handler, the keyboard shortcuts)
@@ -144,10 +149,10 @@ export function App() {
         setNotice(next && next.text === dismissedNotice.current ? null : next)
         return
       }
-      // Errors the file panel doesn't own (it filters on files:*) have no UI
-      // yet; log them so a failed session op isn't silent.
+      // Errors the file panel doesn't own (it filters on files:*) go to
+      // the toast so a failed session op isn't silent.
       if (msg.type === 'error' && !msg.request.startsWith('files:')) {
-        console.error(`[nest] ${msg.request} failed: ${msg.message}`)
+        setToast(`${msg.request} failed: ${msg.message}`)
         return
       }
       if (msg.type === 'session:ownership') {
@@ -213,9 +218,15 @@ export function App() {
     applyPanelAction('open-file')
   }, [applyPanelAction])
 
+  // Back to the tree: the panel stays where it is on both layouts.
   const handleCloseFile = useCallback(() => {
     setOpenFile(null)
-    applyPanelAction('close-file')
+  }, [])
+
+  // Hide the panel (desktop) or return to the terminal (phone); the open
+  // file and any edit in progress survive, since the panel stays mounted.
+  const handleClosePanel = useCallback(() => {
+    applyPanelAction('toggle-files')
   }, [applyPanelAction])
 
   // Edge swipe opens the drawer; a leftward swipe closes it. Decided on
@@ -254,17 +265,24 @@ export function App() {
             setNotice(null)
           }}
         />
+        <Toast message={toast} onDismiss={dismissToast} />
 
         {/* Sidebar overlay on mobile */}
         {sidebarOpen && isMobile && (
-          <div
+          <button
             data-testid="sidebar-backdrop"
+            aria-label="Close sidebar"
             onClick={() => applyPanelAction('close-sidebar')}
             style={{
               position: 'fixed',
               inset: 0,
               background: 'rgba(0,0,0,0.75)',
               zIndex: 90,
+              width: '100%',
+              height: '100%',
+              border: 'none',
+              padding: 0,
+              cursor: 'default',
             }}
           />
         )}
@@ -332,18 +350,18 @@ export function App() {
               ))}
             </div>
 
-            {/* File panel */}
-            {((!isMobile && filePanelOpen) || (isMobile && mobileView === 'files')) && (
-              <FilePanel
-                openFile={openFile}
-                onOpenFile={handleOpenFile}
-                onClose={handleCloseFile}
-                isMobile={isMobile}
-                width={filePanelWidth}
-                onResize={setFilePanelWidth}
-                cwd={activeSessionData?.cwd ?? ''}
-              />
-            )}
+            {/* File panel: mounted once so its tree, expansion and watcher survive toggles */}
+            <FilePanel
+              open={isMobile ? mobileView === 'files' : filePanelOpen}
+              openFile={openFile}
+              onOpenFile={handleOpenFile}
+              onCloseFile={handleCloseFile}
+              onClosePanel={handleClosePanel}
+              isMobile={isMobile}
+              width={filePanelWidth}
+              onResize={setFilePanelWidth}
+              cwd={activeSessionData?.cwd ?? ''}
+            />
           </div>
 
           {/* Mobile input bar: see Composer.tsx for why typing goes here. */}

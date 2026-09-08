@@ -1,13 +1,11 @@
-// Markdown editor and file panel header, pending for S7.
+// Markdown editor and file panel header.
 //
-// The editor rebuilds its CodeMirror view on every keystroke (its effect
-// keys on `content`, which the parent updates as you type), so the cursor
-// jumps and focus is lost. The panel header has one close button that
-// closes the whole panel where "back to the tree" was meant. Both specs
-// are fixme until S7 lands; S7 removes the fixme.
-//
-// Expected accessible names after S7: "Back to files" (returns to the
-// tree) and "Close panel" (closes the panel), on both layouts.
+// The editor used to rebuild its CodeMirror view on every keystroke (its
+// effect keyed on `content`, which the parent updates as you type), so the
+// cursor jumped and focus was lost; now the view lives as long as the file
+// is open and outside content is dispatched into it. The header has two
+// buttons: "Back to files" returns to the tree and "Close panel" hides the
+// panel (desktop) or returns to the terminal (phone).
 import { test, expect, type Page } from '@playwright/test'
 import { DESKTOP, MOBILE } from './helpers.ts'
 
@@ -23,34 +21,37 @@ async function openMarkdownFile(page: Page, mobile: boolean): Promise<void> {
 test.describe('markdown editor', () => {
   test.use({ viewport: DESKTOP })
 
-  test.fixme('typing keeps the cursor at the end and never loses focus', async ({ page }) => {
+  test('typing keeps the cursor at the end and never loses focus', async ({ page }) => {
     await page.goto('/')
     await openMarkdownFile(page, false)
     await page.getByTestId('file-edit-toggle').click()
     const content = page.getByTestId('file-panel').locator('.cm-content')
     await expect(content).toBeVisible()
-    const before = (await content.innerText()).replace(/\n$/, '')
 
     // Put the cursor at the very end, then type twenty characters one by one.
+    // CodeMirror virtualises long documents (only the lines near the viewport
+    // are in the DOM), so the checks look at the document's tail rather than
+    // comparing the whole text: a rebuilt view would put the cursor back at
+    // offset 0 and the typed text would land at the top, not the end.
     await content.click()
     await page.keyboard.press('Control+End')
+    const tail = () => content.innerText().then((t) => t.replace(/\n$/, ''))
     const typed = 'abcdefghijklmnopqrst'
     for (const ch of typed) await page.keyboard.type(ch)
 
-    // The document is the old text plus what was typed, in order.
-    await expect.poll(() => content.innerText().then((t) => t.replace(/\n$/, ''))).toBe(before + typed)
+    await expect.poll(tail).toMatch(new RegExp(`${typed}$`))
     // Focus never left the editor.
     expect(await page.evaluate(() => document.activeElement?.classList.contains('cm-content'))).toBe(true)
     // The cursor sits after the last typed character: typing once more appends.
     await page.keyboard.type('!')
-    await expect.poll(() => content.innerText().then((t) => t.replace(/\n$/, ''))).toBe(`${before}${typed}!`)
+    await expect.poll(tail).toMatch(new RegExp(`${typed}!$`))
   })
 })
 
 test.describe('file panel header on desktop', () => {
   test.use({ viewport: DESKTOP })
 
-  test.fixme('back returns to the tree; close closes the panel', async ({ page }) => {
+  test('back returns to the tree; close closes the panel', async ({ page }) => {
     await page.goto('/')
     await openMarkdownFile(page, false)
 
@@ -67,7 +68,7 @@ test.describe('file panel header on desktop', () => {
 test.describe('file panel header on a phone', () => {
   test.use({ viewport: MOBILE, isMobile: true, hasTouch: true })
 
-  test.fixme('back returns to the tree', async ({ page }) => {
+  test('back returns to the tree', async ({ page }) => {
     await page.goto('/')
     await openMarkdownFile(page, true)
 

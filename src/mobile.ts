@@ -146,6 +146,16 @@ export function readFontSize(raw: string | null | undefined, fallback: number): 
  */
 export const TABLET_MAX_WIDTH = 1024
 
+/** Desktop file panel width, in px: the user drags it between the bounds. */
+export const FILE_PANEL_MIN_WIDTH = 200
+export const FILE_PANEL_MAX_WIDTH = 800
+export const FILE_PANEL_DEFAULT_WIDTH = 320
+
+export function clampFilePanelWidth(width: number): number {
+  if (!Number.isFinite(width)) return FILE_PANEL_DEFAULT_WIDTH
+  return Math.min(FILE_PANEL_MAX_WIDTH, Math.max(FILE_PANEL_MIN_WIDTH, Math.round(width)))
+}
+
 /** Which of the two full-width views a phone shows; desktop shows both side by side. */
 export type MobileView = 'terminal' | 'files'
 

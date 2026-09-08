@@ -84,7 +84,7 @@ test.describe('file panel on a phone', () => {
     expect(editBox).not.toBeNull()
     expect(editBox!.width).toBeGreaterThan(20)
     expect(editBox!.x + editBox!.width).toBeLessThanOrEqual(MOBILE.width)
-    const closeBtn = page.getByRole('button', { name: 'Close file' })
+    const closeBtn = page.getByTestId('file-panel').getByRole('button', { name: 'Close panel' })
     await expect(closeBtn).toBeVisible()
     const closeBox = await closeBtn.boundingBox()
     expect(closeBox).not.toBeNull()

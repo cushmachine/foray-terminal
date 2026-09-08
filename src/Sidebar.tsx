@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { displayName, sortSessions, type Session } from './sessionState'
+import { isEditableTarget, useEscape } from './hooks/useEscape'
 import { MAX_FONT_SIZE, MIN_FONT_SIZE } from './mobile'
 import { MONO_FONT } from './theme'
 
@@ -59,6 +60,24 @@ export function Sidebar({
     return () => clearTimeout(timer)
   }, [confirmKillId])
 
+  // The drawer is a modal layer: Escape closes it, and keyboard focus
+  // moves in while it is open and back out when it closes. Focus is not
+  // handed back to a text field, since on a phone that would raise the
+  // soft keyboard the user did not ask for.
+  const drawerOpen = isMobile && isOpen
+  useEscape(onClose, drawerOpen)
+  const drawerRef = useRef<HTMLDivElement>(null)
+  const closeRef = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    if (!drawerOpen) return
+    const previous = document.activeElement as HTMLElement | null
+    closeRef.current?.focus()
+    return () => {
+      if (drawerRef.current?.contains(document.activeElement)) (document.activeElement as HTMLElement | null)?.blur()
+      if (previous && previous.isConnected && previous !== document.body && !isEditableTarget(previous)) previous.focus()
+    }
+  }, [drawerOpen])
+
   if (!isMobile && !isOpen) return null
 
   const startRename = (session: Session) => {
@@ -111,7 +130,7 @@ export function Sidebar({
   })
 
   return (
-    <div data-testid="sidebar" aria-hidden={isMobile && !isOpen ? true : undefined} style={{
+    <div ref={drawerRef} data-testid="sidebar" aria-hidden={isMobile && !isOpen ? true : undefined} style={{
       width: isMobile ? 'min(300px, 85vw)' : 'var(--sidebar-width)',
       background: 'var(--surface)',
       borderRight: '1px solid var(--border)',
@@ -166,7 +185,7 @@ export function Sidebar({
           </div>
         </div>
         {isMobile && (
-          <button data-testid="sidebar-close" onClick={onClose} aria-label="Close sidebar" style={iconButton({ fontSize: 18 })}>
+          <button ref={closeRef} data-testid="sidebar-close" onClick={onClose} aria-label="Close sidebar" style={iconButton({ fontSize: 18 })}>
             ‹
           </button>
         )}
