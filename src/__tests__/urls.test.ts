@@ -1,16 +1,14 @@
-// URL helpers for history links, and the row joiner select mode relies on.
+// URL helpers shared by history links and the live screen's link addon.
 //
-// Run with: npx tsx src/__tests__/links.test.ts
+// Run with: npx tsx --test src/__tests__/urls.test.ts
 //
-// Covers:
-//  1. URL_RE + cleanUrl: http/https only, several per line, trailing
-//     punctuation and quotes stripped, a trailing `)` kept only when it
-//     balances one inside the URL, bare scheme is not a URL
-//  2. joinWrapped: wrapped rows re-join their logical line; others stay put
+// Covers URL_RE + cleanUrl: http/https only, several per line, trailing
+// punctuation and quotes stripped, a trailing `)` kept only when it
+// balances one inside the URL, bare scheme is not a URL.
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { URL_RE, cleanUrl, joinWrapped } from '../links.ts'
+import { URL_RE, cleanUrl } from '../urls.ts'
 
 /** What the link chip used to do; kept as the spec for URL_RE + cleanUrl. */
 function extractUrls(text: string): string[] {
@@ -73,43 +71,4 @@ test('extractUrls: a bare scheme is not a URL', () => {
 test('extractUrls: no URLs gives an empty list', () => {
   assert.deepEqual(extractUrls('nothing to see here'), [])
   assert.deepEqual(extractUrls(''), [])
-})
-
-// ---------------------------------------------------------------------------
-// joinWrapped
-// ---------------------------------------------------------------------------
-
-test('joinWrapped: a three-row wrap becomes one logical line', () => {
-  const rows = [
-    { text: 'Opening https://example.com/app/auth/', wrapped: false },
-    { text: 'cli/abcdefghijklmnopqrstuvwxyz0123456789', wrapped: true },
-    { text: 'ABCDEFGHIJ for login', wrapped: true },
-  ]
-  assert.deepEqual(joinWrapped(rows), [
-    'Opening https://example.com/app/auth/cli/abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJ for login',
-  ])
-})
-
-test('joinWrapped: unwrapped rows stay separate', () => {
-  const rows = [
-    { text: 'one', wrapped: false },
-    { text: 'two', wrapped: false },
-    { text: 'three', wrapped: false },
-  ]
-  assert.deepEqual(joinWrapped(rows), ['one', 'two', 'three'])
-})
-
-test('joinWrapped: wraps join only to their own line', () => {
-  const rows = [
-    { text: 'alpha-', wrapped: false },
-    { text: 'beta', wrapped: true },
-    { text: 'gamma', wrapped: false },
-    { text: 'delta-', wrapped: false },
-    { text: 'epsilon', wrapped: true },
-  ]
-  assert.deepEqual(joinWrapped(rows), ['alpha-beta', 'gamma', 'delta-epsilon'])
-})
-
-test('joinWrapped: empty input gives an empty list', () => {
-  assert.deepEqual(joinWrapped([]), [])
 })

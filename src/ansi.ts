@@ -4,6 +4,11 @@
 // this is what gives that text its colours back. Only SGR is interpreted;
 // every other escape sequence is dropped. No dependencies, so it can be
 // unit tested without a DOM.
+//
+// tmux writes a colour code where the colour changes, not at the start of
+// every row, so a row that continues the style of the row above it
+// carries no code of its own. The caller threads one Style through the
+// rows in order and the style at the end of one row opens the next.
 
 export interface Palette {
   /** 256 CSS colours: 16 from the theme, the 6x6x6 cube, then 24 greys. */
@@ -66,7 +71,7 @@ export function paletteFromTheme(theme: ThemeColors): Palette {
  */
 type Colour = number | string
 
-interface Style {
+export interface Style {
   fg: Colour | null
   bg: Colour | null
   bold: boolean
@@ -77,7 +82,7 @@ interface Style {
   inverse: boolean
 }
 
-function plainStyle(): Style {
+export function plainStyle(): Style {
   return { fg: null, bg: null, bold: false, dim: false, italic: false, underline: false, strike: false, inverse: false }
 }
 
@@ -213,9 +218,10 @@ function escapeHtml(text: string): string {
 /**
  * One captured row → HTML. Escapes text; wraps styled runs in
  * `<span style="...">`. Plain text comes out bare and an empty row as ''.
+ * `style` is the style in force at the row's start and is left holding
+ * the one at its end, so consecutive rows can share it.
  */
-export function ansiLineToHtml(line: string, palette: Palette): string {
-  const style = plainStyle()
+export function ansiLineToHtml(line: string, palette: Palette, style: Style = plainStyle()): string {
   let out = ''
   // The style of the span currently open, '' when none. Spans open only
   // when text arrives, so a run of escapes with nothing between them (a

@@ -10,8 +10,6 @@
 // static element the browser owns, select there, then return to the live
 // screen. This module is the pure part; overlays.tsx renders the overlay.
 
-import { joinWrapped } from './links'
-
 /** Scrollback rows followed by the screen's logical lines, trailing blanks dropped. */
 export function snapshotText(history: string[], screen: string[]): string {
   const lines = [...history, ...screen]
@@ -28,6 +26,19 @@ export interface ScreenLines {
       getLine(y: number): { translateToString(trim?: boolean): string; isWrapped: boolean } | undefined
     }
   }
+}
+
+/**
+ * Join screen rows into logical lines: a row flagged `wrapped` is the
+ * continuation of the row above it (xterm's isWrapped).
+ */
+export function joinWrapped(rows: { text: string; wrapped: boolean }[]): string[] {
+  const out: string[] = []
+  for (const row of rows) {
+    if (row.wrapped && out.length > 0) out[out.length - 1] += row.text
+    else out.push(row.text)
+  }
+  return out
 }
 
 /** The visible screen as logical lines: rows xterm soft-wrapped are rejoined. */

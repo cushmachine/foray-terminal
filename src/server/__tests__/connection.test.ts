@@ -202,46 +202,53 @@ test('session:kill kills the ptys attached to that window on every connection', 
 // Resize bursts
 // ---------------------------------------------------------------------------
 
-/** Every message of `type` that arrives within `ms`. */
-function collect(ws: WebSocket, type: string, ms: number): Promise<Msg[]> {
-  return new Promise((resolve) => {
-    const seen: Msg[] = []
-    const handler = (event: MessageEvent): void => {
-      const msg = JSON.parse(String(event.data)) as Msg
-      if (msg.type === type) seen.push(msg)
-    }
-    ws.addEventListener('message', handler)
-    setTimeout(() => {
-      ws.removeEventListener('message', handler)
-      resolve(seen)
-    }, ms)
-  })
+/**
+ * Let the handler's promise chain run to completion. The fake tmux answers
+ * on the microtask queue, so a few turns of the event loop see any message
+ * through; a poll would not do here because the timers are faked.
+ */
+async function drain(): Promise<void> {
+  for (let i = 0; i < 10; i++) await new Promise((resolve) => setImmediate(resolve))
 }
 
 // A phone rotating, or a desktop window being dragged, sends a burst of
-// resizes; tmux reflows the history after each, so the whole history is
-// re-sent once, after the burst settles, not once per resize.
-test('ten resizes in 50 ms cause one history re-send', async () => {
-  const { url, close, tmux } = await startTestServer()
-  tmux.add('shell', { history: ['one', 'two', 'three'] })
-  try {
-    const { ws } = await connect(url)
-    const attached = waitForType(ws, 'terminal:history')
-    ws.send(JSON.stringify({ type: 'terminal:attach', windowId: 0, cols: 80, rows: 24 }))
-    await attached
+// resizes; tmux reflows the history after each. The lines the client has
+// are captured joined, so a reflow leaves them as they were: the burst
+// costs one history check after it settles, and no re-send.
+test('ten resizes in 50 ms cause one history check, after the burst settles, and no re-send', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] })
+  const conn = handleTestConnection()
+  conn.tmux.add('shell', { history: ['one', 'two', 'three'] })
+  const histories = () => conn.sent.filter((m) => m.type === 'terminal:history')
+  const checks = () => conn.tmux.calls.filter((args) => args[0] === 'display-message').length
 
-    const resends = collect(ws, 'terminal:history', 700)
-    for (let i = 0; i < 10; i++) {
-      ws.send(JSON.stringify({ type: 'terminal:resize', windowId: 0, cols: 60 + i, rows: 24 }))
-      await new Promise((resolve) => setTimeout(resolve, 5))
-    }
-    const got = await resends
-    assert.equal(got.length, 1, `expected one history re-send after the storm, got ${got.length}`)
-    assert.equal(got[0].reset, true)
-    ws.close()
-  } finally {
-    await close()
+  conn.socket.receive({ type: 'terminal:attach', windowId: 0, cols: 80, rows: 24 })
+  await drain()
+  assert.equal(conn.ptys.length, 1)
+  assert.equal(histories().length, 1, 'the attach sends the history once')
+  const checksAfterAttach = checks()
+
+  for (let i = 0; i < 10; i++) {
+    if (i > 0) t.mock.timers.tick(5)
+    conn.socket.receive({ type: 'terminal:resize', windowId: 0, cols: 60 + i, rows: 24 })
+    await drain()
   }
+  assert.equal(conn.ptys[0].resizes.length, 10, 'every resize reaches the pty at once')
+  assert.equal(checks(), checksAfterAttach, 'no check while the burst is still going')
+
+  // The reflow delay counts from the last resize.
+  t.mock.timers.tick(149)
+  await drain()
+  assert.equal(checks(), checksAfterAttach, 'still settling')
+  t.mock.timers.tick(1)
+  await drain()
+  assert.equal(checks(), checksAfterAttach + 1, 'one check after the burst settles')
+  assert.equal(histories().length, 1, 'the lines are the same, so nothing is re-sent')
+
+  t.mock.timers.tick(10_000)
+  await drain()
+  assert.equal(checks(), checksAfterAttach + 1, 'and no more after that')
+  conn.socket.emit('close')
 })
 
 // ---------------------------------------------------------------------------

@@ -17,6 +17,7 @@ import { canFit } from '../terminalSize'
 import { applyModifiers, type Modifiers } from '../keys'
 import { paletteFromTheme, type Palette } from '../ansi'
 import { MONO_FONT, THEME } from '../theme'
+import { URL_RE, cleanUrl } from '../urls'
 import { TerminalController, type AttachState } from './TerminalController'
 import { createHistoryPane } from './historyPane'
 import { bottomInset, composerFocused } from './bottomInset'
@@ -35,6 +36,8 @@ export interface UseTerminalOptions {
   scrollRef: RefObject<HTMLDivElement | null>
   historyRef: RefObject<HTMLDivElement | null>
   containerRef: RefObject<HTMLDivElement | null>
+  /** Where the xterm opens: the container's padding-free inside, so the fit measures the room it has. */
+  hostRef: RefObject<HTMLDivElement | null>
 }
 
 export interface UseTerminalResult {
@@ -52,6 +55,11 @@ export interface UseTerminalResult {
 interface Live {
   term: XTerm
   controller: TerminalController
+}
+
+/** Open a URL from the live screen in a new tab that cannot reach this one. */
+function openLink(_event: MouseEvent, uri: string): void {
+  window.open(cleanUrl(uri), '_blank', 'noopener')
 }
 
 /** Focus the Composer on touch (typing goes there), the xterm otherwise. */
@@ -76,6 +84,7 @@ export function useTerminal({
   scrollRef,
   historyRef,
   containerRef,
+  hostRef,
 }: UseTerminalOptions): UseTerminalResult {
   const { send, onMessage, status } = useSocketContext()
   const [live, setLive] = useState<Live | null>(null)
@@ -102,9 +111,10 @@ export function useTerminal({
   // Mount: the xterm, its addons and the controller, and every listener.
   useEffect(() => {
     const container = containerRef.current
+    const host = hostRef.current
     const scrollEl = scrollRef.current
     const historyEl = historyRef.current
-    if (!container || !scrollEl || !historyEl) return
+    if (!container || !host || !scrollEl || !historyEl) return
 
     const term = new XTerm({
       theme: THEME,
@@ -121,9 +131,13 @@ export function useTerminal({
     const fitAddon = new FitAddon()
     term.loadAddon(fitAddon)
     term.loadAddon(new ClipboardAddon())
-    term.open(container)
-    // Click/tap a URL on the live screen to open it (all platforms).
-    term.loadAddon(new WebLinksAddon())
+    // The fit addon sizes the pty from the host's width, so the host is
+    // the container's inside: with padding on the host itself the addon
+    // would read the padded width and the screen would run past it.
+    term.open(host)
+    // Click/tap a URL on the live screen to open it (all platforms), with
+    // the pattern history links use so both agree on where a URL ends.
+    term.loadAddon(new WebLinksAddon(openLink, { urlRegex: URL_RE }))
     // WebGL on desktop only. The DOM renderer leaves text in the DOM so
     // native long-press selection works on phones. WebGL paints to a canvas
     // where the browser can't select text at all.
@@ -259,7 +273,7 @@ export function useTerminal({
       controller.dispose()
       term.dispose()
     }
-  }, [windowId, send, onMessage, sendInput, touch, containerRef, scrollRef, historyRef])
+  }, [windowId, send, onMessage, sendInput, touch, containerRef, hostRef, scrollRef, historyRef])
 
   // A new socket means the old pty is gone; the controller asks again.
   useEffect(() => {

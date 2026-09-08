@@ -69,6 +69,7 @@ export function Terminal({
   const scrollRef = useRef<HTMLDivElement>(null)
   const historyRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  const hostRef = useRef<HTMLDivElement>(null)
   const { send, status } = useSocketContext()
   const { term, state, wasAttached, reattach, sendInput } = useTerminal({
     windowId,
@@ -80,6 +81,7 @@ export function Terminal({
     scrollRef,
     historyRef,
     containerRef,
+    hostRef,
   })
   const focusTerm = useCallback(() => term?.focus(), [term])
   const upload = useImageUpload({ windowId, containerRef, onSettled: focusTerm })
@@ -171,6 +173,9 @@ export function Terminal({
             lineHeight: 1.4,
             whiteSpace: 'pre-wrap',
             wordBreak: 'break-all',
+            // The right padding is adjusted so the text is exactly the pty's
+            // columns wide, measured in this font, and lines break where
+            // tmux broke them (terminal/historyPane.ts).
             padding: '0 8px',
             color: THEME.foreground,
             userSelect: 'text',
@@ -185,7 +190,9 @@ export function Terminal({
             height: touch ? 'var(--xterm-full-h, 100%)' : '100%',
             padding: 8,
           }}
-        />
+        >
+          <div ref={hostRef} style={{ width: '100%', height: '100%' }} />
+        </div>
       </div>
       {selecting !== null && (
         <SelectModeOverlay

@@ -31,14 +31,18 @@ const HISTORY_CHECK_MS = 80
 /**
  * Lines remembered from what was last sent. At the history limit the size
  * stops moving while lines rotate through, so new lines are found by
- * overlap with these.
+ * overlap with these. Rows captured per sync are the new rows plus this
+ * many, so a line wrapped over more rows than this at the tail cannot be
+ * matched and costs a reset.
  */
 const HISTORY_TAIL = 50
 
 /**
- * How long after the last resize of a burst to wait before sending the
- * whole history again. tmux reflows history to the new width, which moves
- * the line boundaries the client already has.
+ * How long after the last resize of a burst to wait before checking the
+ * history. tmux reflows wrapped rows to the new width, which moves the
+ * row count but not the lines the client has (they are captured joined),
+ * so the check finds nothing to send unless a line crossed into or out
+ * of the visible screen; it is here for the redraw tmux may not produce.
  */
 const HISTORY_REFLOW_MS = 150
 
@@ -80,7 +84,7 @@ interface Attachment {
   /** Null until the history that precedes the spawn has been sent. */
   pty: PtyHandle | null
   tracker: HistoryTracker
-  /** Pending full history re-send after a resize burst. */
+  /** Pending history check after a resize burst. */
   reflowTimer: ReturnType<typeof setTimeout> | null
   /** Polling for the socket buffer to drain while the pty is paused. */
   drainTimer: ReturnType<typeof setInterval> | null
@@ -271,7 +275,7 @@ export function handleConnection(ws: WebSocket, deps: ConnectionDeps): Connectio
 
   /**
    * Bring the client's history up to date with the pane's. `force` sends
-   * the whole history again (attach, resize reflow). One sync per window
+   * the whole history again (attach). One sync per window
    * runs at a time; a request that lands mid-run is folded into a rerun so
    * messages reach the client in order.
    */
@@ -303,11 +307,11 @@ export function handleConnection(ws: WebSocket, deps: ConnectionDeps): Connectio
       if (plan.kind === 'sync') {
         const captured = await captureHistoryLines(windowId, Math.min(state.size, plan.count + HISTORY_TAIL), tmuxExec)
         if (stale()) return
-        const fresh = alignHistory(tracker.sentTail, captured)
-        if (fresh !== null) {
-          if (fresh.length > 0) {
-            tracker.sentTail = nextTail(tracker.sentTail, fresh, HISTORY_TAIL)
-            send({ type: 'terminal:history', windowId, lines: fresh, reset: false })
+        const aligned = alignHistory(tracker.sentTail, captured)
+        if (aligned !== null) {
+          tracker.sentTail = nextTail([], aligned.tail, HISTORY_TAIL)
+          if (aligned.fresh.length > 0) {
+            send({ type: 'terminal:history', windowId, lines: aligned.fresh, reset: false })
           }
           tracker.known = state.size
           return
@@ -439,13 +443,12 @@ export function handleConnection(ws: WebSocket, deps: ConnectionDeps): Connectio
       const attachment = attachments.get(msg.windowId)
       if (!attachment?.pty) return
       attachment.pty.resize(clamp(msg.cols, MAX_COLS), clamp(msg.rows, MAX_ROWS))
-      // tmux reflows the history to the new width, so the lines the client
-      // has no longer match; send the whole set again once the burst of
-      // resizes has settled.
+      // tmux reflows the history to the new width; check once the burst
+      // of resizes has settled whether that moved anything.
       if (attachment.reflowTimer) clearTimeout(attachment.reflowTimer)
       attachment.reflowTimer = setTimeout(() => {
         attachment.reflowTimer = null
-        void syncHistory(msg.windowId, true)
+        void syncHistory(msg.windowId)
       }, HISTORY_REFLOW_MS)
     },
     'files:tree': async (msg) => {

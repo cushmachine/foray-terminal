@@ -54,6 +54,8 @@ export interface FakeSession {
   named: boolean
   /** Scrollback rows, oldest first. */
   history: string[]
+  /** Indexes of rows tmux soft-wrapped, so `capture-pane -J` joins each with the row after it. */
+  wrapped: number[]
   alternate: boolean
 }
 
@@ -83,6 +85,7 @@ export function fakeTmux(): FakeTmux {
       command: 'bash',
       named: false,
       history: [],
+      wrapped: [],
       alternate: false,
       ...overrides,
     }
@@ -138,7 +141,17 @@ export function fakeTmux(): FakeTmux {
       case 'capture-pane': {
         const s = target(args)
         const count = -Number(arg(args, '-S'))
-        return ok(s.history.slice(-count).map((row) => `${row}\n`).join(''))
+        const from = Math.max(0, s.history.length - count)
+        const wrapped = new Set(s.wrapped)
+        const lines: string[] = []
+        for (let i = from; i < s.history.length; i++) {
+          // tmux joins a wrapped row with the next only within the range it
+          // captures; the last row still gets its newline.
+          const join = args.includes('-J') && i > from && wrapped.has(i - 1)
+          if (join) lines[lines.length - 1] += s.history[i]
+          else lines.push(s.history[i])
+        }
+        return ok(lines.map((row) => `${row}\n`).join(''))
       }
       default:
         return fail(`unknown command: ${args[0]}`)

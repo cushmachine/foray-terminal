@@ -64,6 +64,7 @@ function fakeHistory() {
       lines.length = 0
       rows.length = 0
     },
+    lockWidth() {},
   }
   return pane
 }

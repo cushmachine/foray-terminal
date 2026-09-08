@@ -14,7 +14,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { ansiLineToHtml, paletteFromTheme, type ThemeColors } from '../ansi.ts'
+import { ansiLineToHtml, paletteFromTheme, plainStyle, type ThemeColors } from '../ansi.ts'
 
 const ESC = '\x1b'
 
@@ -228,4 +228,14 @@ test('a trailing reset produces no empty span', () => {
 
 test('a leading reset and back-to-back style changes with no text produce nothing', () => {
   assert.equal(html(`${ESC}[0m${ESC}[31m${ESC}[32mx`), `<span style="color:${theme.green}">x</span>`)
+})
+
+test('a style carried in from the row above applies until the row changes it', () => {
+  // tmux writes a code only where the colour changes: the second row of a
+  // red block carries none of its own.
+  const style = plainStyle()
+  assert.equal(ansiLineToHtml('\x1b[31mred', palette, style), `<span style="color:${palette.colors[1]}">red</span>`)
+  assert.equal(ansiLineToHtml('still red', palette, style), `<span style="color:${palette.colors[1]}">still red</span>`)
+  assert.equal(ansiLineToHtml('\x1b[39mplain', palette, style), 'plain')
+  assert.equal(ansiLineToHtml('and plain', palette, style), 'and plain')
 })

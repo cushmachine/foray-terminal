@@ -7,9 +7,15 @@
 // it from there and ships lines to the client as they land. These are the
 // pure decisions; the tmux calls and the per-connection state live in
 // tmux.ts and ws-handler.ts.
+//
+// Sizes count tmux rows; lines are what capture-pane -J returns, one per
+// line the program wrote, so a wrapped line is one entry however many rows
+// it takes. The two never need to agree: sizes decide how many rows to
+// capture, and the captured lines are matched against the ones already
+// sent by content.
 
 export interface PaneHistoryState {
-  /** Lines currently in the pane's history (above the visible screen). */
+  /** Rows currently in the pane's history (above the visible screen). */
   size: number
   /** history-limit for the pane: history stops growing here and rotates. */
   limit: number
@@ -20,15 +26,17 @@ export interface PaneHistoryState {
 export type HistoryPlan =
   /** Nothing to do. */
   | { kind: 'none' }
-  /** Capture the last `count` lines and align them against what was already sent. */
+  /** Capture the last `count` rows and align them against what was already sent. */
   | { kind: 'sync'; count: number }
   /** Capture everything; the client replaces its copy. */
   | { kind: 'reset' }
 
 /**
- * Lines to fetch when history is at its limit. New lines are found by
- * overlap with the last lines sent, so this only has to cover what could
- * have arrived since the previous check.
+ * Rows to fetch when the size cannot say how much is new: at the limit it
+ * no longer moves while lines rotate through, and after a resize tmux
+ * reflows wrapped rows so it moves without the lines changing. New lines
+ * are found by overlap with the last lines sent, so this only has to cover
+ * what could have arrived since the previous check.
  */
 export const SATURATED_WINDOW = 200
 
@@ -43,43 +51,70 @@ export function planHistoryUpdate(
 ): HistoryPlan {
   if (state.alternate) return { kind: 'none' }
   if (known === null) return { kind: 'reset' }
-  // Shrunk: tmux reflowed on a resize, or the history was cleared.
-  if (state.size < known) return { kind: 'reset' }
-  // At the limit the size no longer moves while lines rotate through, so
-  // check a window of the tail every time.
-  if (state.limit > 0 && state.size >= state.limit) {
-    return { kind: 'sync', count: Math.min(saturatedWindow, state.size) }
-  }
+  const window = Math.min(saturatedWindow, state.size)
+  // Shrunk: tmux reflowed wrapped rows to a wider pane, or lines came back
+  // from history to a taller screen, or the history was cleared. Only the
+  // first leaves the client's lines intact; the others fail to align and
+  // reset from there.
+  if (state.size < known) return { kind: 'sync', count: window }
+  if (state.limit > 0 && state.size >= state.limit) return { kind: 'sync', count: window }
   if (state.size === known) return { kind: 'none' }
   return { kind: 'sync', count: state.size - known }
 }
 
+export interface Alignment {
+  /** The captured lines the client does not have yet, in order. */
+  fresh: string[]
+  /** The history's tail as tmux has it now, uncapped; what the next alignment matches against. */
+  tail: string[]
+}
+
 /**
- * The lines in `captured` (a fresh tail of the history) that come after
- * the last lines already sent. Matches the longest run of `sentTail`'s end
+ * Lines in `captured` (a fresh tail of the history) that come after the
+ * last lines already sent. Matches the longest run of `sentTail`'s end
  * found in `captured`, searching from the newest end. Returns null when
  * they don't overlap at all, meaning the client is too far behind to
  * append and must reset.
+ *
+ * History rows never change once written, with one exception: a line
+ * still being wrapped onto the visible screen is captured as its history
+ * part and grows as rows scroll up. So the last sent line also matches a
+ * captured line that extends it, and the extension is sent as a line of
+ * its own: it starts at column zero on the pane, where tmux's wrap put it.
+ * The remembered tail takes the joined line, so the next capture matches.
  */
 export function alignHistory(
   sentTail: readonly string[],
   captured: readonly string[],
   minOverlap: number = 3,
-): string[] | null {
+): Alignment | null {
   const maxRun = Math.min(sentTail.length, captured.length)
   if (maxRun === 0) return null
   const minRun = Math.min(minOverlap, sentTail.length)
+  const last = sentTail[sentTail.length - 1]
+  const extends_ = (line: string): boolean => last !== '' && line.length > last.length && line.startsWith(last)
   for (let run = maxRun; run >= minRun; run--) {
     const block = sentTail.slice(sentTail.length - run)
     for (let at = captured.length - run; at >= 0; at--) {
       let matches = true
-      for (let j = 0; j < run; j++) {
+      for (let j = 0; j < run - 1; j++) {
         if (captured[at + j] !== block[j]) {
           matches = false
           break
         }
       }
-      if (matches) return captured.slice(at + run)
+      if (!matches) continue
+      const end = at + run - 1
+      const grown = captured[end]
+      if (grown === last) {
+        return { fresh: captured.slice(end + 1), tail: sentTail.concat(captured.slice(end + 1)) }
+      }
+      if (extends_(grown)) {
+        return {
+          fresh: [grown.slice(last.length), ...captured.slice(end + 1)],
+          tail: sentTail.slice(0, -1).concat(captured.slice(end)),
+        }
+      }
     }
   }
   return null

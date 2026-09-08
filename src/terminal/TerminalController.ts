@@ -44,10 +44,15 @@ export interface RowLike {
 /** The scrollback pane: one rendered row per history line (historyPane.ts). */
 export interface HistoryPane {
   readonly rows: ArrayLike<RowLike>
-  append(lines: string[], cols: number): void
+  append(lines: string[]): void
   /** Drop `count` rows from the top. */
   trimTop(count: number): void
   clear(): void
+  /**
+   * Make the pane exactly `cols` cells wide so it breaks lines where the
+   * pty does. Called after every fit: the columns or the font may have changed.
+   */
+  lockWidth(cols: number): void
 }
 
 /** The scroll container holding the history pane and the live screen. */
@@ -162,7 +167,7 @@ export class TerminalController {
     if (this.disposed || this.holdsPty || this.attachFrame !== null) return
     this.attachFrame = this.schedule(() => {
       this.attachFrame = null
-      this.fit()
+      if (this.fit()) this.history?.lockWidth(this.term.cols)
       this.reported = { cols: this.term.cols, rows: this.term.rows }
       // The send fails while the socket is down; onStatus repeats it once
       // the socket is back, which is why the state still moves on.
@@ -233,6 +238,7 @@ export class TerminalController {
    */
   fitAndReport(): void {
     if (!this.fit()) return
+    this.history?.lockWidth(this.term.cols)
     const next = nextResize(this.reported, this.term.cols, this.term.rows)
     if (!next) return
     this.reported = next
@@ -293,7 +299,7 @@ export class TerminalController {
 
   private appendHistory(lines: string[]): void {
     if (lines.length === 0 || !this.history) return
-    this.history.append(lines, this.term.cols)
+    this.history.append(lines)
     this.historyCount += lines.length
     const over = this.historyCount - MAX_HISTORY_LINES
     if (over > 0) {

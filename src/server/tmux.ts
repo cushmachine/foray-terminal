@@ -214,12 +214,14 @@ export async function paneHistoryState(
 }
 
 /**
- * The last `count` lines of a session's pane history, oldest first, with
- * colour escapes intact. Rows are returned as tmux displayed them (no
- * re-joining of wrapped lines): a wrapped line that straddles the boundary
- * between history and the visible screen would otherwise come back joined
- * later and look like a new line. Returns [] for count 0; capture-pane
- * would hand back the top visible row instead.
+ * The last `count` rows of a session's pane history as logical lines,
+ * oldest first, with colour escapes intact. `-J` joins the rows tmux
+ * soft-wrapped at its width back into the line the program wrote, so the
+ * client wraps it once, at its own width, instead of a second time on top
+ * of tmux's break. A line that continues onto the visible screen comes
+ * back as its history part only (tmux still ends it with a newline) and
+ * grows in later captures; history.ts allows for that. Returns [] for
+ * count 0; capture-pane would hand back the top visible row instead.
  */
 export async function captureHistoryLines(
   sessionId: number,
@@ -230,7 +232,7 @@ export async function captureHistoryLines(
   // -S/-E select history rows only: negative rows sit above the visible
   // screen, and -1 is the row just above it.
   const { stdout } = await exec('tmux', [
-    'capture-pane', '-p', '-e', '-t', `$${sessionId}`, '-S', `-${count}`, '-E', '-1',
+    'capture-pane', '-p', '-e', '-J', '-t', `$${sessionId}`, '-S', `-${count}`, '-E', '-1',
   ])
   const lines = stdout.split('\n')
   if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop()

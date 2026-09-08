@@ -45,9 +45,12 @@ test('planHistoryUpdate resets when nothing has been sent', () => {
   assert.deepEqual(planHistoryUpdate(null, state(0)), { kind: 'reset' })
 })
 
-test('planHistoryUpdate resets when the history shrank', () => {
-  // A resize reflow or a cleared history: the client's lines are stale.
-  assert.deepEqual(planHistoryUpdate(120, state(90)), { kind: 'reset' })
+test('planHistoryUpdate checks a window of the tail when the history shrank', () => {
+  // A resize reflow moves the row count without changing the joined lines,
+  // so they are aligned first; a cleared history fails to align and resets.
+  assert.deepEqual(planHistoryUpdate(120, state(90)), { kind: 'sync', count: 90 })
+  assert.deepEqual(planHistoryUpdate(1000, state(600)), { kind: 'sync', count: SATURATED_WINDOW })
+  assert.deepEqual(planHistoryUpdate(120, state(0)), { kind: 'sync', count: 0 })
 })
 
 test('planHistoryUpdate checks a window of the tail once the history is at its limit', () => {
@@ -73,43 +76,67 @@ test('planHistoryUpdate syncs the delta when the history grew', () => {
 // alignHistory
 // ---------------------------------------------------------------------------
 
+/** The lines an alignment would send. */
+const fresh = (sent: string[], captured: string[]) => alignHistory(sent, captured)?.fresh ?? null
+
 test('alignHistory returns only the lines after what was already sent', () => {
-  assert.deepEqual(alignHistory(lines(1, 5), lines(1, 7)), ['l6', 'l7'])
+  assert.deepEqual(fresh(lines(1, 5), lines(1, 7)), ['l6', 'l7'])
   // The capture need not start where the sent tail starts.
-  assert.deepEqual(alignHistory(lines(1, 5), lines(3, 7)), ['l6', 'l7'])
+  assert.deepEqual(fresh(lines(1, 5), lines(3, 7)), ['l6', 'l7'])
+  // The tail carries on from what was sent.
+  assert.deepEqual(alignHistory(lines(1, 5), lines(3, 7))?.tail, lines(1, 7))
 })
 
 test('alignHistory returns [] when nothing new has arrived', () => {
-  assert.deepEqual(alignHistory(lines(1, 5), lines(3, 5)), [])
+  assert.deepEqual(fresh(lines(1, 5), lines(3, 5)), [])
 })
 
 test('alignHistory returns null when the captured tail is entirely new', () => {
   // Too much arrived since the last check to know where to append.
-  assert.equal(alignHistory(lines(1, 5), lines(20, 30)), null)
+  assert.equal(fresh(lines(1, 5), lines(20, 30)), null)
 })
 
 test('alignHistory returns null when nothing was ever sent', () => {
-  assert.equal(alignHistory([], lines(1, 5)), null)
+  assert.equal(fresh([], lines(1, 5)), null)
 })
 
 test('alignHistory finds the sent tail mid-window when history rotates at its limit', () => {
   // At the limit the size stops moving; the last sent lines sit somewhere
   // inside the captured window with the new lines after them.
-  assert.deepEqual(alignHistory(lines(1, 10), lines(8, 17)), lines(11, 17))
+  assert.deepEqual(fresh(lines(1, 10), lines(8, 17)), lines(11, 17))
 })
 
 test('alignHistory prefers the longest run when lines repeat', () => {
   // The last sent line also ends the capture. Matching only that line from
   // the newest end would report nothing new; the full run shows two lines
   // arrived.
-  assert.deepEqual(alignHistory(['p', 'q', 'r'], ['p', 'q', 'r', 's', 'r']), ['s', 'r'])
+  assert.deepEqual(fresh(['p', 'q', 'r'], ['p', 'q', 'r', 's', 'r']), ['s', 'r'])
 })
 
 test('alignHistory needs more than a one-line overlap when it has more to compare', () => {
   // Blank lines and prompts repeat; one matching line is no evidence.
-  assert.equal(alignHistory(['a', 'b', 'c'], ['c', 'd', 'e']), null)
+  assert.equal(fresh(['a', 'b', 'c'], ['c', 'd', 'e']), null)
   // A short sent tail is all there is, so one line has to do.
-  assert.deepEqual(alignHistory(['a'], ['a', 'b']), ['b'])
+  assert.deepEqual(fresh(['a'], ['a', 'b']), ['b'])
+})
+
+test('alignHistory lets the last sent line grow: a wrapped line still scrolling into history', () => {
+  // The line was captured as far as it had got; now two more rows of it are in.
+  const aligned = alignHistory(['a', 'b', 'xxxx'], ['a', 'b', 'xxxxyyyyzz', 'c'])
+  assert.deepEqual(aligned?.fresh, ['yyyyzz', 'c'], 'only the new part goes to the client')
+  assert.deepEqual(aligned?.tail, ['a', 'b', 'xxxxyyyyzz', 'c'], 'the tail remembers the joined line')
+  // Growing again from that tail: the earlier rows are not repeated.
+  assert.deepEqual(fresh(['a', 'b', 'xxxxyyyyzz', 'c'], ['b', 'xxxxyyyyzz', 'c']), [])
+  assert.deepEqual(fresh(['a', 'b', 'xxxxyyyyzz'], ['a', 'b', 'xxxxyyyyzzw']), ['w'])
+})
+
+test('alignHistory does not let an empty or a shortened last line match by prefix', () => {
+  // Every line starts with the empty string; a blank last line matches only itself.
+  assert.equal(fresh(['a', 'b', ''], ['a', 'b', 'c']), null)
+  // A line that came back shorter is on the screen again: nothing to append to.
+  assert.equal(fresh(['a', 'b', 'xxxxyyyy'], ['a', 'b', 'xxxx']), null)
+  // Only the last line may grow.
+  assert.equal(fresh(['a', 'xxxx', 'c'], ['a', 'xxxxyy', 'c']), null)
 })
 
 // ---------------------------------------------------------------------------
