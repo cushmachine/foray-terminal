@@ -202,16 +202,47 @@ test.describe('keyboard behavior on mobile', () => {
     }
   })
 
-  test('copy button is visible and copies terminal screen', async ({ page, context }) => {
+  // Select mode: the toolbar's select key freezes scrollback plus screen as
+  // plain text in an overlay the browser owns, so long-press selection works
+  // (the live xterm rewrites its rows on every redraw, which kills a native
+  // selection). Copy with nothing selected copies the whole snapshot; Done
+  // returns to the live terminal.
+  test('select key freezes the screen as selectable text; copy and done', async ({ page, context }) => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write'])
     await page.goto('/')
-    await expectTerminalReady(page)
+    const name = uniqueName('select-mode')
+    try {
+      await createMobileSession(page, name)
+      await expectTerminalReady(page)
+      await page.getByTestId('terminal-area').click()
+      await page.evaluate(() => {
+        window.dispatchEvent(new CustomEvent('nest:sendkeys', { detail: "printf 'select-me %s\\n' marker-42\r" }))
+      })
+      await expectTerminalText(page, 'select-me marker-42')
 
-    const copyBtn = page.getByRole('button', { name: 'Copy terminal screen' })
-    await expect(copyBtn).toBeVisible()
-    await copyBtn.click()
+      const selectBtn = page.getByRole('button', { name: 'Select text' })
+      await expect(selectBtn).toBeVisible()
+      await selectBtn.click()
 
-    const clipboardText = await page.evaluate(() => navigator.clipboard.readText())
-    expect(typeof clipboardText).toBe('string')
+      const overlay = active(page).getByTestId('select-mode')
+      await expect(overlay).toBeVisible()
+      const text = overlay.getByTestId('select-mode-text')
+      await expect(text).toContainText('select-me marker-42')
+      await expect(text).toHaveCSS('user-select', 'text')
+      // The keyboard drops: nothing in the composer or terminal has focus.
+      expect(await page.evaluate(() => document.activeElement?.tagName ?? '')).not.toBe('TEXTAREA')
+
+      await overlay.getByTestId('select-mode-copy').click()
+      await expect.poll(() => page.evaluate(() => navigator.clipboard.readText()), { timeout: 5_000 })
+        .toContain('select-me marker-42')
+      await expect(overlay.getByTestId('select-mode-copy')).toContainText('Copied')
+
+      await overlay.getByTestId('select-mode-done').click()
+      await expect(overlay).toBeHidden()
+      // Focus returns to the Composer so typing resumes.
+      await expect(page.locator('[data-composer] textarea')).toBeFocused()
+    } finally {
+      await killMobileSession(page, name).catch(() => {})
+    }
   })
 })

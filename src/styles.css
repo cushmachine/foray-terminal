@@ -81,13 +81,3 @@ button, input {
   text-decoration-color: var(--accent);
   text-underline-offset: 2px;
 }
-
-/* On touch devices using the DOM renderer, override xterm's
-   user-select: none so native long-press selection works. */
-@media (pointer: coarse) {
-  .xterm {
-    -webkit-user-select: text !important;
-    user-select: text !important;
-    -webkit-touch-callout: default !important;
-  }
-}

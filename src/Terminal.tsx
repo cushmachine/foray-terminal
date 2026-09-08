@@ -13,8 +13,9 @@ import { canFit, nextResize, type TerminalDims } from './terminalSize'
 import { NO_MODIFIERS, applyModifiers, type Modifiers } from './keys'
 import { paletteFromTheme, ansiLineToHtml, type Palette } from './ansi'
 import { MONO_FONT, THEME } from './theme'
-import { extractUrls, extractCommands, joinWrapped, shortenUrl, shortenCommand } from './links'
+import { joinWrapped } from './links'
 import { linkifyRows } from './linkify'
+import { snapshotText } from './selectMode'
 
 interface TerminalProps {
   windowId: number
@@ -35,10 +36,6 @@ interface UploadStatus {
 const UPLOAD_ERROR_FLASH_MS = 4000
 // onSelectionChange fires continuously during a drag; copy once it settles.
 const COPY_ON_SELECT_MS = 120
-// Output bursts arrive as many small writes; scan the screen for URLs once
-// they settle.
-const LINK_SCAN_MS = 250
-const LINK_CHIP_MAX = 4
 const COPIED_FLASH_MS = 1500
 // Touch device (phone/tablet). Drives the mobile-only terminal policy below:
 // DOM renderer, fixed pty height, composer-mode scroll inset.
@@ -93,10 +90,10 @@ export function Terminal({
 
   const [dragging, setDragging] = useState(false)
   const [uploadStatus, setUploadStatus] = useState<UploadStatus | null>(null)
-  // URLs on the visible screen, oldest first (touch devices only).
-  const [links, setLinks] = useState<string[]>([])
-  const [commands, setCommands] = useState<string[]>([])
-  const [copiedUrl, setCopiedUrl] = useState<string | null>(null)
+  // Select mode: the frozen text, or null when the live terminal shows.
+  const [selecting, setSelecting] = useState<string | null>(null)
+  const selectScrollRef = useRef<HTMLDivElement>(null)
+  const [copied, setCopied] = useState(false)
   const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const dragDepth = useRef(0)
   const uploadsInFlight = useRef(0)
@@ -317,26 +314,6 @@ export function Terminal({
       return joinWrapped(rows)
     }
 
-    // URL chips (touch only): rescan the screen once output settles, and
-    // only re-render when the set actually changed.
-    let linkTimer: ReturnType<typeof setTimeout> | null = null
-    const scheduleLinkScan = () => {
-      if (!COARSE) return
-      if (linkTimer) clearTimeout(linkTimer)
-      linkTimer = setTimeout(() => {
-        linkTimer = null
-        const text = visibleLogicalLines().join('\n')
-        const nextLinks = extractUrls(text)
-        setLinks((prev) =>
-          prev.length === nextLinks.length && prev.every((u, i) => u === nextLinks[i]) ? prev : nextLinks,
-        )
-        const nextCmds = extractCommands(text)
-        setCommands((prev) =>
-          prev.length === nextCmds.length && prev.every((c, i) => c === nextCmds[i]) ? prev : nextCmds,
-        )
-      }, LINK_SCAN_MS)
-    }
-
     const appendHistoryLines = (lines: string[]) => {
       if (lines.length === 0) return
       const frag = document.createDocumentFragment()
@@ -355,7 +332,6 @@ export function Terminal({
         historyCount--
       }
       maybeScrollToBottom()
-      scheduleLinkScan()
     }
 
     const unsubscribe = onMessage((msg) => {
@@ -363,7 +339,6 @@ export function Terminal({
       if (msg.type === 'terminal:output') {
         term.write(msg.data, () => {
           maybeScrollToBottom()
-          scheduleLinkScan()
         })
       }
       if (msg.type === 'terminal:history') {
@@ -437,15 +412,20 @@ export function Terminal({
         send({ type: 'terminal:input', windowId, data: '\r' })
       }, text ? 40 : 0)
     }
-    const handleCopyScreen = () => {
+    // Select mode: freeze scrollback plus screen as plain text (see
+    // selectMode.ts). The toolbar key toggles it; the overlay's Done closes it.
+    const handleSelectMode = () => {
       if (!isActiveRef.current) return
-      const text = visibleLogicalLines().join('\n').trimEnd()
-      if (text) navigator.clipboard?.writeText(text).catch(() => {})
+      setSelecting((current) => {
+        if (current !== null) return null
+        const history = Array.from(historyEl.children, (row) => row.textContent ?? '')
+        return snapshotText(history, visibleLogicalLines())
+      })
     }
     window.addEventListener('nest:sendkeys', handleSendKeys)
     window.addEventListener('nest:paste', handlePaste)
     window.addEventListener('nest:submit', handleSubmit)
-    window.addEventListener('nest:copy-screen', handleCopyScreen)
+    window.addEventListener('nest:select-mode', handleSelectMode)
 
     // Wheel over the xterm canvas must scroll the outer container instead
     // of being consumed by xterm (which would convert it to arrow keys on
@@ -465,16 +445,6 @@ export function Terminal({
     }
     container.addEventListener('wheel', handleWheel, { capture: true, passive: false })
 
-    // Mobile: copy xterm selection on touchend. The existing onSelectionChange
-    // debounce fires from a setTimeout which loses the user-gesture context
-    // that iOS Safari requires for clipboard.writeText. touchend is a real
-    // gesture, so the write succeeds.
-    const handleTouchCopy = () => {
-      const text = term.getSelection()
-      if (!text) return
-      navigator.clipboard?.writeText(text).catch(() => {})
-    }
-    container.addEventListener('touchend', handleTouchCopy)
     termRef.current = term
 
     return () => {
@@ -484,13 +454,11 @@ export function Terminal({
       window.removeEventListener('nest:sendkeys', handleSendKeys)
       window.removeEventListener('nest:paste', handlePaste)
       window.removeEventListener('nest:submit', handleSubmit)
-      window.removeEventListener('nest:copy-screen', handleCopyScreen)
+      window.removeEventListener('nest:select-mode', handleSelectMode)
       if (submitTimer) clearTimeout(submitTimer)
       if (copyTimer) clearTimeout(copyTimer)
-      if (linkTimer) clearTimeout(linkTimer)
       scrollEl.removeEventListener('scroll', handleScroll)
       container.removeEventListener('wheel', handleWheel, { capture: true })
-      container.removeEventListener('touchend', handleTouchCopy)
       document.removeEventListener('focusin', onFocusChange)
       document.removeEventListener('focusout', onFocusChange)
       cancelAnimationFrame(pinRaf)
@@ -607,20 +575,45 @@ export function Terminal({
     send({ type: 'terminal:attach', windowId, cols: term?.cols, rows: term?.rows })
   }
 
-  const copyLink = (url: string) => {
-    navigator.clipboard?.writeText(url).catch(() => {})
-    setCopiedUrl(url)
+  // Entering select mode: drop the keyboard so the text gets the whole
+  // screen, and open the overlay at the same scroll offset so the terminal
+  // looks paused rather than replaced. Leaving: hand focus back.
+  useEffect(() => {
+    if (selecting === null) return
+    const live = scrollRef.current
+    const frozen = selectScrollRef.current
+    if (live && frozen) frozen.scrollTop = live.scrollTop
+    const focused = document.activeElement
+    if (focused instanceof HTMLElement) focused.blur()
+    return () => {
+      setCopied(false)
+      if (COARSE) {
+        document.querySelector<HTMLTextAreaElement>('[data-composer] textarea')?.focus()
+      } else {
+        termRef.current?.focus()
+      }
+    }
+  }, [selecting])
+
+  /** Copy the native selection inside the overlay, or the whole snapshot if there is none. */
+  const copyFromSelectMode = () => {
+    if (selecting === null) return
+    const sel = window.getSelection()
+    const inOverlay = sel && sel.rangeCount > 0 && selectScrollRef.current?.contains(sel.anchorNode)
+    const text = inOverlay ? sel.toString() : ''
+    navigator.clipboard?.writeText(text || selecting).catch(() => {})
+    setCopied(true)
     if (copiedTimer.current) clearTimeout(copiedTimer.current)
     copiedTimer.current = setTimeout(() => {
       copiedTimer.current = null
-      setCopiedUrl(null)
+      setCopied(false)
     }, COPIED_FLASH_MS)
   }
 
-  const chipButton: React.CSSProperties = {
+  const selectButton: React.CSSProperties = {
     flexShrink: 0,
     height: 32,
-    padding: '0 10px',
+    padding: '0 12px',
     borderRadius: 8,
     border: '1px solid var(--key-border)',
     background: 'var(--key-bg)',
@@ -629,6 +622,8 @@ export function Terminal({
     fontSize: 12,
     cursor: 'pointer',
     touchAction: 'manipulation',
+    userSelect: 'none',
+    WebkitUserSelect: 'none',
   }
 
   return (
@@ -680,80 +675,74 @@ export function Terminal({
           }}
         />
       </div>
-      {COARSE && (links.length > 0 || commands.length > 0) && (
+      {selecting !== null && (
         <div
-          data-testid="link-chip"
+          data-testid="select-mode"
           style={{
-            flexShrink: 0,
+            position: 'absolute',
+            inset: 0,
             display: 'flex',
             flexDirection: 'column',
-            gap: 6,
-            padding: '6px 8px',
-            background: 'var(--surface)',
-            borderTop: '1px solid var(--border)',
-            fontFamily: MONO_FONT,
-            fontSize: 12,
+            background: THEME.background,
+            zIndex: 5,
           }}
         >
-          {commands.slice(-LINK_CHIP_MAX).reverse().map((cmd) => (
-            <div key={`cmd:${cmd}`} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span
-                title={cmd}
-                style={{
-                  flex: 1,
-                  minWidth: 0,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                  color: 'var(--text)',
-                }}
-              >
-                <span style={{ color: 'var(--text-faint)', marginRight: 4 }}>$</span>
-                {shortenCommand(cmd)}
-              </span>
-              <button
-                data-testid="cmd-copy"
-                onPointerDown={(e) => e.preventDefault()}
-                onClick={() => copyLink(cmd)}
-                style={chipButton}
-              >
-                {copiedUrl === cmd ? 'Copied' : 'Copy'}
-              </button>
-            </div>
-          ))}
-          {links.slice(-LINK_CHIP_MAX).reverse().map((url) => (
-            <div key={url} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span
-                title={url}
-                style={{
-                  flex: 1,
-                  minWidth: 0,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                  color: 'var(--accent-text)',
-                }}
-              >
-                {shortenUrl(url)}
-              </span>
-              <button
-                data-testid="link-open"
-                onPointerDown={(e) => e.preventDefault()}
-                onClick={() => window.open(url, '_blank', 'noopener')}
-                style={chipButton}
-              >
-                Open
-              </button>
-              <button
-                data-testid="link-copy"
-                onPointerDown={(e) => e.preventDefault()}
-                onClick={() => copyLink(url)}
-                style={chipButton}
-              >
-                {copiedUrl === url ? 'Copied' : 'Copy'}
-              </button>
-            </div>
-          ))}
+          <div
+            style={{
+              flexShrink: 0,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '6px 8px',
+              background: 'var(--surface)',
+              borderBottom: '1px solid var(--border)',
+              fontFamily: MONO_FONT,
+              fontSize: 12,
+            }}
+          >
+            <span style={{ flex: 1, color: 'var(--text-dim)', userSelect: 'none', WebkitUserSelect: 'none' }}>
+              select text to copy
+            </span>
+            <button
+              data-testid="select-mode-copy"
+              onPointerDown={(e) => e.preventDefault()}
+              onClick={copyFromSelectMode}
+              style={selectButton}
+            >
+              {copied ? 'Copied' : 'Copy'}
+            </button>
+            <button
+              data-testid="select-mode-done"
+              onPointerDown={(e) => e.preventDefault()}
+              onClick={() => setSelecting(null)}
+              style={{ ...selectButton, color: 'var(--accent-text)', borderColor: 'var(--accent)' }}
+            >
+              Done
+            </button>
+          </div>
+          <div
+            ref={selectScrollRef}
+            data-testid="select-mode-text"
+            style={{
+              flex: 1,
+              minHeight: 0,
+              overflowY: 'auto',
+              overscrollBehavior: 'contain',
+              WebkitOverflowScrolling: 'touch',
+              padding: '0 8px 8px',
+              fontFamily: MONO_FONT,
+              fontSize,
+              lineHeight: 1.4,
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-all',
+              color: THEME.foreground,
+              userSelect: 'text',
+              WebkitUserSelect: 'text',
+              WebkitTouchCallout: 'default',
+            } as React.CSSProperties}
+          >
+            {selecting}
+          </div>
         </div>
       )}
       {dragging && (

@@ -1,7 +1,7 @@
-// URLs in the terminal on a phone. A URL on the visible screen surfaces in a
-// link chip above the Composer with Open and Copy; the URL is re-joined
-// across wrapped rows so it is exact. Once it scrolls into history it
-// becomes a real <a> and leaves the chip.
+// URLs in the terminal on a phone. Once a URL scrolls into history it
+// becomes a real <a>, re-joined across wrapped rows so the href is exact.
+// (Anything on the live screen is reached through select mode instead; see
+// keyboard.spec.ts.)
 //
 // Every test creates its own tmux session; the session active on load may be
 // someone's live shell.
@@ -21,8 +21,6 @@ const SCRATCH = '/tmp/claude-0/-root-GitHub-lifeos/90a908dc-7c4b-4b6d-98cf-a7ba7
 // Long enough to wrap on a ~48 column phone terminal.
 const URL = 'https://example.com/app/auth/cli/abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'
 
-/** Only the active session's terminal carries data-testid="terminal". */
-const active = (page: Page) => page.getByTestId('terminal')
 
 async function createMobileSession(page: Page, name: string): Promise<void> {
   await openDrawer(page)
@@ -52,40 +50,7 @@ async function printUrl(page: Page): Promise<void> {
 test.describe('terminal links on mobile', () => {
   test.use({ viewport: MOBILE, isMobile: true, hasTouch: true })
 
-  test('link chip opens and copies the exact URL across a wrap', async ({ page, context }) => {
-    await context.grantPermissions(['clipboard-read', 'clipboard-write'])
-    await page.goto('/')
-    const name = uniqueName('links-chip')
-    try {
-      await createMobileSession(page, name)
-      await expectTerminalReady(page)
-      await printUrl(page)
-
-      const chip = page.getByTestId('terminal').getByTestId('link-chip')
-      await expect(chip).toBeVisible()
-      await expect(chip).toContainText('example.com')
-
-      // Open: a new page with the exact, un-wrapped URL.
-      const [popup] = await Promise.all([
-        context.waitForEvent('page'),
-        chip.getByTestId('link-open').first().click(),
-      ])
-      expect(popup.url()).toBe(URL)
-      await popup.close()
-
-      // Copy: the exact URL lands on the clipboard and the button says so.
-      const copy = chip.getByTestId('link-copy').first()
-      await copy.click()
-      await expect.poll(() => page.evaluate(() => navigator.clipboard.readText()), { timeout: 5_000 }).toBe(URL)
-      await expect(copy).toContainText('Copied')
-
-      await page.screenshot({ path: `${SCRATCH}/links-chip.png` })
-    } finally {
-      await killMobileSession(page, name).catch(() => {})
-    }
-  })
-
-  test('a URL that scrolls into history becomes a link and leaves the chip', async ({ page }) => {
+  test('a URL that scrolls into history becomes a link', async ({ page }) => {
     await page.goto('/')
     const name = uniqueName('links-hist')
     try {
@@ -103,12 +68,6 @@ test.describe('terminal links on mobile', () => {
       // only a full-width row is a soft wrap.
       await expect(page.locator('a.term-link', { hasText: 'Opening' })).toHaveCount(0)
       await expect(page.locator('a.term-link', { hasText: 'for' })).toHaveCount(0)
-
-      // Off-screen: no chip entry for it.
-      const chip = page.getByTestId('terminal').getByTestId('link-chip')
-      if (await chip.isVisible()) {
-        await expect(chip).not.toContainText('example.com')
-      }
 
       // Bring the link into view: both wrapped fragments should be underlined.
       await page.locator(`a.term-link[href="${URL}"]`).first().scrollIntoViewIfNeeded()

@@ -23,6 +23,7 @@
     "test:sessions-sort": "npx tsx src/__tests__/sessions-sort.test.ts",
     "test:visual-audit": "npx tsx src/__tests__/visual-audit.test.ts",
     "test:mobile": "npx tsx src/__tests__/mobile.test.ts",
+    "test:select-mode": "npx tsx src/__tests__/select-mode.test.ts",
     "test:protocol": "npx tsx src/server/__tests__/protocol.test.ts",
     "test:tmux-and-routing": "npx tsx src/server/__tests__/tmux-and-routing.test.ts",
     "test:files": "npx tsx src/server/__tests__/files.test.ts",

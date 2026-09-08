@@ -1,18 +1,29 @@
-// URL helpers for the terminal link chip and history links.
+// URL helpers for history links, and the row joiner select mode relies on.
 //
 // Run with: npx tsx src/__tests__/links.test.ts
 //
 // Covers:
-//  1. extractUrls: http/https only, several per line, dedupe in first-seen
-//     order, trailing punctuation and quotes stripped, a trailing `)` kept
-//     only when it balances one inside the URL, bare scheme is not a URL
-//  2. shortenUrl: scheme dropped, short URLs intact, long ones middle-
-//     ellipsised to at most `max` characters
-//  3. joinWrapped: wrapped rows re-join their logical line; others stay put
+//  1. URL_RE + cleanUrl: http/https only, several per line, trailing
+//     punctuation and quotes stripped, a trailing `)` kept only when it
+//     balances one inside the URL, bare scheme is not a URL
+//  2. joinWrapped: wrapped rows re-join their logical line; others stay put
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { extractUrls, extractCommands, shortenUrl, shortenCommand, joinWrapped } from '../links.ts'
+import { URL_RE, cleanUrl, joinWrapped } from '../links.ts'
+
+/** What the link chip used to do; kept as the spec for URL_RE + cleanUrl. */
+function extractUrls(text: string): string[] {
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const m of text.matchAll(URL_RE)) {
+    const url = cleanUrl(m[0])
+    if (!url || seen.has(url)) continue
+    seen.add(url)
+    out.push(url)
+  }
+  return out
+}
 
 // ---------------------------------------------------------------------------
 // extractUrls
@@ -65,37 +76,6 @@ test('extractUrls: no URLs gives an empty list', () => {
 })
 
 // ---------------------------------------------------------------------------
-// shortenUrl
-// ---------------------------------------------------------------------------
-
-test('shortenUrl: drops the scheme and keeps a short URL whole', () => {
-  assert.equal(shortenUrl('https://example.com/a/b'), 'example.com/a/b')
-  assert.equal(shortenUrl('http://example.com/a/b'), 'example.com/a/b')
-})
-
-test('shortenUrl: a long URL is middle-ellipsised to at most max', () => {
-  const long = 'https://example.com/app/auth/cli/abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'
-  const out = shortenUrl(long)
-  assert.ok(out.length <= 40, `expected <= 40 chars, got ${out.length}: ${out}`)
-  assert.ok(out.includes('…'), `expected an ellipsis in ${out}`)
-  assert.ok(out.startsWith('example.com'), `expected host first in ${out}`)
-  assert.ok(!out.includes('https://'), 'scheme should be dropped')
-})
-
-test('shortenUrl: honours a custom max', () => {
-  const long = 'https://example.com/some/rather/long/path/that/keeps/going'
-  const out = shortenUrl(long, 20)
-  assert.ok(out.length <= 20, `expected <= 20 chars, got ${out.length}: ${out}`)
-  assert.ok(out.includes('…'))
-})
-
-test('shortenUrl: a URL exactly at max is returned whole', () => {
-  const body = 'example.com/' + 'x'.repeat(40 - 'example.com/'.length)
-  assert.equal(body.length, 40)
-  assert.equal(shortenUrl(`https://${body}`), body)
-})
-
-// ---------------------------------------------------------------------------
 // joinWrapped
 // ---------------------------------------------------------------------------
 
@@ -132,53 +112,4 @@ test('joinWrapped: wraps join only to their own line', () => {
 
 test('joinWrapped: empty input gives an empty list', () => {
   assert.deepEqual(joinWrapped([]), [])
-})
-
-// ---------------------------------------------------------------------------
-// extractCommands
-// ---------------------------------------------------------------------------
-
-test('extractCommands: detects common CLI tools', () => {
-  assert.deepEqual(extractCommands('claude --resume abc-123'), ['claude --resume abc-123'])
-  assert.deepEqual(extractCommands('git push origin main'), ['git push origin main'])
-  assert.deepEqual(extractCommands('npm install'), ['npm install'])
-})
-
-test('extractCommands: strips $ prompt prefix', () => {
-  assert.deepEqual(extractCommands('$ claude --resume abc-123'), ['claude --resume abc-123'])
-  assert.deepEqual(extractCommands('$ git status'), ['git status'])
-})
-
-test('extractCommands: ignores tool name alone (no args)', () => {
-  assert.deepEqual(extractCommands('git'), [])
-  assert.deepEqual(extractCommands('npm'), [])
-})
-
-test('extractCommands: multiple commands, deduped', () => {
-  const text = 'git push origin main\nnpm install\ngit push origin main'
-  assert.deepEqual(extractCommands(text), ['git push origin main', 'npm install'])
-})
-
-test('extractCommands: ignores non-command lines', () => {
-  assert.deepEqual(extractCommands('nothing to see here'), [])
-  assert.deepEqual(extractCommands('the git repository is fine'), [])
-})
-
-test('extractCommands: command in the middle of prose is not matched', () => {
-  assert.deepEqual(extractCommands('run git push to deploy'), [])
-})
-
-// ---------------------------------------------------------------------------
-// shortenCommand
-// ---------------------------------------------------------------------------
-
-test('shortenCommand: short command returned whole', () => {
-  assert.equal(shortenCommand('git push'), 'git push')
-})
-
-test('shortenCommand: long command is truncated with ellipsis', () => {
-  const long = 'claude --resume 52040212-6482-422c-a8e6-324df93ab7d1-extra-long-id-here'
-  const out = shortenCommand(long, 50)
-  assert.ok(out.length <= 50, `expected <= 50 chars, got ${out.length}`)
-  assert.ok(out.endsWith('…'))
 })

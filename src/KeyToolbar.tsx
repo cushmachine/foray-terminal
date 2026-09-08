@@ -101,8 +101,8 @@ export function KeyToolbar({
       case 'photo':
         fileInput.current?.click()
         break
-      case 'copy-screen':
-        window.dispatchEvent(new CustomEvent('nest:copy-screen'))
+      case 'select':
+        window.dispatchEvent(new CustomEvent('nest:select-mode'))
         break
       case 'paste': {
         // Must run inside the user gesture; browsers refuse otherwise.

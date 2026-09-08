@@ -14,8 +14,8 @@ export type KeyKind =
   | 'alt'
   /** Reads the clipboard and pastes it into the terminal. */
   | 'paste'
-  /** Copies the visible terminal screen to the clipboard. */
-  | 'copy-screen'
+  /** Freezes the screen as plain text so it can be long-press selected. */
+  | 'select'
   /** Opens the photo picker and uploads the result. */
   | 'photo'
   /** Shows or hides the secondary row. */
@@ -47,7 +47,7 @@ export const PRIMARY_KEYS: KeyDef[] = [
   { id: 'right', label: '→', kind: 'key', data: `${ESC}[C`, repeat: true, title: 'Right' },
   { id: 'ctrl-c', label: '^C', kind: 'key', data: '\x03', title: 'Control-C' },
   { id: 'enter', label: '⏎', kind: 'key', data: '\r', title: 'Enter' },
-  { id: 'copy-screen', label: 'copy', kind: 'copy-screen', title: 'Copy terminal screen' },
+  { id: 'select', label: 'select', kind: 'select', title: 'Select text' },
   { id: 'paste', label: 'paste', kind: 'paste', title: 'Paste from clipboard' },
   { id: 'photo', label: '📷', kind: 'photo', title: 'Upload a photo' },
   { id: 'more', label: '⋯', kind: 'more', title: 'More keys' },
