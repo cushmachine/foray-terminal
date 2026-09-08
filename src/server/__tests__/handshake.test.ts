@@ -88,3 +88,37 @@ test('readServedClientBuild reads the stamped id from dist/index.html, null when
     await fs.rm(root, { recursive: true, force: true })
   }
 })
+
+// A page that reconnects sends terminal:attach and client:hello the moment
+// the socket opens, before the server has finished the welcome's tmux round
+// trip. Those messages must be handled, not dropped.
+test('a message sent the instant the socket opens is still answered', async () => {
+  const { url, close } = await startServer(0)
+  try {
+    const ws = new WsClient(url.replace(/^http/, 'ws') + '/ws')
+    const types: string[] = []
+    const hello = new Promise<Msg>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`no server:hello; got ${types.join(',') || 'nothing'}`)), 5000)
+      ws.on('message', (data) => {
+        const msg = JSON.parse(String(data)) as Msg
+        types.push(msg.type)
+        if (msg.type === 'server:hello') {
+          clearTimeout(timer)
+          resolve(msg)
+        }
+      })
+    })
+    await new Promise<void>((resolve, reject) => {
+      ws.once('open', resolve)
+      ws.once('error', reject)
+    })
+    ws.send(JSON.stringify({ type: 'client:hello', build: 'test0000.abc' }))
+    const reply = await hello
+    assert.equal(typeof reply.serverBuild, 'string')
+    // The welcome still comes first.
+    assert.equal(types[0], 'session:list')
+    ws.close()
+  } finally {
+    await close()
+  }
+})

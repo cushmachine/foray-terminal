@@ -307,6 +307,13 @@ export function startServer(
     alive.set(ws, true)
     ws.on('pong', () => alive.set(ws, true))
 
+    // Nothing reads this socket until handleConnection installs the message
+    // handler below, after the welcome's tmux round trip. A message that
+    // arrives before then is dropped by the emitter, and a reconnecting page
+    // sends its terminal:attach the instant the socket opens. Hold the bytes
+    // until the handler is in place.
+    ws.pause()
+
     // Welcome message: send the real tmux window list. If any windows
     // already have clients attached (e.g. this connection is a browser tab
     // reconnecting to a server other tabs are already using), follow up
@@ -347,6 +354,7 @@ export function startServer(
       serverBuild,
       servedClientBuild: () => readServedClientBuild(clientDistDir()),
     })
+    ws.resume()
   })
 
   return new Promise<StartedServer>((resolve, reject) => {
