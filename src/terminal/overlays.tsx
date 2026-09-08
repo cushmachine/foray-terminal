@@ -1,10 +1,11 @@
 // The layers a Terminal draws over its screen: select mode, the image
 // drop target and upload status, a lost pty, and a lost socket. Each is a
 // leaf that renders from props; Terminal.tsx decides which are shown.
+// They share one z-index (--z-overlay) and stack in the order Terminal.tsx
+// renders them, so the connection overlay, last, paints over the rest.
 
 import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
-import { MONO_FONT, THEME } from '../theme'
 import type { UploadStatus } from '../hooks/useImageUpload'
 
 const COPIED_FLASH_MS = 1500
@@ -13,16 +14,7 @@ const selectButton: CSSProperties = {
   flexShrink: 0,
   height: 32,
   padding: '0 12px',
-  borderRadius: 8,
-  border: '1px solid var(--key-border)',
-  background: 'var(--key-bg)',
-  color: 'var(--key-text)',
-  fontFamily: MONO_FONT,
   fontSize: 12,
-  cursor: 'pointer',
-  touchAction: 'manipulation',
-  userSelect: 'none',
-  WebkitUserSelect: 'none',
 }
 
 interface SelectModeOverlayProps {
@@ -56,7 +48,6 @@ export function SelectModeOverlay({ text, scrollTop, fontSize, onDone, restoreFo
       restoreFocus()
     }
     // Runs once per opening; the offset and the focus target are read then.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   /** Copy the native selection inside the overlay, or the whole snapshot if there is none. */
@@ -81,8 +72,8 @@ export function SelectModeOverlay({ text, scrollTop, fontSize, onDone, restoreFo
         inset: 0,
         display: 'flex',
         flexDirection: 'column',
-        background: THEME.background,
-        zIndex: 5,
+        background: 'var(--bg)',
+        zIndex: 'var(--z-overlay)',
       }}
     >
       <div
@@ -94,7 +85,6 @@ export function SelectModeOverlay({ text, scrollTop, fontSize, onDone, restoreFo
           padding: '6px 8px',
           background: 'var(--surface)',
           borderBottom: '1px solid var(--border)',
-          fontFamily: MONO_FONT,
           fontSize: 12,
         }}
       >
@@ -102,6 +92,7 @@ export function SelectModeOverlay({ text, scrollTop, fontSize, onDone, restoreFo
           select text to copy
         </span>
         <button
+          className="btn-key"
           data-testid="select-mode-copy"
           onPointerDown={(e) => e.preventDefault()}
           onClick={copy}
@@ -110,10 +101,11 @@ export function SelectModeOverlay({ text, scrollTop, fontSize, onDone, restoreFo
           {copied ? 'Copied' : 'Copy'}
         </button>
         <button
+          className="btn-key tone-accent"
           data-testid="select-mode-done"
           onPointerDown={(e) => e.preventDefault()}
           onClick={onDone}
-          style={{ ...selectButton, color: 'var(--accent-text)', borderColor: 'var(--accent)' }}
+          style={{ ...selectButton, borderColor: 'var(--accent)' }}
         >
           Done
         </button>
@@ -128,12 +120,11 @@ export function SelectModeOverlay({ text, scrollTop, fontSize, onDone, restoreFo
           overscrollBehavior: 'contain',
           WebkitOverflowScrolling: 'touch',
           padding: '0 8px 8px',
-          fontFamily: MONO_FONT,
           fontSize,
           lineHeight: 1.4,
           whiteSpace: 'pre-wrap',
           wordBreak: 'break-all',
-          color: THEME.foreground,
+          color: 'var(--text)',
           userSelect: 'text',
           WebkitUserSelect: 'text',
           WebkitTouchCallout: 'default',
@@ -164,14 +155,13 @@ export function UploadOverlay({ dragging, status }: UploadOverlayProps) {
             alignItems: 'center',
             justifyContent: 'center',
             border: '2px dashed var(--accent)',
-            borderRadius: 8,
+            borderRadius: 'var(--radius-lg)',
             background: 'rgba(61, 184, 169, 0.08)',
             color: 'var(--accent-text)',
             fontSize: 13,
-            fontFamily: MONO_FONT,
             letterSpacing: '0.04em',
             pointerEvents: 'none',
-            zIndex: 4,
+            zIndex: 'var(--z-overlay)',
           }}
         >
           drop image to upload
@@ -179,20 +169,20 @@ export function UploadOverlay({ dragging, status }: UploadOverlayProps) {
       )}
       {status && (
         <div
+          role="status"
           style={{
             position: 'absolute',
             right: 12,
             bottom: 12,
             padding: '4px 10px',
-            borderRadius: 6,
+            borderRadius: 'var(--radius-md)',
             background: 'var(--surface-raised)',
             border: `1px solid ${status.kind === 'error' ? 'var(--danger)' : 'var(--accent)'}`,
             color: status.kind === 'error' ? 'var(--danger)' : 'var(--accent-text)',
             fontSize: 12,
-            fontFamily: MONO_FONT,
             letterSpacing: '0.02em',
             pointerEvents: 'none',
-            zIndex: 6,
+            zIndex: 'var(--z-overlay)',
           }}
         >
           {status.message}
@@ -222,31 +212,22 @@ export function DetachedOverlay({ reason, onReattach }: DetachedOverlayProps) {
         justifyContent: 'center',
         gap: 14,
         background: 'rgba(10, 10, 12, 0.88)',
-        zIndex: 5,
+        zIndex: 'var(--z-overlay)',
       }}
     >
       <div
         style={{
           color: 'var(--text)',
           fontSize: 13,
-          fontFamily: MONO_FONT,
           letterSpacing: '0.02em',
         }}
       >
         {reason === 'takenOver' ? 'session taken over by another client' : 'session ended'}
       </div>
       <button
+        className="btn-outline tone-accent"
         onClick={onReattach}
-        style={{
-          background: 'var(--accent-dim)',
-          border: '1px solid var(--accent)',
-          color: 'var(--accent)',
-          fontSize: 12,
-          padding: '6px 14px',
-          borderRadius: 6,
-          cursor: 'pointer',
-          fontFamily: MONO_FONT,
-        }}
+        style={{ padding: '6px 14px' }}
       >
         {reason === 'takenOver' ? 'reconnect' : 'reattach'}
       </button>
@@ -267,9 +248,9 @@ export function ConnectionOverlay({ reconnecting }: { reconnecting: boolean }) {
         background: 'rgba(10, 10, 12, 0.72)',
         color: 'var(--text-dim)',
         fontSize: 13,
-        fontFamily: MONO_FONT,
         letterSpacing: '0.04em',
         pointerEvents: 'none',
+        zIndex: 'var(--z-overlay)',
       }}
     >
       {reconnecting ? 'reconnecting…' : 'connecting…'}

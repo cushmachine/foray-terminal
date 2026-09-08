@@ -17,7 +17,7 @@ export interface Palette {
   background: string
 }
 
-/** The shape of THEME in theme.ts; extra keys such as `cursor` are fine. */
+/** The shape of TerminalTheme in theme.ts; extra keys such as `cursor` are fine. */
 export interface ThemeColors {
   foreground: string
   background: string

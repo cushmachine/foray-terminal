@@ -1,16 +1,22 @@
-// Keyboard focus and accessible names, pending for S9.
+// Keyboard focus and accessible names.
 //
-// Buttons are styled inline with `outline: none` and nothing replaces the
-// focus ring, so a keyboard user cannot see where they are; several icon
-// buttons have no accessible name at all. fixme until S9 lands; S9 removes
-// the fixme.
-import { test, expect } from '@playwright/test'
-import { DESKTOP } from './helpers.ts'
+// styles.css draws one :focus-visible ring for every control, and every
+// icon button carries an aria-label; these keep both true.
+import { test, expect, type Page } from '@playwright/test'
+import { DESKTOP, MOBILE, openDrawer } from './helpers.ts'
+
+async function expectEveryButtonNamed(page: Page): Promise<void> {
+  const buttons = await page.getByRole('button').all()
+  expect(buttons.length).toBeGreaterThan(0)
+  for (const button of buttons) {
+    await expect(button).toHaveAccessibleName(/\S/)
+  }
+}
 
 test.describe('accessibility', () => {
   test.use({ viewport: DESKTOP })
 
-  test.fixme('Tab to the first toolbar button shows a visible focus ring', async ({ page }) => {
+  test('Tab to the first toolbar button shows a visible focus ring', async ({ page }) => {
     await page.goto('/')
     await expect(page.getByTestId('sidebar')).toBeVisible()
     // Start from the document so Tab lands on the first focusable control.
@@ -31,17 +37,29 @@ test.describe('accessibility', () => {
     expect(hasOutline || hasShadow, `no visible focus ring: ${JSON.stringify(ring)}`).toBe(true)
   })
 
-  test.fixme('every button has an accessible name', async ({ page }) => {
+  test('every button has an accessible name', async ({ page }) => {
     await page.goto('/')
     await expect(page.getByTestId('sidebar')).toBeVisible()
     // Open the file panel too so its header buttons are in the audit.
     await page.getByTestId('files-toggle').click()
     await expect(page.getByTestId('file-panel')).toBeVisible()
+    await expectEveryButtonNamed(page)
+  })
+})
 
-    const buttons = await page.getByRole('button').all()
-    expect(buttons.length).toBeGreaterThan(0)
-    for (const button of buttons) {
-      await expect(button).toHaveAccessibleName(/\S/)
-    }
+test.describe('accessibility on a phone', () => {
+  test.use({ viewport: MOBILE, isMobile: true, hasTouch: true })
+
+  test('every button has an accessible name: drawer, toolbar, files view', async ({ page }) => {
+    await page.goto('/')
+    await expect(page.getByTestId('key-toolbar')).toBeVisible()
+    await expectEveryButtonNamed(page)
+    await openDrawer(page)
+    await expectEveryButtonNamed(page)
+    await page.getByTestId('sidebar-close').click()
+    await expect(page.getByTestId('sidebar')).toBeHidden()
+    await page.getByRole('button', { name: 'files' }).click()
+    await expect(page.getByTestId('file-panel')).toBeVisible()
+    await expectEveryButtonNamed(page)
   })
 })

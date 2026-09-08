@@ -9,7 +9,6 @@ import {
   type KeyDef,
   type Modifiers,
 } from './keys'
-import { MONO_FONT } from './theme'
 import { terminalRegistry } from './terminalRegistry'
 
 interface KeyToolbarProps {
@@ -204,34 +203,20 @@ export function KeyToolbar({
     return (
       <button
         key={key.id}
+        className="btn-key"
         title={key.title ?? key.label}
         aria-label={key.title ?? key.label}
         aria-pressed={key.kind === 'ctrl' || key.kind === 'alt' || key.kind === 'more' ? active : undefined}
+        data-active={active ? 'true' : undefined}
         onPointerDown={handlePointerDown(key)}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerCancel}
         onContextMenu={(e) => e.preventDefault()}
         style={{
-          background: active ? 'var(--accent-dim)' : 'var(--key-bg)',
-          border: `1px solid ${active ? 'var(--key-active)' : 'var(--key-border)'}`,
-          borderRadius: 8,
-          color: active ? 'var(--key-active)' : 'var(--key-text)',
           padding: '0 10px',
           minWidth: isMobile ? 40 : 44,
           minHeight: isMobile ? 40 : 32,
-          fontSize: 13,
-          fontFamily: MONO_FONT,
-          fontWeight: 500,
-          cursor: 'pointer',
-          whiteSpace: 'nowrap',
-          userSelect: 'none',
-          WebkitUserSelect: 'none',
-          // Effective touch-action is the intersection with the row's pan-x:
-          // a sideways drag scrolls the row (and pointercancels the press),
-          // a still finger holds the key.
-          transition: 'background 0.08s, border-color 0.08s',
-          textAlign: 'center',
           flexShrink: 0,
         }}
       >
@@ -246,7 +231,11 @@ export function KeyToolbar({
     padding: '6px 8px',
     overflowX: 'auto',
     // Horizontal pans scroll the row; a press that turns into a pan is
-    // cancelled by the browser via pointercancel, so nothing is sent.
+    // cancelled by the browser via pointercancel, so nothing is sent. The
+    // keys inherit this: a button's touch-action (styles.css sets
+    // manipulation) is intersected with its scrolling ancestor's, so a
+    // sideways drag on a key still scrolls the row and a still finger
+    // still holds the key.
     touchAction: 'pan-x',
     WebkitOverflowScrolling: 'touch',
     scrollbarWidth: 'none',

@@ -3,7 +3,6 @@ import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { displayName, sortSessions, type Session } from './sessionState'
 import { isEditableTarget, useEscape } from './hooks/useEscape'
 import { MAX_FONT_SIZE, MIN_FONT_SIZE } from './mobile'
-import { MONO_FONT } from './theme'
 
 interface SidebarProps {
   sessions: Session[]
@@ -110,23 +109,15 @@ export function Sidebar({
   }
 
   // Touch targets: 44px on phones, compact on desktop.
-  const hit = isMobile ? 44 : 30
+  const hit = isMobile ? 'var(--hit)' : 30
 
-  const iconButton = (extra: React.CSSProperties = {}): React.CSSProperties => ({
-    background: 'none',
-    border: 'none',
-    color: 'var(--text-faint)',
-    cursor: 'pointer',
+  // Square icon buttons: the look is .btn-ghost, this is only the size.
+  const iconButton = (fontSize: number): React.CSSProperties => ({
     padding: 0,
     minWidth: hit,
     minHeight: hit,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
     flexShrink: 0,
-    borderRadius: 6,
-    fontFamily: MONO_FONT,
-    ...extra,
+    fontSize,
   })
 
   return (
@@ -142,7 +133,7 @@ export function Sidebar({
         left: 0,
         top: 0,
         bottom: 0,
-        zIndex: 100,
+        zIndex: 'var(--z-drawer)',
         paddingTop: 'env(safe-area-inset-top)',
         paddingBottom: 'env(safe-area-inset-bottom)',
         transform: isOpen ? 'translateX(0)' : 'translateX(-100%)',
@@ -168,7 +159,6 @@ export function Sidebar({
             fontWeight: 700,
             letterSpacing: '0.04em',
             color: 'var(--accent)',
-            fontFamily: MONO_FONT,
           }}>
             nest
           </div>
@@ -176,7 +166,6 @@ export function Sidebar({
             fontSize: 11,
             color: 'var(--text-faint)',
             marginTop: 2,
-            fontFamily: MONO_FONT,
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
@@ -185,7 +174,15 @@ export function Sidebar({
           </div>
         </div>
         {isMobile && (
-          <button ref={closeRef} data-testid="sidebar-close" onClick={onClose} aria-label="Close sidebar" style={iconButton({ fontSize: 18 })}>
+          <button
+            ref={closeRef}
+            className="btn-ghost"
+            data-testid="sidebar-close"
+            onClick={onClose}
+            aria-label="Close sidebar"
+            title="Close sidebar"
+            style={iconButton(18)}
+          >
             ‹
           </button>
         )}
@@ -209,6 +206,7 @@ export function Sidebar({
           const active = session.id === activeSession
           const renaming = renamingId === session.id
           const armed = confirmKillId === session.id
+          const killLabel = armed ? 'Confirm kill session' : 'Kill session'
           return (
             <div
               key={session.id}
@@ -223,6 +221,7 @@ export function Sidebar({
               {renaming ? (
                 <input
                   autoFocus
+                  className="field"
                   data-testid="session-name-input"
                   value={draft}
                   onChange={e => setDraft(e.target.value)}
@@ -237,36 +236,27 @@ export function Sidebar({
                     minWidth: 0,
                     minHeight: hit,
                     padding: '0 10px',
-                    background: 'var(--surface-raised)',
-                    border: '1px solid var(--accent)',
-                    borderRadius: 6,
-                    color: 'var(--text)',
                     fontSize: 13,
-                    fontFamily: MONO_FONT,
-                    outline: 'none',
                   }}
                 />
               ) : (
                 <button
+                  className="btn-ghost"
                   data-testid="session-item"
                   data-session-id={session.id}
                   data-active={active ? 'true' : 'false'}
+                  aria-current={active ? 'true' : undefined}
                   title={displayName(session)}
                   onClick={() => onSelect(session.id)}
                   style={{
                     flex: 1,
                     minWidth: 0,
                     minHeight: hit,
-                    display: 'flex',
-                    alignItems: 'center',
+                    justifyContent: 'flex-start',
                     gap: 10,
                     padding: '6px 12px',
-                    background: active ? 'var(--surface-hover)' : 'transparent',
-                    border: 'none',
-                    borderRadius: 6,
-                    cursor: 'pointer',
                     textAlign: 'left',
-                    transition: 'background 0.1s',
+                    whiteSpace: 'normal',
                   }}
                 >
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -275,7 +265,6 @@ export function Sidebar({
                       alignItems: 'center',
                       gap: 6,
                       fontSize: 13,
-                      fontFamily: MONO_FONT,
                       color: active ? 'var(--accent)' : 'var(--text)',
                       fontWeight: active ? 600 : 400,
                       overflow: 'hidden',
@@ -295,7 +284,7 @@ export function Sidebar({
                             width: 6,
                             height: 6,
                             borderRadius: '50%',
-                            background: 'var(--accent, #3db8a9)',
+                            background: 'var(--accent)',
                           }}
                         />
                       )}
@@ -303,7 +292,6 @@ export function Sidebar({
                     <div style={{
                       fontSize: 11,
                       color: 'var(--text-dim)',
-                      fontFamily: MONO_FONT,
                       marginTop: 1,
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
@@ -318,20 +306,22 @@ export function Sidebar({
               {renaming ? (
                 <>
                   <button
+                    className="btn-ghost tone-accent"
                     onMouseDown={e => e.preventDefault()}
                     onClick={commitRename}
-                    title="save name"
+                    title="Save name"
                     aria-label="Save name"
-                    style={iconButton({ color: 'var(--accent)', fontSize: 14 })}
+                    style={iconButton(14)}
                   >
                     ✓
                   </button>
                   <button
+                    className="btn-ghost"
                     onMouseDown={e => e.preventDefault()}
                     onClick={cancelRename}
-                    title="cancel"
+                    title="Cancel rename"
                     aria-label="Cancel rename"
-                    style={iconButton({ fontSize: 14 })}
+                    style={iconButton(14)}
                   >
                     ✕
                   </button>
@@ -339,26 +329,22 @@ export function Sidebar({
               ) : (
                 <>
                   <button
+                    className="btn-ghost"
                     data-testid="session-rename"
                     onClick={() => startRename(session)}
-                    title="rename session"
+                    title="Rename session"
                     aria-label="Rename session"
-                    style={iconButton({ fontSize: 13 })}
+                    style={iconButton(13)}
                   >
                     ✎
                   </button>
                   <button
+                    className={armed ? 'btn-ghost tone-danger' : 'btn-ghost'}
                     data-testid="session-kill"
                     onClick={() => handleKill(session)}
-                    title={armed ? 'tap again to kill' : 'kill session'}
-                    aria-label={armed ? 'Confirm kill session' : 'Kill session'}
-                    style={iconButton(armed ? {
-                      color: 'var(--danger)',
-                      background: 'rgba(212, 99, 79, 0.15)',
-                      fontSize: 11,
-                      fontWeight: 600,
-                      padding: '0 8px',
-                    } : { fontSize: 15 })}
+                    title={killLabel}
+                    aria-label={killLabel}
+                    style={armed ? { ...iconButton(11), fontWeight: 600, padding: '0 8px' } : iconButton(15)}
                   >
                     {armed ? 'kill?' : '×'}
                   </button>
@@ -375,23 +361,14 @@ export function Sidebar({
         borderTop: '1px solid var(--border-subtle)',
       }}>
         <button
+          className="btn-outline"
           data-testid="new-session"
           onClick={onCreate}
           style={{
             width: '100%',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 6,
             padding: '8px',
-            minHeight: isMobile ? 44 : undefined,
-            background: 'transparent',
-            border: '1px dashed var(--border)',
-            borderRadius: 6,
-            color: 'var(--text-dim)',
-            fontSize: 12,
-            cursor: 'pointer',
-            fontFamily: MONO_FONT,
+            minHeight: isMobile ? 'var(--hit)' : undefined,
+            borderStyle: 'dashed',
           }}
         >
           + new session
@@ -404,25 +381,28 @@ export function Sidebar({
         alignItems: 'center',
         gap: 4,
         padding: '4px 8px 8px',
-        fontFamily: MONO_FONT,
         fontSize: 11,
         color: 'var(--text-faint)',
       }}>
         <span style={{ flex: 1, paddingLeft: 8 }}>text size</span>
         <button
+          className="btn-outline"
           onClick={() => onFontSizeChange(fontSize - 1)}
           disabled={fontSize <= MIN_FONT_SIZE}
           aria-label="Smaller text"
-          style={iconButton({ color: 'var(--text-dim)', fontSize: 15, border: '1px solid var(--border)' })}
+          title="Smaller text"
+          style={iconButton(15)}
         >
           −
         </button>
         <span style={{ minWidth: 24, textAlign: 'center', color: 'var(--text-dim)' }}>{fontSize}</span>
         <button
+          className="btn-outline"
           onClick={() => onFontSizeChange(fontSize + 1)}
           disabled={fontSize >= MAX_FONT_SIZE}
           aria-label="Larger text"
-          style={iconButton({ color: 'var(--text-dim)', fontSize: 15, border: '1px solid var(--border)' })}
+          title="Larger text"
+          style={iconButton(15)}
         >
           +
         </button>

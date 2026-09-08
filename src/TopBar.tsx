@@ -1,7 +1,7 @@
-import { MONO_FONT } from './theme'
 import { displayName } from './sessionState'
 import type { Session } from './sessionState'
 import type { MobileView } from './mobile'
+import type { CSSProperties } from 'react'
 
 interface TopBarProps {
   isMobile: boolean
@@ -29,34 +29,38 @@ export function TopBar({
   toolbarVisible,
   onToggleToolbar,
 }: TopBarProps) {
+  const sidebarLabel = sidebarOpen ? 'Close sidebar' : 'Open sidebar'
   return (
-    <div style={{
-      display: 'flex',
-      alignItems: 'center',
-      gap: isMobile ? 4 : 8,
-      padding: isMobile ? '4px 8px 4px 4px' : '8px 12px',
-      paddingTop: `calc(${isMobile ? 4 : 8}px + env(safe-area-inset-top))`,
-      background: 'var(--surface)',
-      borderBottom: '1px solid var(--border)',
-      minHeight: 44,
-    }}>
+    <div
+      className="top-bar"
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: isMobile ? 4 : 8,
+        paddingRight: isMobile ? 8 : 12,
+        paddingBottom: isMobile ? 4 : 8,
+        paddingLeft: isMobile ? 4 : 12,
+        // The top padding is set in styles.css (.top-bar), which adds the
+        // safe-area inset unless the version banner above owns it.
+        '--top-bar-pad': isMobile ? '4px' : '8px',
+        background: 'var(--surface)',
+        borderBottom: '1px solid var(--border)',
+        minHeight: 'var(--hit)',
+      } as CSSProperties}
+    >
       {/* Sidebar toggle: hamburger on mobile, collapse arrow on desktop */}
       <button
+        className="btn-ghost"
         data-testid="sidebar-toggle"
         onClick={onToggleSidebar}
-        aria-label={sidebarOpen ? 'Close sidebar' : 'Open sidebar'}
+        aria-label={sidebarLabel}
+        title={sidebarLabel}
         style={{
-          background: 'none',
-          border: 'none',
-          color: 'var(--text-dim)',
           fontSize: isMobile ? 20 : 14,
-          cursor: 'pointer',
           padding: isMobile ? 0 : '4px 6px',
-          minWidth: isMobile ? 44 : undefined,
-          minHeight: isMobile ? 44 : undefined,
-          fontFamily: MONO_FONT,
+          minWidth: isMobile ? 'var(--hit)' : undefined,
+          minHeight: isMobile ? 'var(--hit)' : undefined,
         }}
-        title={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
       >
         {isMobile ? '☰' : (sidebarOpen ? '◂' : '▸')}
       </button>
@@ -71,7 +75,6 @@ export function TopBar({
         overflow: 'hidden',
       }}>
         <span style={{
-          fontFamily: MONO_FONT,
           fontSize: 13,
           color: 'var(--accent)',
           fontWeight: 600,
@@ -83,7 +86,6 @@ export function TopBar({
           &rsaquo; {activeSessionData ? displayName(activeSessionData) : ''}
         </span>
         <span style={{
-          fontFamily: MONO_FONT,
           fontSize: isMobile ? 10 : 12,
           color: 'var(--text-dim)',
           whiteSpace: 'nowrap',
@@ -96,31 +98,27 @@ export function TopBar({
         </span>
       </div>
 
-      {/* Mobile view toggle */}
+      {/* Mobile view switch: terminal or files, one pressed at a time */}
       {isMobile && (
-        <div style={{
-          display: 'flex',
-          gap: 2,
-          background: 'var(--surface-raised)',
-          borderRadius: 8,
-          padding: 2,
-          flexShrink: 0,
-        }}>
+        <div
+          role="group"
+          aria-label="View"
+          style={{
+            display: 'flex',
+            gap: 2,
+            background: 'var(--surface-raised)',
+            borderRadius: 'var(--radius-lg)',
+            padding: 2,
+            flexShrink: 0,
+          }}
+        >
           {(['terminal', 'files'] as const).map(view => (
             <button
               key={view}
+              className="btn-ghost"
               onClick={() => onSetMobileView(view)}
-              style={{
-                background: mobileView === view ? 'var(--accent-dim)' : 'transparent',
-                border: 'none',
-                color: mobileView === view ? 'var(--accent)' : 'var(--text-dim)',
-                fontSize: 12,
-                padding: '0 12px',
-                minHeight: 36,
-                borderRadius: 6,
-                cursor: 'pointer',
-                fontFamily: MONO_FONT,
-              }}
+              aria-pressed={mobileView === view}
+              style={{ padding: '0 12px', minHeight: 36 }}
             >
               {view === 'terminal' ? 'term' : 'files'}
             </button>
@@ -131,20 +129,12 @@ export function TopBar({
       {/* Desktop key toolbar toggle: off by default next to a real keyboard */}
       {!isMobile && (
         <button
+          className="btn-outline"
           data-testid="keytoolbar-toggle"
           onClick={onToggleToolbar}
           aria-pressed={toolbarVisible}
           title={toolbarVisible ? 'Hide key toolbar' : 'Show key toolbar'}
-          style={{
-            background: toolbarVisible ? 'var(--accent-dim)' : 'transparent',
-            border: `1px solid ${toolbarVisible ? 'var(--accent)' : 'var(--border)'}`,
-            color: toolbarVisible ? 'var(--accent)' : 'var(--text-dim)',
-            fontSize: 12,
-            padding: '4px 10px',
-            borderRadius: 4,
-            cursor: 'pointer',
-            fontFamily: MONO_FONT,
-          }}
+          style={{ borderRadius: 'var(--radius-sm)' }}
         >
           keys
         </button>
@@ -153,18 +143,12 @@ export function TopBar({
       {/* Desktop file panel toggle */}
       {!isMobile && (
         <button
+          className="btn-outline"
           data-testid="files-toggle"
           onClick={onToggleFilePanel}
-          style={{
-            background: filePanelOpen ? 'var(--accent-dim)' : 'transparent',
-            border: `1px solid ${filePanelOpen ? 'var(--accent)' : 'var(--border)'}`,
-            color: filePanelOpen ? 'var(--accent)' : 'var(--text-dim)',
-            fontSize: 12,
-            padding: '4px 10px',
-            borderRadius: 4,
-            cursor: 'pointer',
-            fontFamily: MONO_FONT,
-          }}
+          aria-pressed={filePanelOpen}
+          title={filePanelOpen ? 'Hide file panel' : 'Show file panel'}
+          style={{ borderRadius: 'var(--radius-sm)' }}
         >
           files
         </button>

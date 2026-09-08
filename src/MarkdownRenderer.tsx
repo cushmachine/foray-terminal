@@ -1,11 +1,8 @@
-import { MONO_FONT } from './theme'
-
 export function MarkdownRenderer({ content }: { content: string }) {
   return (
     <div style={{
       fontSize: 13,
       lineHeight: 1.7,
-      fontFamily: MONO_FONT,
       color: 'var(--text)',
       overflowWrap: 'break-word',
     }}>
@@ -54,7 +51,7 @@ function renderInline(text: string) {
           background: 'var(--surface-raised)',
           color: 'var(--warning)',
           padding: '1px 5px',
-          borderRadius: 3,
+          borderRadius: 'var(--radius-sm)',
           fontSize: '0.9em',
         }}>
           {part.slice(1, -1)}

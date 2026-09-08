@@ -64,8 +64,8 @@ test('paletteFromTheme has 256 entries with the theme first, then the cube, then
   assert.equal(palette.background, theme.background)
 })
 
-test('paletteFromTheme accepts the THEME object shape with its extra keys', () => {
-  // Terminal.tsx's THEME also carries cursor and selection colours; the
+test('paletteFromTheme accepts the TerminalTheme shape with its extra keys', () => {
+  // theme.ts's TerminalTheme also carries cursor and selection colours; the
   // structural type must not reject them.
   const withExtras = { ...theme, cursor: '#123456', cursorAccent: '#654321', selectionBackground: '#00000033' }
   assert.equal(paletteFromTheme(withExtras).colors[1], theme.red)

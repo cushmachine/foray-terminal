@@ -257,14 +257,6 @@ export function App() {
         onTouchStart={isMobile ? handleTouchStart : undefined}
         onTouchEnd={isMobile ? handleTouchEnd : undefined}
       >
-        <VersionBanner
-          notice={notice}
-          onReload={() => window.location.reload()}
-          onDismiss={() => {
-            dismissedNotice.current = notice?.text ?? null
-            setNotice(null)
-          }}
-        />
         <Toast message={toast} onDismiss={dismissToast} />
 
         {/* Sidebar overlay on mobile */}
@@ -277,7 +269,8 @@ export function App() {
               position: 'fixed',
               inset: 0,
               background: 'rgba(0,0,0,0.75)',
-              zIndex: 90,
+              // Same layer as the drawer; the drawer is rendered after it.
+              zIndex: 'var(--z-drawer)',
               width: '100%',
               height: '100%',
               border: 'none',
@@ -308,6 +301,15 @@ export function App() {
           flexDirection: 'column',
           minWidth: 0,
         }}>
+          {/* In the flow above the top bar, so it never covers a control. */}
+          <VersionBanner
+            notice={notice}
+            onReload={() => window.location.reload()}
+            onDismiss={() => {
+              dismissedNotice.current = notice?.text ?? null
+              setNotice(null)
+            }}
+          />
           <TopBar
             isMobile={isMobile}
             sidebarOpen={sidebarOpen}

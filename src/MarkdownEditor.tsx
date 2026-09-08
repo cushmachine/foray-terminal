@@ -5,61 +5,59 @@ import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirro
 import { markdown } from '@codemirror/lang-markdown'
 import { syntaxHighlighting, HighlightStyle } from '@codemirror/language'
 import { tags } from '@lezer/highlight'
-import { MONO_FONT, THEME } from './theme'
 
+// Colours come from styles.css; CodeMirror writes these as a stylesheet,
+// so var() resolves the same way it does for the rest of the page.
 const theme = EditorView.theme({
   '&': {
     height: '100%',
     fontSize: '13px',
-    background: THEME.background,
+    background: 'var(--bg)',
+  },
+  '.cm-scroller': {
+    fontFamily: 'var(--font-mono)',
+    overflow: 'auto',
   },
   '.cm-content': {
-    fontFamily: MONO_FONT,
     padding: '12px 0',
-    caretColor: THEME.cursor,
+    caretColor: 'var(--term-cursor)',
     lineHeight: '1.7',
   },
   '.cm-line': {
     padding: '0 16px',
   },
   '.cm-gutters': {
-    background: THEME.background,
+    background: 'var(--bg)',
     border: 'none',
-    color: '#3e3e4a',
+    color: 'var(--text-faint)',
   },
   '.cm-activeLineGutter': {
-    background: '#111116',
-    color: '#636370',
+    background: 'var(--surface)',
+    color: 'var(--text-dim)',
   },
   '.cm-activeLine': {
-    background: '#111116',
+    background: 'var(--surface)',
   },
   '.cm-cursor': {
-    borderColor: THEME.cursor,
+    borderColor: 'var(--term-cursor)',
   },
-  '.cm-selectionBackground': {
-    background: `${THEME.cursor}33 !important`,
-  },
-  '&.cm-focused .cm-selectionBackground': {
-    background: `${THEME.cursor}44 !important`,
-  },
-  '.cm-scroller': {
-    overflow: 'auto',
+  '.cm-selectionBackground, &.cm-focused .cm-selectionBackground': {
+    background: 'var(--term-selection) !important',
   },
 }, { dark: true })
 
 const highlights = HighlightStyle.define([
-  { tag: tags.heading1, color: '#d4d4d8', fontWeight: '700', fontSize: '1.3em' },
-  { tag: tags.heading2, color: '#3db8a9', fontWeight: '600', fontSize: '1.15em' },
-  { tag: tags.heading3, color: '#5cd4c4', fontWeight: '600' },
-  { tag: tags.emphasis, color: '#b07cd8', fontStyle: 'italic' },
-  { tag: tags.strong, color: '#d4d4d8', fontWeight: '700' },
-  { tag: tags.link, color: '#5e6ad2', textDecoration: 'underline' },
-  { tag: tags.url, color: '#5e6ad2' },
-  { tag: tags.monospace, color: '#e09a3c', background: '#1e1e26', borderRadius: '3px', padding: '1px 4px' },
-  { tag: tags.list, color: '#636370' },
-  { tag: tags.quote, color: '#636370', fontStyle: 'italic' },
-  { tag: tags.processingInstruction, color: '#636370' },
+  { tag: tags.heading1, color: 'var(--text)', fontWeight: '700', fontSize: '1.3em' },
+  { tag: tags.heading2, color: 'var(--accent)', fontWeight: '600', fontSize: '1.15em' },
+  { tag: tags.heading3, color: 'var(--accent-text)', fontWeight: '600' },
+  { tag: tags.emphasis, color: 'var(--ansi-magenta)', fontStyle: 'italic' },
+  { tag: tags.strong, color: 'var(--text)', fontWeight: '700' },
+  { tag: tags.link, color: 'var(--ansi-blue)', textDecoration: 'underline' },
+  { tag: tags.url, color: 'var(--ansi-blue)' },
+  { tag: tags.monospace, color: 'var(--warning)', background: 'var(--surface-hover)', borderRadius: 'var(--radius-sm)', padding: '1px 4px' },
+  { tag: tags.list, color: 'var(--text-dim)' },
+  { tag: tags.quote, color: 'var(--text-dim)', fontStyle: 'italic' },
+  { tag: tags.processingInstruction, color: 'var(--text-dim)' },
 ])
 
 /**

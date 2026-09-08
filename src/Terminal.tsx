@@ -8,7 +8,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSocketContext } from './SocketContext'
 import { NO_MODIFIERS, type Modifiers } from './keys'
-import { MONO_FONT, THEME } from './theme'
 import { snapshotText, visibleLogicalLines } from './selectMode'
 import { terminalRegistry, type TerminalActions } from './terminalRegistry'
 import { useTerminal, focusInput } from './terminal/useTerminal'
@@ -162,13 +161,12 @@ export function Terminal({
           overflowY: 'auto',
           overscrollBehavior: 'contain',
           WebkitOverflowScrolling: 'touch',
-          background: THEME.background,
+          background: 'var(--bg)',
         }}
       >
         <div
           ref={historyRef}
           style={{
-            fontFamily: MONO_FONT,
             fontSize,
             lineHeight: 1.4,
             whiteSpace: 'pre-wrap',
@@ -177,7 +175,7 @@ export function Terminal({
             // columns wide, measured in this font, and lines break where
             // tmux broke them (terminal/historyPane.ts).
             padding: '0 8px',
-            color: THEME.foreground,
+            color: 'var(--text)',
             userSelect: 'text',
             WebkitUserSelect: 'text',
           }}

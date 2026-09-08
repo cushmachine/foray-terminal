@@ -1,33 +1,77 @@
-// Shared theme constants for Nest.
+// The palette lives in styles.css, as custom properties on :root. This is
+// the read side for the two consumers that need literal values rather
+// than var(): xterm paints its theme into a canvas, and the history
+// renderer (ansi.ts) writes colours into innerHTML style attributes.
 //
-// The terminal, markdown editor, and all UI components share this palette
-// and font stack. CSS variables in styles.css define the same values for
-// the DOM side; this file is the canonical JS-side source.
+// Read at first use, which is at terminal mount: by then the stylesheet
+// has loaded (a module script waits for the stylesheets before it) and
+// the values are what the rest of the page is already painted with.
 
-/** Full monospace font stack with fallbacks, matching Terminal.tsx's xterm config. */
-export const MONO_FONT = "'JetBrains Mono', 'SF Mono', 'Fira Code', 'Cascadia Code', monospace"
+/** xterm's ITheme, minus the keys Nest leaves at xterm's defaults. */
+export interface TerminalTheme {
+  background: string
+  foreground: string
+  cursor: string
+  cursorAccent: string
+  selectionBackground: string
+  black: string
+  red: string
+  green: string
+  yellow: string
+  blue: string
+  magenta: string
+  cyan: string
+  white: string
+  brightBlack: string
+  brightRed: string
+  brightGreen: string
+  brightYellow: string
+  brightBlue: string
+  brightMagenta: string
+  brightCyan: string
+  brightWhite: string
+}
 
-/** Terminal color theme — used by xterm.js and the ANSI history renderer. */
-export const THEME = {
-  background: '#0a0a0c',
-  foreground: '#d4d4d8',
-  cursor: '#3db8a9',
-  cursorAccent: '#0a0a0c',
-  selectionBackground: '#3db8a933',
-  black: '#1a1a21',
-  red: '#d4634f',
-  green: '#3db8a9',
-  yellow: '#e09a3c',
-  blue: '#5e6ad2',
-  magenta: '#b07cd8',
-  cyan: '#3db8a9',
-  white: '#d4d4d8',
-  brightBlack: '#636370',
-  brightRed: '#e8796a',
-  brightGreen: '#5cd4c4',
-  brightYellow: '#f0b45c',
-  brightBlue: '#8b93e8',
-  brightMagenta: '#c99de8',
-  brightCyan: '#5cd4c4',
-  brightWhite: '#fafafa',
-} as const
+const COLOR_VARS: Record<keyof TerminalTheme, string> = {
+  background: '--bg',
+  foreground: '--text',
+  cursor: '--term-cursor',
+  cursorAccent: '--bg',
+  selectionBackground: '--term-selection',
+  black: '--ansi-black',
+  red: '--ansi-red',
+  green: '--ansi-green',
+  yellow: '--ansi-yellow',
+  blue: '--ansi-blue',
+  magenta: '--ansi-magenta',
+  cyan: '--ansi-cyan',
+  white: '--ansi-white',
+  brightBlack: '--ansi-bright-black',
+  brightRed: '--ansi-bright-red',
+  brightGreen: '--ansi-bright-green',
+  brightYellow: '--ansi-bright-yellow',
+  brightBlue: '--ansi-bright-blue',
+  brightMagenta: '--ansi-bright-magenta',
+  brightCyan: '--ansi-bright-cyan',
+  brightWhite: '--ansi-bright-white',
+}
+
+function cssVar(name: string): string {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+}
+
+let theme: TerminalTheme | null = null
+
+/** The terminal colours, resolved from the stylesheet once. */
+export function terminalTheme(): TerminalTheme {
+  if (theme) return theme
+  const read = {} as Record<keyof TerminalTheme, string>
+  for (const key of Object.keys(COLOR_VARS) as (keyof TerminalTheme)[]) read[key] = cssVar(COLOR_VARS[key])
+  theme = read
+  return theme
+}
+
+/** The monospace stack the page uses, for xterm, which measures it itself. */
+export function monoFont(): string {
+  return cssVar('--font-mono')
+}

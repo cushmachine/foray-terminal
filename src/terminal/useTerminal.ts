@@ -16,13 +16,12 @@ import { useSocketContext } from '../SocketContext'
 import { canFit } from '../terminalSize'
 import { applyModifiers, type Modifiers } from '../keys'
 import { paletteFromTheme, type Palette } from '../ansi'
-import { MONO_FONT, THEME } from '../theme'
+import { monoFont, terminalTheme } from '../theme'
 import { URL_RE, cleanUrl } from '../urls'
 import { TerminalController, type AttachState } from './TerminalController'
 import { createHistoryPane } from './historyPane'
 import { bottomInset, composerFocused } from './bottomInset'
 
-const PALETTE: Palette = paletteFromTheme(THEME)
 // onSelectionChange fires continuously during a drag; copy once it settles.
 const COPY_ON_SELECT_MS = 120
 
@@ -116,9 +115,11 @@ export function useTerminal({
     const historyEl = historyRef.current
     if (!container || !host || !scrollEl || !historyEl) return
 
+    const theme = terminalTheme()
+    const palette: Palette = paletteFromTheme(theme)
     const term = new XTerm({
-      theme: THEME,
-      fontFamily: MONO_FONT,
+      theme,
+      fontFamily: monoFont(),
       fontSize: fontSizeRef.current,
       lineHeight: 1.4,
       cursorStyle: 'bar',
@@ -165,7 +166,7 @@ export function useTerminal({
         return true
       },
       scroll: scrollEl,
-      history: createHistoryPane(historyEl, PALETTE),
+      history: createHistoryPane(historyEl, palette),
       screen: container,
       inset: touch ? () => (composerFocused() ? bottomInset(term, scrollEl) : 0) : undefined,
       onStateChange: setState,

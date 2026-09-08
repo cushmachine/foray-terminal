@@ -1,5 +1,4 @@
 import { Component, type ReactNode } from 'react'
-import { MONO_FONT } from './theme'
 
 interface Props {
   children: ReactNode
@@ -29,7 +28,6 @@ export class ErrorBoundary extends Component<Props, State> {
         gap: 16,
         background: 'var(--bg)',
         color: 'var(--text)',
-        fontFamily: MONO_FONT,
       }}>
         <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--danger)' }}>
           something went wrong
@@ -45,17 +43,9 @@ export class ErrorBoundary extends Component<Props, State> {
           {this.state.error.message}
         </div>
         <button
+          className="btn-outline tone-accent"
           onClick={() => window.location.reload()}
-          style={{
-            background: 'var(--accent-dim)',
-            border: '1px solid var(--accent)',
-            color: 'var(--accent)',
-            fontSize: 13,
-            padding: '8px 20px',
-            borderRadius: 6,
-            cursor: 'pointer',
-            fontFamily: MONO_FONT,
-          }}
+          style={{ fontSize: 13, padding: '8px 20px' }}
         >
           reload
         </button>

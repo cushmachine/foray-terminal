@@ -1,3 +1,8 @@
+/* The palette, fonts and design tokens: the one source. theme.ts reads
+   the colour and font variables for xterm and the ANSI history renderer,
+   which paint literal values into a canvas and innerHTML; everything else
+   uses var(). public/sw.js and public/manifest.json carry their own copies
+   of the shell colours because they load before this file. */
 :root {
   --bg: #0a0a0c;
   --surface: #111116;
@@ -12,11 +17,47 @@
   --accent-dim: #1a2e2b;
   --accent-text: #5cd4c4;
   --danger: #d4634f;
+  --danger-dim: rgba(212, 99, 79, 0.15);
   --warning: #e09a3c;
-  --key-bg: #1e1e26;
+  --key-bg: var(--surface-hover);
   --key-border: #2a2a35;
   --key-text: #a0a0ac;
-  --key-active: #3db8a9;
+  --key-active: var(--accent);
+
+  /* The terminal: cursor, selection and the 16 ANSI colours, shared by
+     the live xterm screen and the scrollback history above it. */
+  --term-cursor: var(--accent);
+  --term-selection: #3db8a933;
+  --ansi-black: #1a1a21;
+  --ansi-red: var(--danger);
+  --ansi-green: var(--accent);
+  --ansi-yellow: var(--warning);
+  --ansi-blue: #5e6ad2;
+  --ansi-magenta: #b07cd8;
+  --ansi-cyan: var(--accent);
+  --ansi-white: var(--text);
+  --ansi-bright-black: var(--text-dim);
+  --ansi-bright-red: #e8796a;
+  --ansi-bright-green: var(--accent-text);
+  --ansi-bright-yellow: #f0b45c;
+  --ansi-bright-blue: #8b93e8;
+  --ansi-bright-magenta: #c99de8;
+  --ansi-bright-cyan: var(--accent-text);
+  --ansi-bright-white: #fafafa;
+
+  --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  /* Minimum touch target. */
+  --hit: 44px;
+  /* Layers a terminal draws over its screen; the phone drawer and its
+     backdrop; the toast. Siblings on one layer stack in DOM order. */
+  --z-overlay: 10;
+  --z-drawer: 100;
+  --z-banner: 200;
   --sidebar-width: 240px;
 }
 
@@ -35,7 +76,9 @@ html, body, #root {
   overflow: hidden;
   background: var(--bg);
   color: var(--text);
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  /* The whole chrome is monospace like the terminal it frames; the
+     Composer opts into the system font (see .composer). */
+  font-family: var(--font-mono);
   /* Pull-to-refresh or rubber-banding would reload or shift a live terminal. */
   overscroll-behavior: none;
   -webkit-text-size-adjust: 100%;
@@ -53,10 +96,159 @@ body {
   height: var(--app-height, 100dvh);
 }
 
-button, input {
+button, input, textarea {
+  font-family: inherit;
   /* No 300ms tap delay, no double-tap zoom, no long-press callout on controls. */
   touch-action: manipulation;
   -webkit-touch-callout: none;
+}
+
+/* Keyboard focus is shown the same way everywhere. Text fields and the
+   editor show it through their border and caret instead of a ring. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.field:focus-visible,
+.cm-content:focus-visible {
+  outline: none;
+}
+
+.field {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+  color: var(--text);
+}
+.field:focus-visible {
+  border-color: var(--accent);
+}
+
+/* Buttons. Size and placement stay inline where they are layout; the
+   look and the states live here so every control hovers, presses,
+   focuses and disables alike.
+   .btn-ghost: no border, for icon buttons and list rows.
+   .btn-outline: bordered; [aria-pressed="true"] is the "on" state.
+   .btn-primary: filled accent, one per view at most.
+   .btn-key: the key-toolbar look, also used by the select-mode bar. */
+.btn-ghost, .btn-outline, .btn-primary, .btn-key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 4px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.1s, border-color 0.1s, color 0.1s;
+}
+.btn-outline {
+  border-color: var(--border);
+}
+.btn-primary {
+  background: var(--accent);
+  color: var(--bg);
+  font-weight: 600;
+}
+.btn-key {
+  background: var(--key-bg);
+  border-color: var(--key-border);
+  color: var(--key-text);
+  border-radius: var(--radius-lg);
+  font-size: 13px;
+  font-weight: 500;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.tone-accent {
+  color: var(--accent);
+}
+.btn-outline.tone-accent {
+  border-color: var(--accent);
+}
+.tone-danger {
+  color: var(--danger);
+  background: var(--danger-dim);
+}
+.tree-item[data-kind="dir"] {
+  color: var(--text);
+}
+.tree-item[data-kind="md"] {
+  color: var(--accent-text);
+}
+
+@media (hover: hover) {
+  .btn-ghost:hover:not(:disabled, [aria-pressed="true"], [aria-current="true"]),
+  .btn-outline:hover:not(:disabled, [aria-pressed="true"]) {
+    background: var(--surface-hover);
+    color: var(--text);
+  }
+  .tone-accent:hover:not(:disabled) {
+    background: var(--accent-dim);
+    color: var(--accent);
+  }
+  .tone-danger:hover:not(:disabled) {
+    color: var(--danger);
+  }
+  .btn-primary:hover:not(:disabled) {
+    background: var(--accent-text);
+  }
+  .btn-key:hover:not(:disabled, [aria-pressed="true"], [data-active="true"]) {
+    border-color: var(--key-text);
+  }
+}
+.btn-ghost:active:not(:disabled),
+.btn-outline:active:not(:disabled) {
+  background: var(--accent-dim);
+}
+.btn-primary:active:not(:disabled) {
+  background: var(--accent-text);
+}
+
+/* On: pressed toggles, the current list row, the key being held. */
+.btn-ghost[aria-pressed="true"],
+.btn-ghost[aria-current="true"],
+.btn-outline[aria-pressed="true"] {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+.btn-outline[aria-pressed="true"] {
+  border-color: var(--accent);
+}
+.btn-key[aria-pressed="true"],
+.btn-key[data-active="true"] {
+  background: var(--accent-dim);
+  border-color: var(--key-active);
+  color: var(--key-active);
+}
+
+.btn-ghost:disabled, .btn-outline:disabled, .btn-primary:disabled, .btn-key:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* The top bar owns the top safe-area inset, unless the version banner is
+   in the column above it, in which case the banner does. */
+.top-bar {
+  padding-top: calc(var(--top-bar-pad) + env(safe-area-inset-top));
+}
+.version-banner {
+  padding: 6px 12px;
+  padding-top: calc(6px + env(safe-area-inset-top));
+}
+.version-banner + .top-bar {
+  padding-top: var(--top-bar-pad);
+}
+
+/* The mobile input bar reads as a message field, not terminal text. */
+.composer {
+  font-family: var(--font-sans);
 }
 
 ::-webkit-scrollbar {

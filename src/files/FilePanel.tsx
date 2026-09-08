@@ -1,8 +1,7 @@
 import { useCallback, useState, lazy, Suspense, type ReactNode } from 'react'
 import { MarkdownRenderer } from '../MarkdownRenderer'
 import { useEscape } from '../hooks/useEscape'
-import { clampFilePanelWidth } from '../mobile'
-import { MONO_FONT } from '../theme'
+import { FILE_PANEL_MAX_WIDTH, FILE_PANEL_MIN_WIDTH, clampFilePanelWidth } from '../mobile'
 import { FileTree } from './FileTree'
 import { ResizeHandle } from './ResizeHandle'
 import { useFileStore } from './useFileStore'
@@ -35,7 +34,6 @@ function Message({ children, tone = 'dim' }: { children: ReactNode; tone?: 'dim'
       padding: 16,
       fontSize: 12,
       color: tone === 'warning' ? 'var(--warning)' : 'var(--text-dim)',
-      fontFamily: MONO_FONT,
     }}>
       {children}
     </div>
@@ -43,14 +41,9 @@ function Message({ children, tone = 'dim' }: { children: ReactNode; tone?: 'dim'
 }
 
 const noticeButtonStyle = {
-  background: 'transparent',
-  color: 'var(--accent)',
-  border: '1px solid var(--accent)',
-  borderRadius: 4,
+  borderRadius: 'var(--radius-sm)',
   padding: '3px 8px',
-  fontFamily: MONO_FONT,
   fontSize: 11,
-  cursor: 'pointer',
   flexShrink: 0,
 } as const
 
@@ -65,7 +58,6 @@ function Notice({ children }: { children: ReactNode }) {
       borderBottom: '1px solid var(--border)',
       background: 'var(--surface-raised)',
       color: 'var(--warning)',
-      fontFamily: MONO_FONT,
       fontSize: 11,
     }}>
       {children}
@@ -100,23 +92,15 @@ export function FilePanel({
     onResize(clampFilePanelWidth(width + delta))
   }, [width, onResize])
 
-  const hit = isMobile ? 44 : undefined
-  const headerButtonStyle = {
-    background: 'none',
-    border: 'none',
-    color: 'var(--text-dim)',
-    cursor: 'pointer',
-    fontFamily: MONO_FONT,
-    flexShrink: 0,
-    minHeight: hit,
-  } as const
+  const hit = isMobile ? 'var(--hit)' : undefined
 
   const closePanelButton = (
     <button
+      className="btn-ghost"
       onClick={onClosePanel}
       aria-label="Close panel"
-      title={isMobile ? 'Back to terminal' : 'Close file panel'}
-      style={{ ...headerButtonStyle, fontSize: 16, padding: '0 4px', minWidth: hit }}
+      title="Close panel"
+      style={{ fontSize: 16, padding: '0 4px', minWidth: hit, minHeight: hit, flexShrink: 0 }}
     >
       ×
     </button>
@@ -166,7 +150,9 @@ export function FilePanel({
         minWidth: 0,
       }}
     >
-      {!isMobile && <ResizeHandle onResize={handleResize} />}
+      {!isMobile && (
+        <ResizeHandle onResize={handleResize} value={width} min={FILE_PANEL_MIN_WIDTH} max={FILE_PANEL_MAX_WIDTH} />
+      )}
       <div style={{
         width: isMobile ? '100%' : width,
         height: '100%',
@@ -188,17 +174,17 @@ export function FilePanel({
               minWidth: 0,
             }}>
               <button
+                className="btn-ghost"
                 onClick={onCloseFile}
                 aria-label="Back to files"
-                title="Back to the file tree"
-                style={{ ...headerButtonStyle, fontSize: 12, padding: '2px 6px' }}
+                title="Back to files"
+                style={{ padding: '2px 6px', minHeight: hit, flexShrink: 0 }}
               >
                 ← files
               </button>
               <span style={{
                 flex: 1,
                 fontSize: 12,
-                fontFamily: MONO_FONT,
                 color: 'var(--accent-text)',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
@@ -208,18 +194,15 @@ export function FilePanel({
               </span>
               {isMarkdown && (fileContent !== undefined || files.editing) && (
                 <button
+                  className="btn-outline"
                   data-testid="file-edit-toggle"
                   onClick={() => (files.editing ? files.cancelEdit() : files.edit())}
                   aria-pressed={files.editing}
+                  title={files.editing ? 'Preview' : 'Edit'}
                   style={{
-                    background: files.editing ? 'var(--accent-dim)' : 'transparent',
-                    border: `1px solid ${files.editing ? 'var(--accent)' : 'var(--border)'}`,
-                    color: files.editing ? 'var(--accent)' : 'var(--text-dim)',
                     fontSize: 11,
                     padding: isMobile ? '8px 12px' : '3px 8px',
-                    borderRadius: 4,
-                    cursor: 'pointer',
-                    fontFamily: MONO_FONT,
+                    borderRadius: 'var(--radius-sm)',
                     flexShrink: 0,
                   }}
                 >
@@ -232,8 +215,8 @@ export function FilePanel({
             {files.diskChange && (
               <Notice>
                 <span style={{ flex: 1 }}>changed on disk</span>
-                <button onClick={files.reloadFromDisk} style={noticeButtonStyle}>reload</button>
-                <button onClick={files.keepEdits} style={noticeButtonStyle}>keep mine</button>
+                <button className="btn-outline tone-accent" onClick={files.reloadFromDisk} style={noticeButtonStyle}>reload</button>
+                <button className="btn-outline tone-accent" onClick={files.keepEdits} style={noticeButtonStyle}>keep mine</button>
               </Notice>
             )}
             {files.removed && files.editing && (
@@ -262,7 +245,6 @@ export function FilePanel({
                     flex: 1,
                     fontSize: 11,
                     color: 'var(--warning)',
-                    fontFamily: MONO_FONT,
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
                     whiteSpace: 'nowrap',
@@ -271,37 +253,18 @@ export function FilePanel({
                   </span>
                 )}
                 <button
+                  className="btn-outline"
                   onClick={files.cancelEdit}
                   disabled={files.saving}
-                  style={{
-                    background: 'transparent',
-                    border: '1px solid var(--border)',
-                    color: 'var(--text-dim)',
-                    padding: isMobile ? '10px 18px' : '6px 14px',
-                    borderRadius: 4,
-                    fontSize: 12,
-                    cursor: files.saving ? 'default' : 'pointer',
-                    opacity: files.saving ? 0.5 : 1,
-                    fontFamily: MONO_FONT,
-                  }}
+                  style={{ padding: isMobile ? '10px 18px' : '6px 14px', borderRadius: 'var(--radius-sm)' }}
                 >
                   discard
                 </button>
                 <button
+                  className="btn-primary"
                   onClick={files.save}
                   disabled={files.saving}
-                  style={{
-                    background: 'var(--accent)',
-                    border: 'none',
-                    color: 'var(--bg)',
-                    padding: isMobile ? '10px 18px' : '6px 14px',
-                    borderRadius: 4,
-                    fontSize: 12,
-                    cursor: files.saving ? 'default' : 'pointer',
-                    opacity: files.saving ? 0.7 : 1,
-                    fontWeight: 600,
-                    fontFamily: MONO_FONT,
-                  }}
+                  style={{ padding: isMobile ? '10px 18px' : '6px 14px', borderRadius: 'var(--radius-sm)' }}
                 >
                   {files.saving ? 'saving…' : 'save'}
                 </button>
@@ -330,7 +293,6 @@ export function FilePanel({
                 flex: 1,
                 fontSize: 11,
                 color: 'var(--text-dim)',
-                fontFamily: MONO_FONT,
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',

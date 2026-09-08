@@ -4,9 +4,11 @@
 // round-trips to the VM before it shows, and the soft keyboard composes
 // and rewrites words through the IME, which the terminal app can't undo,
 // so corrected words leave ghosts behind. Here the keyboard gets a real
-// text field: it autocorrects and echoes locally, and the finished text
-// reaches the terminal once, as a paste, followed by Enter. Tapping the
-// terminal still types directly for quick y/n answers.
+// text field that echoes locally, and the finished text reaches the
+// terminal once, as a paste, followed by Enter. Autocorrect and
+// auto-capitalisation are off (they mangle commands and paths); spell
+// check stays on as a passive underline. Tapping the terminal still types
+// directly for quick y/n answers.
 //
 // The unsent text is saved per session (draftKey) so switching sessions —
 // or backgrounding the app — never loses what you were typing. App mounts
@@ -83,7 +85,7 @@ export function Composer({ onSubmit, draftKey = null }: ComposerProps) {
   }
 
   return (
-    <div data-composer style={{
+    <div data-composer className="composer" style={{
       display: 'flex',
       alignItems: 'flex-end',
       gap: 6,
@@ -109,6 +111,7 @@ export function Composer({ onSubmit, draftKey = null }: ComposerProps) {
         autoCorrect="off"
         spellCheck
         aria-label="Message to send to the terminal"
+        className="field"
         style={{
           flex: 1,
           minWidth: 0,
@@ -117,12 +120,8 @@ export function Composer({ onSubmit, draftKey = null }: ComposerProps) {
           fontSize: 16,
           lineHeight: 1.35,
           padding: '7px 10px',
-          borderRadius: 10,
-          border: '1px solid var(--border)',
+          borderRadius: 'var(--radius-lg)',
           background: 'var(--bg)',
-          color: 'var(--text)',
-          outline: 'none',
-          fontFamily: 'inherit',
           maxHeight: MAX_HEIGHT,
           overflowY: 'auto',
         }}

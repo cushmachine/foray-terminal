@@ -1,5 +1,4 @@
 import type { FileNode } from '../shared/protocol'
-import { MONO_FONT } from '../theme'
 
 interface FileTreeProps {
   nodes: FileNode[]
@@ -9,6 +8,12 @@ interface FileTreeProps {
   onSelect: (path: string) => void
   selectedPath: string | null
   isMobile: boolean
+}
+
+/** What a row is, for its colour (styles.css .tree-item). */
+function kindOf(node: FileNode): 'dir' | 'md' | 'file' {
+  if (node.type === 'dir') return 'dir'
+  return node.name.endsWith('.md') ? 'md' : 'file'
 }
 
 /** One level of the tree; recurses into expanded directories. Expansion lives in the store. */
@@ -22,26 +27,20 @@ export function FileTree({ nodes, depth, expanded, onToggleDir, onSelect, select
         return (
           <div key={node.path}>
             <button
+              className="btn-ghost tree-item"
+              data-kind={kindOf(node)}
               onClick={() => (isDir ? onToggleDir(node.path) : onSelect(node.path))}
               aria-expanded={isDir ? isOpen : undefined}
+              aria-current={selected ? 'true' : undefined}
               style={{
                 width: '100%',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
+                justifyContent: 'flex-start',
                 padding: isMobile ? '0 8px' : '5px 8px',
-                minHeight: isMobile ? 44 : undefined,
+                minHeight: isMobile ? 'var(--hit)' : undefined,
                 paddingLeft: 8 + depth * 16,
-                background: selected ? 'var(--accent-dim)' : 'transparent',
-                border: 'none',
-                color: selected ? 'var(--accent)' :
-                       isDir ? 'var(--text)' :
-                       node.name.endsWith('.md') ? 'var(--accent-text)' : 'var(--text-dim)',
                 fontSize: isMobile ? 13 : 12,
-                fontFamily: MONO_FONT,
-                cursor: 'pointer',
                 textAlign: 'left',
-                borderRadius: 3,
+                borderRadius: 'var(--radius-sm)',
               }}
             >
               <span aria-hidden style={{ width: 14, textAlign: 'center', fontSize: 10, color: 'var(--text-faint)' }}>

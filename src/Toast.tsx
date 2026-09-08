@@ -1,5 +1,4 @@
 import { useEffect } from 'react'
-import { MONO_FONT } from './theme'
 
 interface ToastProps {
   message: string | null
@@ -8,18 +7,6 @@ interface ToastProps {
 
 /** How long a toast stays before dismissing itself. */
 export const TOAST_MS = 6000
-
-const buttonStyle = {
-  background: 'var(--surface-2, transparent)',
-  color: 'var(--accent)',
-  border: '1px solid var(--accent)',
-  borderRadius: 6,
-  padding: '4px 10px',
-  minHeight: 32,
-  fontFamily: MONO_FONT,
-  fontSize: 12,
-  cursor: 'pointer',
-} as const
 
 /**
  * A short-lived strip at the bottom of the page for failures nothing else
@@ -43,22 +30,21 @@ export function Toast({ message, onDismiss }: ToastProps) {
         left: '50%',
         transform: 'translateX(-50%)',
         maxWidth: 'calc(100vw - 24px)',
-        zIndex: 200,
+        zIndex: 'var(--z-banner)',
         display: 'flex',
         alignItems: 'center',
         gap: 10,
         padding: '6px 12px',
         background: 'var(--surface)',
         border: '1px solid var(--danger)',
-        borderRadius: 6,
+        borderRadius: 'var(--radius-md)',
         color: 'var(--text)',
-        fontFamily: MONO_FONT,
         fontSize: 12,
         boxShadow: '0 4px 24px rgba(0,0,0,0.5)',
       }}
     >
       <span style={{ overflowWrap: 'anywhere' }}>{message}</span>
-      <button onClick={onDismiss} aria-label="Dismiss" style={buttonStyle}>×</button>
+      <button className="btn-outline tone-accent" onClick={onDismiss} aria-label="Dismiss" title="Dismiss">×</button>
     </div>
   )
 }
