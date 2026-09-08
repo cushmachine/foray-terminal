@@ -143,6 +143,12 @@ export function App() {
         setNotice(next && next.text === dismissedNotice.current ? null : next)
         return
       }
+      // Errors the file panel doesn't own (it filters on files:*) have no UI
+      // yet; log them so a failed session op isn't silent.
+      if (msg.type === 'error' && !msg.request.startsWith('files:')) {
+        console.error(`[nest] ${msg.request} failed: ${msg.message}`)
+        return
+      }
       if (msg.type === 'session:ownership') {
         const next: Record<number, number> = {}
         for (const entry of msg.ownership) next[entry.windowId] = entry.clients
