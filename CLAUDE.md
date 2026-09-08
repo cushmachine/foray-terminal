@@ -4,6 +4,10 @@
 
 Run `npm run deploy` to build and restart the app. It runs `scripts/deploy.sh`, which restarts nest under pm2, or relaunches it from `ecosystem.config.cjs` when that file changed (pm2 does not pick up a changed script or interpreter on a plain restart). pm2 runs `scripts/start.sh`, which builds the client and then starts the server, so every restart is a full deploy and the server and page stamps always match. The app prompts connected clients to reload via `VersionBanner`. Do not use the dev server — we deploy straight to prod. Never run `pm2 restart` or `pm2 start` by hand; use `npm run deploy`.
 
+## Sessions live in nest-tmux.service
+
+The tmux server that holds every session runs in its own systemd unit, `nest-tmux.service` (`scripts/systemd/`, installed by `scripts/ensure-tmux-unit.sh` from `start.sh`), not under pm2. So a deploy, a pm2 crash, or an OOM teardown of pm2 leaves sessions alive. Never `systemctl stop` or `restart nest-tmux`: that kills every session. To recover lost sessions, find their uuids in `~/.claude/activity.log` and run `claude --resume <uuid>` inside a new `nest_<name>` tmux session.
+
 ## Build & check
 
 - `npm run build` — typecheck (both client and server tsconfigs) then vite build
