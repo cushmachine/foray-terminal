@@ -183,6 +183,71 @@ test.describe('keyboard behavior on mobile', () => {
     }
   })
 
+  // Locking the phone or switching apps blurs the focused input and refocuses
+  // it on return. That focus churn must not throw away a reader's place:
+  // only a view already pinned to the bottom follows the pin.
+  test('focus churn keeps a scrolled-up view where it was', async ({ page }) => {
+    await page.goto('/')
+    const name = uniqueName('kb-keep')
+    const scroll = () => active(page).getByTestId('terminal-scroll')
+    const scrollTop = () => scroll().evaluate((el) => el.scrollTop)
+    try {
+      await createMobileSession(page, name)
+      await expectTerminalReady(page)
+
+      // Keyboard up: the fixed-height page is taller than the viewport, so
+      // there is somewhere to scroll to.
+      await page.setViewportSize({ width: MOBILE.width, height: 500 })
+      await page.waitForTimeout(400)
+      await page.getByTestId('terminal-area').click()
+      await page.evaluate(() => {
+        window.dispatchEvent(new CustomEvent('nest:sendkeys', { detail: 'seq 1 80\r' }))
+      })
+      await expectTerminalText(page, '80')
+      await page.locator('[data-composer] textarea').focus()
+      await page.waitForTimeout(900)
+      const pinned = await scrollTop()
+      expect(pinned).toBeGreaterThan(100)
+
+      // Scroll back up to read.
+      const target = Math.round(pinned / 2)
+      await scroll().evaluate((el, top) => { el.scrollTop = top }, target)
+      await expect.poll(scrollTop).toBe(target)
+      await page.waitForTimeout(100) // let the scroll event record the unpinned state
+
+      // Sleep and wake: the composer blurs, then regains focus.
+      const textarea = page.locator('[data-composer] textarea')
+      await textarea.blur()
+      await page.waitForTimeout(300)
+      await textarea.focus()
+      await page.waitForTimeout(900)
+      expect(Math.abs((await scrollTop()) - target)).toBeLessThanOrEqual(2)
+
+      // Output arriving while scrolled up does not pull the view down either.
+      await page.evaluate(() => {
+        window.dispatchEvent(new CustomEvent('nest:submit', { detail: 'echo AFTER-WAKE' }))
+      })
+      await expectTerminalText(page, 'AFTER-WAKE')
+      await page.waitForTimeout(300)
+      expect(Math.abs((await scrollTop()) - target)).toBeLessThanOrEqual(2)
+
+      // Back at the bottom, the pin follows focus again: composer mode parks
+      // the prompt row below the fold, terminal mode brings it back.
+      await scroll().evaluate((el) => { el.scrollTop = el.scrollHeight })
+      await page.waitForTimeout(100)
+      await textarea.blur()
+      await textarea.focus()
+      await page.waitForTimeout(900)
+      const cellH = await cellHeight(page)
+      await expect.poll(() => scrollGap(page), { timeout: 5_000 }).toBeGreaterThanOrEqual(cellH - 2)
+      await page.getByTestId('terminal-area').click()
+      await expect.poll(() => scrollGap(page), { timeout: 5_000 }).toBeLessThan(4)
+    } finally {
+      await page.setViewportSize(MOBILE)
+      await killMobileSession(page, name).catch(() => {})
+    }
+  })
+
   test('only one input looks live', async ({ page }) => {
     await page.goto('/')
     const name = uniqueName('kb-live')

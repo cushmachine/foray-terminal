@@ -292,13 +292,15 @@ export function Terminal({
     }
     insetRef.current = bottomInset
 
-    // Switching between the Composer and the terminal re-pins: composer mode
-    // parks the prompt box below the fold, terminal mode brings it back.
+    // Switching between the Composer and the terminal moves the pin: composer
+    // mode parks the prompt box below the fold, terminal mode brings it back.
+    // Only a pinned view follows. Locking the phone or switching apps blurs
+    // and refocuses the input too, and a reader scrolled up must stay put.
     let pinRaf = 0
     const onFocusChange = () => {
       if (!COARSE) return
       cancelAnimationFrame(pinRaf)
-      pinRaf = requestAnimationFrame(() => { stickRef.current = true; scrollToBottom(true) })
+      pinRaf = requestAnimationFrame(() => { if (stickRef.current) scrollToBottom(true) })
     }
     document.addEventListener('focusin', onFocusChange)
     document.addEventListener('focusout', onFocusChange)
