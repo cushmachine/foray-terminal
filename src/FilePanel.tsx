@@ -285,7 +285,10 @@ export function FilePanel({ openFile, onOpenFile, onClose, isMobile, width, onRe
   }, [onClose])
 
   return (
-    <div data-testid="file-panel" style={{ display: 'flex', height: '100%', flexShrink: 0 }}>
+    // On a phone the panel must take the viewport width, not its content's
+    // max-content width: an unwrapped long line would otherwise widen the
+    // whole column and push the header buttons off-screen.
+    <div data-testid="file-panel" style={{ display: 'flex', height: '100%', flexShrink: 0, width: isMobile ? '100%' : undefined, minWidth: 0 }}>
       {!isMobile && <ResizeHandle onResize={handleResize} />}
       <div style={{
         width: isMobile ? '100%' : width,
@@ -304,6 +307,8 @@ export function FilePanel({ openFile, onOpenFile, onClose, isMobile, width, onRe
               padding: '8px 12px',
               borderBottom: '1px solid var(--border)',
               gap: 8,
+              overflow: 'hidden',
+              minWidth: 0,
             }}>
               <button
                 onClick={closePanel}
@@ -333,6 +338,7 @@ export function FilePanel({ openFile, onOpenFile, onClose, isMobile, width, onRe
               </span>
               {isMarkdown && fileContent !== undefined && (
                 <button
+                  data-testid="file-edit-toggle"
                   onClick={() => editing ? setEditing(false) : handleEdit()}
                   style={{
                     background: editing ? 'var(--accent-dim)' : 'transparent',
@@ -343,6 +349,7 @@ export function FilePanel({ openFile, onOpenFile, onClose, isMobile, width, onRe
                     borderRadius: 4,
                     cursor: 'pointer',
                     fontFamily: MONO_FONT,
+                    flexShrink: 0,
                   }}
                 >
                   {editing ? 'preview' : 'edit'}
@@ -360,6 +367,7 @@ export function FilePanel({ openFile, onOpenFile, onClose, isMobile, width, onRe
                   padding: '0 4px',
                   minWidth: isMobile ? 44 : undefined,
                   minHeight: isMobile ? 44 : undefined,
+                  flexShrink: 0,
                 }}
               >
                 ×

@@ -7,6 +7,7 @@ export function MarkdownRenderer({ content }: { content: string }) {
       lineHeight: 1.7,
       fontFamily: MONO_FONT,
       color: 'var(--text)',
+      overflowWrap: 'break-word',
     }}>
       {content.split('\n').map((line, i) => {
         if (line.startsWith('# ')) return (

@@ -64,6 +64,37 @@ test.describe('tablet', () => {
   })
 })
 
+test.describe('file panel on a phone', () => {
+  test.use({ viewport: MOBILE, isMobile: true, hasTouch: true })
+
+  test('edit and close buttons are visible when a .md file is open', async ({ page }) => {
+    await page.goto('/')
+    // On mobile the view switcher has "term | files" buttons (no test ID).
+    await page.getByRole('button', { name: 'files' }).click()
+    await expect(page.getByTestId('file-panel')).toBeVisible()
+    // Wait for the file tree to load, then tap a markdown file.
+    const mdFile = page.getByTestId('file-panel').getByRole('button', { name: /\.md$/ }).first()
+    await mdFile.click()
+    // toBeVisible() is satisfied by an element rendered far off the right
+    // edge, which is exactly the bug (an unwrapped long line widened the
+    // panel), so also assert both buttons sit inside the viewport.
+    const editBtn = page.getByTestId('file-edit-toggle')
+    await expect(editBtn).toBeVisible()
+    const editBox = await editBtn.boundingBox()
+    expect(editBox).not.toBeNull()
+    expect(editBox!.width).toBeGreaterThan(20)
+    expect(editBox!.x + editBox!.width).toBeLessThanOrEqual(MOBILE.width)
+    const closeBtn = page.getByRole('button', { name: 'Close file' })
+    await expect(closeBtn).toBeVisible()
+    const closeBox = await closeBtn.boundingBox()
+    expect(closeBox).not.toBeNull()
+    expect(closeBox!.width).toBeGreaterThan(10)
+    expect(closeBox!.x + closeBox!.width).toBeLessThanOrEqual(MOBILE.width)
+    const panel = await page.getByTestId('file-panel').boundingBox()
+    expect(panel!.width).toBeLessThanOrEqual(MOBILE.width)
+  })
+})
+
 test.describe('keyboard shortcuts', () => {
   test.use({ viewport: DESKTOP })
 
