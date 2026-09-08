@@ -137,8 +137,8 @@ export function App() {
   }, [])
 
   // Side panels go through resolvePanels so a tablet never shows both at
-  // once (AUDIT #6). A ref keeps the current state visible to the keyboard
-  // listener, which is installed once.
+  // once (the terminal would be squeezed to ~230px). A ref keeps the current
+  // state visible to the keyboard listener, which is installed once.
   const panelsRef = useRef({ sidebarOpen, filePanelOpen })
   panelsRef.current = { sidebarOpen, filePanelOpen }
   const applyPanelAction = useCallback((action: PanelAction) => {
@@ -147,7 +147,7 @@ export function App() {
     setFilePanelOpen(next.filePanelOpen)
   }, [])
 
-  // Keyboard shortcuts for the chrome (AUDIT #9). Captured on window so they
+  // Keyboard shortcuts for the chrome (sidebar, file panel). Captured on window so they
   // win over xterm, which otherwise swallows every key while focused.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -425,8 +425,7 @@ export function App() {
           />
         )}
 
-        {/* Key toolbar — CSS container query hides it when the keyboard
-            shrinks the layout on mobile (see styles.css). */}
+        {/* Key toolbar: always on touch layouts, opt-in on desktop (TopBar toggle). */}
         {toolbarVisible && (
           <KeyToolbar
             onSend={sendKeys}

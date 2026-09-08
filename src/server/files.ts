@@ -14,7 +14,7 @@ const ALWAYS_SKIP = new Set(['node_modules', '.git', 'dist', '.DS_Store'])
 const DEFAULT_MAX_DEPTH = 5
 
 // ---------------------------------------------------------------------------
-// .gitignore parsing (simple subset — see module doc in the task spec)
+// .gitignore parsing: a small subset (`*` globs matched against the basename and the relative path, trailing / for directories, ! negation)
 // ---------------------------------------------------------------------------
 
 interface GitignoreRule {

@@ -135,7 +135,6 @@ export function MarkdownEditor({ content, onChange, onSave, readOnly }: Markdown
       viewRef.current = null
     }
     // Only recreate when switching between files or read-only mode
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [readOnly, content])
 
   return (

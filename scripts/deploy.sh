@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
-# Deploy nest: restart it under pm2, applying ecosystem.config.cjs if that
-# changed. This is what `npm run deploy` runs.
+# Deploy nest: typecheck, then restart it under pm2, applying
+# ecosystem.config.cjs if that changed. This is what `npm run deploy` runs.
+#
+# The typecheck comes first because scripts/start.sh builds with vite alone
+# (no tsc) and would happily serve a bundle the types reject; failing here
+# leaves the running app untouched.
 #
 # pm2 re-reads only some options from the config on a restart (log format,
 # env) and silently keeps others (script, interpreter), so when the config
@@ -14,11 +18,23 @@ cd "$(dirname "$0")/.."
 APP=nest
 CONFIG=ecosystem.config.cjs
 
+if ! command -v pm2 >/dev/null 2>&1; then
+  echo "[deploy] pm2 is not installed; run install.sh or 'npm install -g pm2'" >&2
+  exit 1
+fi
+
+echo "[deploy] typechecking"
+npm run typecheck
+
+# pm2 jlist prints nothing useful when the daemon is not up yet; treat any
+# unparsable output as "not running" rather than aborting.
 started_ms=$(pm2 jlist 2>/dev/null | node -e '
-  const apps = JSON.parse(require("fs").readFileSync(0, "utf8"))
+  let apps = []
+  try { apps = JSON.parse(require("fs").readFileSync(0, "utf8")) } catch {}
   const app = apps.find((a) => a.name === process.argv[1])
   console.log(app ? app.pm2_env.pm_uptime : 0)
 ' "$APP")
+started_ms=${started_ms:-0}
 config_ms=$(( $(stat -c %Y "$CONFIG") * 1000 ))
 
 if [ "$started_ms" -eq 0 ]; then

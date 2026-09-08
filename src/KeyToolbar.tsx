@@ -57,7 +57,7 @@ export function KeyToolbar({
   const press = useRef<PressState | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
   const row = useRef<HTMLDivElement>(null)
-  // Which edges of the primary row hide more keys (AUDIT #5).
+  // Which edges of the primary row hide more keys, so a fade can hint that it scrolls.
   const [overflow, setOverflow] = useState({ left: false, right: false })
 
   useEffect(() => {

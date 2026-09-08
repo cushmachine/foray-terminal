@@ -1,7 +1,8 @@
 // PTY bridge: attaches to a tmux pane via node-pty.
 //
 // Each WebSocket client that views a terminal gets its own pty process
-// running `tmux attach-session -t nest:@{windowId}`.
+// running `tmux attach-session -t $<windowId>`: every Nest session is its own
+// tmux session, and windowId is that session's tmux id.
 
 import * as pty from 'node-pty'
 
@@ -31,8 +32,8 @@ const defaultSpawn: PtySpawner = (file, args, options) =>
   pty.spawn(file, args, options as pty.IPtyForkOptions)
 
 /**
- * Attach a pty to a specific tmux window in the "nest" session.
- * The pty runs `tmux attach-session -t nest:@{windowId}`.
+ * Attach a pty to a Nest session (a tmux session whose id is `windowId`).
+ * The pty runs `tmux attach-session -t $<windowId>`.
  * Data from the pty is forwarded through the onData callback.
  */
 export function attachToPane(

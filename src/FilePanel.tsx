@@ -253,7 +253,6 @@ export function FilePanel({ openFile, onOpenFile, onClose, isMobile, width, onRe
     // whether a fetch is needed, not to trigger one. Depending on it would
     // cause this to re-run (and loop) every time files:content/files:changed
     // update the cache.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openFile])
 
   const fileContent = openFile ? fileContents[openFile] : undefined

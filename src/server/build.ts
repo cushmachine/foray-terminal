@@ -8,10 +8,11 @@ import { readBuildIdFromHtml } from '../shared/build.ts'
 
 /**
  * `<short-sha>[-dirty]` for the checkout at `cwd`, or 'unknown' outside a
- * repo. Synchronous and meant to run once at startup: tsx loads the server
- * from source, so the commit at start is the code that is running until
- * the next restart. Untracked files count as dirty; dist/ is ignored by
- * git, so a fresh build alone never does.
+ * repo. Synchronous and meant to run once: at server startup (tsx loads the
+ * server from source, so the commit at start is the code that is running
+ * until the next restart) and once per client build (vite.config.ts).
+ * Untracked files count as dirty; dist/ is ignored by git, so a fresh build
+ * alone never does.
  */
 export function describeCheckout(cwd: string = process.cwd()): string {
   const git = (args: string[]): string =>

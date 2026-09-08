@@ -18,7 +18,7 @@ const BYPASS_PREFIXES = ['/ws', '/api/', '/health']
 
 /**
  * Whether a request is the worker's business. Pure so it can be tested
- * outside a worker (see src/__tests__/chunkM.test.ts).
+ * outside a worker (see src/__tests__/mobile.test.ts).
  * @param {URL} url
  * @param {string} method
  * @param {string} origin the worker's own origin
@@ -28,6 +28,34 @@ function shouldCache(url, method, origin) {
   if (url.origin !== origin) return false
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return false
   return !BYPASS_PREFIXES.some((prefix) => url.pathname === prefix || url.pathname.startsWith(prefix))
+}
+
+/**
+ * The hashed bundle files a built index.html loads. Every build renames
+ * them, so whatever an older page referenced is dead weight once a newer
+ * page has been fetched. Pure, like shouldCache.
+ * @param {string} html
+ * @returns {Set<string>} pathnames under /assets/
+ */
+function referencedAssets(html) {
+  const refs = new Set()
+  for (const match of html.matchAll(/\b(?:src|href)="(\/assets\/[^"]+)"/g)) refs.add(match[1])
+  return refs
+}
+
+/**
+ * Drop cached /assets/* entries the freshly fetched page no longer loads.
+ * Done after every successful navigation rather than on activate: this
+ * file seldom changes between builds, so activate would almost never run.
+ */
+async function evictStaleAssets(cache, html) {
+  const live = referencedAssets(html)
+  const keys = await cache.keys()
+  const stale = keys.filter((req) => {
+    const pathname = new URL(req.url).pathname
+    return pathname.startsWith('/assets/') && !live.has(pathname)
+  })
+  await Promise.all(stale.map((req) => cache.delete(req)))
 }
 
 function offlinePage() {
@@ -54,11 +82,19 @@ function offlinePage() {
   })
 }
 
-async function networkFirst(request) {
+async function networkFirst(event) {
+  const request = event.request
   const cache = await caches.open(CACHE)
   try {
     const response = await fetch(request)
-    if (response.ok) cache.put(request, response.clone())
+    if (response.ok) {
+      cache.put(request, response.clone())
+      if (request.mode === 'navigate') {
+        // waitUntil keeps the worker alive for the prune; the page is not
+        // held up because the response is returned right away.
+        event.waitUntil(response.clone().text().then((html) => evictStaleAssets(cache, html)))
+      }
+    }
     return response
   } catch (err) {
     const cached = await cache.match(request, { ignoreSearch: request.mode === 'navigate' })
@@ -92,8 +128,8 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url)
   if (!shouldCache(url, event.request.method, self.location.origin)) return
-  event.respondWith(networkFirst(event.request))
+  event.respondWith(networkFirst(event))
 })
 
 // Exposed for tests, which run this file in a stub worker scope.
-self.__nest = { shouldCache, CACHE, SHELL }
+self.__nest = { shouldCache, referencedAssets, CACHE, SHELL }

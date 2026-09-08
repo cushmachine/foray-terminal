@@ -93,7 +93,7 @@ export function readFontSize(raw: string | null | undefined, fallback: number): 
 }
 
 // ---------------------------------------------------------------------------
-// Side panels (AUDIT #6)
+// Side panels: exclusive on tablets so the terminal is never squeezed
 // ---------------------------------------------------------------------------
 
 /**
@@ -128,7 +128,7 @@ export function resolvePanels(state: PanelState, action: PanelAction, width: num
 }
 
 // ---------------------------------------------------------------------------
-// Key toolbar on desktop (AUDIT #10)
+// Key toolbar on desktop: off by default next to a physical keyboard
 // ---------------------------------------------------------------------------
 
 export const KEY_TOOLBAR_KEY = 'nest:keyToolbar'

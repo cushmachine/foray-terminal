@@ -12,7 +12,7 @@ interface TopBarProps {
   onSetMobileView: (view: MobileView) => void
   filePanelOpen: boolean
   onToggleFilePanel: () => void
-  /** Desktop only: whether the key toolbar is showing (AUDIT #10). */
+  /** Desktop only: whether the key toolbar is showing (off by default next to a physical keyboard). */
   toolbarVisible: boolean
   onToggleToolbar: () => void
 }

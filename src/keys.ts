@@ -132,7 +132,7 @@ export function repeatDelay(n: number): number {
 export const TAP_SLOP_PX = 10
 
 // ---------------------------------------------------------------------------
-// Keyboard shortcuts for the chrome (AUDIT #9)
+// Keyboard shortcuts for the chrome: toggle the sidebar and the file panel
 // ---------------------------------------------------------------------------
 
 export type ShortcutAction = 'toggle-sidebar' | 'toggle-files'
@@ -164,7 +164,7 @@ export function shortcutAction(e: ShortcutKey): ShortcutAction | null {
 }
 
 // ---------------------------------------------------------------------------
-// Toolbar overflow hint (AUDIT #5)
+// Toolbar overflow hint: edge fades that say the key row scrolls further
 // ---------------------------------------------------------------------------
 
 export interface ScrollMetrics {

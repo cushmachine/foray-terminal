@@ -6,7 +6,7 @@
 // up with holes. tmux's history buffer has every line, so the server reads
 // it from there and ships lines to the client as they land. These are the
 // pure decisions; the tmux calls and the per-connection state live in
-// tmux.ts and index.ts.
+// tmux.ts and ws-handler.ts.
 
 export interface PaneHistoryState {
   /** Lines currently in the pane's history (above the visible screen). */

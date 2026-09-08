@@ -5,10 +5,10 @@
 #   1. Installs system deps (tmux, build tools for node-pty)
 #   2. Installs Node.js 24 via nvm
 #   3. Clones the repo (or uses an existing checkout)
-#   4. Runs npm install && npm run build
+#   4. Runs npm install (dev deps included: prod runs with tsx and vite)
 #   5. Writes the tmux config Nest expects
-#   6. Creates a systemd service that starts Nest on boot
-#   7. Starts the service
+#   6. Installs pm2, deploys nest under it (npm run deploy), and registers
+#      pm2 with systemd so nest comes back after a reboot
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/cushmachine/nest/main/install.sh | bash
@@ -19,13 +19,14 @@
 #
 # Environment variables:
 #   NEST_DIR   — where to install (default: ~/nest)
-#   NEST_PORT  — port the server listens on (default: 3000)
-#   NEST_SKIP_SERVICE — set to 1 to skip systemd service creation (for Docker)
+#   NEST_SKIP_SERVICE — set to 1 to skip pm2 and the boot service (for Docker)
+#
+# The port is 3000, set in ecosystem.config.cjs.
 
 set -euo pipefail
 
 NEST_DIR="${NEST_DIR:-$HOME/nest}"
-NEST_PORT="${NEST_PORT:-3000}"
+NEST_PORT=3000
 NODE_MAJOR="24"
 
 info()  { printf '\033[1;32m→\033[0m %s\n' "$*"; }
@@ -89,13 +90,10 @@ fi
 
 cd "$NEST_DIR"
 
-# ---------- npm install + build ----------
+# ---------- npm install ----------
 
 info "Installing npm dependencies (includes compiling node-pty)..."
 npm install 2>&1 | tail -5
-
-info "Building client..."
-npm run build 2>&1 | tail -3
 
 # ---------- tmux config ----------
 
@@ -139,45 +137,32 @@ set -s extended-keys-format csi-u
 TMUX
 fi
 
-# ---------- systemd service ----------
+# ---------- pm2 + boot service ----------
 
 if [ "${NEST_SKIP_SERVICE:-0}" = "1" ]; then
-  info "Skipping systemd service (NEST_SKIP_SERVICE=1)."
+  info "Skipping pm2 and the boot service (NEST_SKIP_SERVICE=1)."
+  info "Start nest yourself with: npm run deploy"
 else
-  NODE_BIN="$(which node)"
-  TSX_BIN="$NEST_DIR/node_modules/.bin/tsx"
-  SERVICE_FILE="/etc/systemd/system/nest.service"
+  if ! command -v pm2 >/dev/null 2>&1; then
+    info "Installing pm2..."
+    npm install -g pm2 2>&1 | tail -1
+  fi
 
-  info "Creating systemd service..."
-  ${SUDO:+$SUDO} tee "$SERVICE_FILE" >/dev/null <<EOF
-[Unit]
-Description=Nest — terminal cockpit
-After=network.target
+  # Typechecks, then starts nest from ecosystem.config.cjs; pm2 runs
+  # scripts/start.sh, which builds the client and starts the server.
+  info "Deploying nest under pm2..."
+  npm run deploy
 
-[Service]
-Type=simple
-User=$(whoami)
-WorkingDirectory=$NEST_DIR
-Environment=NODE_ENV=production
-Environment=PORT=$NEST_PORT
-Environment=PATH=$(dirname "$NODE_BIN"):/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-ExecStart=$TSX_BIN $NEST_DIR/src/server/index.ts
-Restart=on-failure
-RestartSec=5
+  # `pm2 startup` normally prints a root command for the user to paste;
+  # run it directly. PATH is passed through so the unit finds this node.
+  info "Registering pm2 with systemd..."
+  ${SUDO:+$SUDO} env PATH="$PATH" "$(command -v pm2)" startup systemd -u "$(whoami)" --hp "$HOME" >/dev/null
+  pm2 save >/dev/null
 
-[Install]
-WantedBy=multi-user.target
-EOF
-
-  ${SUDO:+$SUDO} systemctl daemon-reload
-  ${SUDO:+$SUDO} systemctl enable nest >/dev/null 2>&1
-  ${SUDO:+$SUDO} systemctl restart nest
-
-  sleep 2
-  if ${SUDO:+$SUDO} systemctl is-active --quiet nest; then
+  if pm2 pid nest 2>/dev/null | grep -q '[1-9]'; then
     info "Nest is running on port $NEST_PORT."
   else
-    warn "Service failed to start. Check: journalctl -u nest"
+    warn "Nest did not start. Check: pm2 logs nest"
   fi
 fi
 

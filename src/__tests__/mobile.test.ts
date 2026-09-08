@@ -1,4 +1,4 @@
-// Mobile optimization tests (see MOBILE-PLAN.md).
+// Mobile optimization tests.
 //
 // Run with: npm run test:mobile
 // (executed directly via `tsx`, using node's built-in test runner)

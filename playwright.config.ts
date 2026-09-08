@@ -1,4 +1,4 @@
-// Visual and interaction regression suite (see AUDIT.md).
+// Visual and interaction regression suite: layout, sidebar, terminal, keyboard.
 //
 // Run with: npm run test:visual
 //
