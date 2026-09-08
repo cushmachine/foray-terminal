@@ -26,6 +26,7 @@ import path from 'node:path'
 import { startTestServer, tmpDir } from '../server/__tests__/helpers.ts'
 import {
   DEFAULT_MAX_UPLOAD_AGE_DAYS,
+  UPLOAD_SWEEP_INITIAL_DELAY_MS,
   purgeOldUploads,
   saveUpload,
   sniffImageType,
@@ -373,27 +374,44 @@ test('server sweeps the upload dir on its timer using maxUploadAgeDays', async (
   }
 })
 
-test('server does not sweep immediately at startup (protects a real ~/uploads during short test runs)', async () => {
+// The server's sweep timer runs on the test clock here: a minute of wall
+// time is a tick, and "never" is a very large one.
+test('server does not sweep immediately at startup (protects a real ~/uploads during short test runs)', async (t) => {
   const { tmp, uploadDir, old } = await makeAgedUploadDir()
+  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] })
   // Default interval (hours), so the first sweep is a minute out at the earliest.
-  const { close } = await startTestServer({ uploadDir, maxUploadAgeDays: 2 })
+  const server = await startTestServer({ uploadDir, maxUploadAgeDays: 2 })
+  let closed = false
+  const close = async (): Promise<void> => {
+    if (closed) return
+    closed = true
+    await server.close()
+  }
   try {
-    await new Promise((resolve) => setTimeout(resolve, 150))
-    assert.equal(await exists(old), true)
+    t.mock.timers.tick(UPLOAD_SWEEP_INITIAL_DELAY_MS - 1)
+    assert.equal(await exists(old), true, 'nothing is touched before the initial delay')
+    t.mock.timers.tick(1)
+    // The sweep is in flight. Its file work is real, so once the server
+    // (and the fake clock) are out of the way, poll for it on real timers.
+    await close()
+    t.mock.timers.reset()
+    await waitUntil(async () => !(await exists(old)))
   } finally {
     await close()
     await fs.rm(tmp, { recursive: true, force: true })
   }
 })
 
-test('server leaves the upload dir alone when maxUploadAgeDays is 0', async () => {
+test('server leaves the upload dir alone when maxUploadAgeDays is 0', async (t) => {
   const { tmp, uploadDir, old } = await makeAgedUploadDir()
+  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] })
   const { close } = await startTestServer({ uploadDir, maxUploadAgeDays: 0, uploadSweepIntervalMs: 20 })
   try {
-    await new Promise((resolve) => setTimeout(resolve, 150))
+    t.mock.timers.tick(DAY)
     assert.equal(await exists(old), true)
   } finally {
     await close()
+    t.mock.timers.reset()
     await fs.rm(tmp, { recursive: true, force: true })
   }
 })

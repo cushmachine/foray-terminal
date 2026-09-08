@@ -1,5 +1,6 @@
-// Connection lifecycle: message ordering, attach races, detach, pty exit,
-// kill, resize bursts, backpressure and early socket errors.
+// Connection lifecycle: message ordering, attach races, reconnects,
+// switching sessions, detach, pty exit, kill, resize bursts, backpressure
+// and early socket errors.
 //
 // Run with: npx tsx --test src/server/__tests__/connection.test.ts
 
@@ -9,7 +10,7 @@ import crypto from 'node:crypto'
 import net from 'node:net'
 import type { TmuxExecutor } from '../tmux.ts'
 import {
-  connect, fakeTmux, handleTestConnection, startTestServer, until, waitForType, type Msg,
+  connect, fakeTmux, handleTestConnection, startTestServer, until, waitForMessage, waitForType,
 } from './helpers.ts'
 
 // ---------------------------------------------------------------------------
@@ -107,6 +108,75 @@ test('closing mid-attach leaves no pty and no phantom owner', async () => {
     ws2.close()
   } finally {
     release()
+    await close()
+  }
+})
+
+// ---------------------------------------------------------------------------
+// Reconnect and switching sessions
+// ---------------------------------------------------------------------------
+
+// A phone's socket dies and the page dials again: the new connection's
+// attach starts the scrollback over (reset) and it is the window's only
+// client; the dead connection's pty is gone.
+test('a reconnect re-attaches with a fresh history and is the only owner', async () => {
+  const { url, close, tmux, ptys } = await startTestServer()
+  tmux.add('shell', { history: ['before'] })
+  try {
+    // An observer on its own socket sees the release the drop causes, so
+    // the reconnect below happens after the server has processed it.
+    const { ws: observer } = await connect(url)
+    const { ws: first } = await connect(url)
+    const firstHistory = waitForType(first, 'terminal:history')
+    first.send(JSON.stringify({ type: 'terminal:attach', windowId: 0 }))
+    assert.equal((await firstHistory).reset, true)
+    assert.equal(ptys.length, 1)
+
+    const released = waitForMessage(observer, (m) => m.type === 'session:ownership' && m.ownership.length === 0)
+    first.close()
+    await released
+    assert.equal(ptys[0].killed, true, 'the dropped connection\'s pty is killed')
+
+    const { ws: again, welcome } = await connect(url)
+    assert.equal(welcome.type, 'session:list')
+    const history = waitForType(again, 'terminal:history')
+    const ownership = waitForType(again, 'session:ownership')
+    again.send(JSON.stringify({ type: 'terminal:attach', windowId: 0 }))
+    assert.deepEqual(await history, { type: 'terminal:history', windowId: 0, lines: ['before'], reset: true })
+    assert.deepEqual((await ownership).ownership, [{ windowId: 0, clients: 1 }])
+    assert.deepEqual(ptys.map((p) => p.killed), [true, false], 'one live pty, on the new connection')
+    again.close()
+    observer.close()
+  } finally {
+    await close()
+  }
+})
+
+// Switching sessions on one device: the terminal that goes inactive
+// detaches, the one that becomes active attaches, and the device holds one
+// pty, not one per session it has looked at.
+test('switching sessions on one connection leaves exactly one live pty', async () => {
+  const { url, close, tmux, ptys } = await startTestServer()
+  tmux.add('a')
+  tmux.add('b')
+  try {
+    const { ws } = await connect(url)
+    const attachedA = waitForType(ws, 'terminal:history')
+    ws.send(JSON.stringify({ type: 'terminal:attach', windowId: 0 }))
+    await attachedA
+
+    const attachedB = waitForMessage(ws, (m) => m.type === 'terminal:history' && m.windowId === 1)
+    const ownership = waitForMessage(ws, (m) => m.type === 'session:ownership' && m.ownership.some((o: { windowId: number }) => o.windowId === 1))
+    ws.send(JSON.stringify({ type: 'terminal:detach', windowId: 0 }))
+    ws.send(JSON.stringify({ type: 'terminal:attach', windowId: 1 }))
+    await attachedB
+    assert.deepEqual((await ownership).ownership, [{ windowId: 1, clients: 1 }], 'only the new session is owned')
+
+    const live = ptys.filter((p) => !p.killed)
+    assert.deepEqual(live.map((p) => p.args), [['attach-session', '-t', '$1']], 'one live pty, for the session in view')
+    assert.equal(ptys[0].killed, true, 'the session switched away from lost its pty')
+    ws.close()
+  } finally {
     await close()
   }
 })

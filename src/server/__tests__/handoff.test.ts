@@ -188,12 +188,24 @@ test('a client that never answers protocol pings is terminated', async () => {
 test('a client that answers protocol pings stays connected across several ticks', async () => {
   const { url, close } = await startTestServer({ heartbeatIntervalMs: 30 })
   try {
-    const { ws } = await connect(url)
+    // The `ws` client surfaces the protocol pings it answers (the built-in
+    // WebSocket answers them silently), so the test can count ticks
+    // instead of guessing how long several of them take.
+    const ws = new WsClient(wsUrl(url))
+    await new Promise<void>((resolve, reject) => {
+      ws.once('message', () => resolve())
+      ws.once('error', reject)
+    })
     let closedEarly = false
-    ws.addEventListener('close', () => {
+    ws.once('close', () => {
       closedEarly = true
     })
-    await new Promise((resolve) => setTimeout(resolve, 200))
+    let pings = 0
+    await new Promise<void>((resolve) => {
+      ws.on('ping', () => {
+        if (++pings === 3) resolve()
+      })
+    })
     assert.equal(closedEarly, false, 'a responsive client must not be terminated')
     ws.close()
   } finally {

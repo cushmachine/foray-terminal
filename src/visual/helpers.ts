@@ -12,6 +12,13 @@
 // window.__nest.term so tests can read the screen buffer, which the WebGL
 // renderer does not expose in the DOM, and its actions as
 // window.__nest.actions (terminalRegistry.ts) so tests can type into it.
+//
+// Every page load lands on a session of the suite's own: global-setup.ts
+// creates nest_visual-seed and seeds nest:lastSession with its id through
+// the storageState in playwright.config.ts. Without that a fresh profile
+// opens the first session tmux lists, which is someone's live shell, and
+// attaching takes over their tab. Tests still create their own sessions
+// for anything they type or assert on.
 
 import { expect, type Page } from '@playwright/test'
 

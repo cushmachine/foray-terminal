@@ -10,7 +10,9 @@
 // not exist yet) must not stop the visual suite from running.
 // Sessions the tests create are real tmux sessions on this machine's
 // default tmux server, named nest_visual-*; global-teardown removes any
-// that a failed test left behind.
+// that a failed test left behind. global-setup creates one of them up
+// front and points every browser context's nest:lastSession at it (via
+// storageState), so a page load never attaches to someone's live session.
 
 import { defineConfig } from '@playwright/test'
 
@@ -18,10 +20,13 @@ import { defineConfig } from '@playwright/test'
 // (each gets its own build root and results directory).
 export const VISUAL_PORT = Number(process.env.VISUAL_PORT) || 3456
 const ROOT = `.playwright/root-${VISUAL_PORT}`
+// Written by global-setup; outside outputDir, which Playwright empties.
+const STORAGE_STATE = `.playwright/state-${VISUAL_PORT}.json`
 
 export default defineConfig({
   testDir: 'src/visual',
   testMatch: '**/*.spec.ts',
+  globalSetup: './src/visual/global-setup.ts',
   globalTeardown: './src/visual/global-teardown.ts',
   outputDir: `.playwright/results-${VISUAL_PORT}`,
   // Creating a session is a real tmux new-session plus an attach; on this
@@ -35,6 +40,7 @@ export default defineConfig({
   reporter: [['list']],
   use: {
     baseURL: `http://127.0.0.1:${VISUAL_PORT}`,
+    storageState: STORAGE_STATE,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     // Software WebGL so the xterm WebGL renderer can load headless.

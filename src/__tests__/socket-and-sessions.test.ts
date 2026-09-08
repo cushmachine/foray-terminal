@@ -10,7 +10,7 @@
 // around this tested core, so we drive the core directly here with a mock
 // WebSocket rather than trying to render components without a DOM.
 
-import { test } from 'node:test'
+import { test, type TestContext } from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
@@ -88,7 +88,15 @@ function makeManager(backoffMs = 5, options: Partial<SocketManagerOptions> = {})
   return { manager, instances }
 }
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+/**
+ * Put the manager's timers (backoff, heartbeat, pong and dial deadlines)
+ * under the test's control: `t.mock.timers.tick(ms)` then fires exactly
+ * what `ms` of wall time would, with no waiting. Restored when the test
+ * ends.
+ */
+function fakeTimers(t: TestContext): void {
+  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] })
+}
 
 const sentTypes = (sock: MockSocket) => sock.sent.map((raw) => JSON.parse(raw).type as string)
 
@@ -114,7 +122,8 @@ test('SocketManager: transitions to connected on open', () => {
   manager.close()
 })
 
-test('SocketManager: transitions to disconnected on close and schedules a reconnect', async () => {
+test('SocketManager: transitions to disconnected on close and schedules a reconnect', (t) => {
+  fakeTimers(t)
   const { manager, instances } = makeManager(5)
   instances[0].triggerOpen()
   assert.equal(manager.status, 'connected')
@@ -123,22 +132,23 @@ test('SocketManager: transitions to disconnected on close and schedules a reconn
   assert.equal(manager.status, 'disconnected')
   assert.equal(instances.length, 1, 'reconnect should be scheduled, not immediate')
 
-  // Wait past the (mocked, 5ms) backoff delay for the reconnect to fire.
-  await new Promise((resolve) => setTimeout(resolve, 40))
-
+  t.mock.timers.tick(4)
+  assert.equal(instances.length, 1, 'not before the (mocked, 5ms) backoff has elapsed')
+  t.mock.timers.tick(1)
   assert.equal(instances.length, 2, 'a new socket should have been created for the reconnect')
   assert.equal(manager.status, 'connecting')
 
   manager.close()
 })
 
-test('SocketManager: close() stops further reconnect attempts', async () => {
+test('SocketManager: close() stops further reconnect attempts', (t) => {
+  fakeTimers(t)
   const { manager, instances } = makeManager(5)
   instances[0].triggerOpen()
   instances[0].triggerClose()
 
   manager.close()
-  await new Promise((resolve) => setTimeout(resolve, 40))
+  t.mock.timers.tick(40)
 
   assert.equal(instances.length, 1, 'a closed manager should not reconnect')
 })
@@ -394,18 +404,22 @@ test('SocketManager.onMessage: delivers parsed server messages and supports unsu
 // Test 4: heartbeat — pings while connected, drops a silent socket
 // ---------------------------------------------------------------------------
 
-test('SocketManager heartbeat: sends ping on the interval once connected', async () => {
+test('SocketManager heartbeat: sends ping on the interval once connected', (t) => {
+  fakeTimers(t)
   const { manager, instances } = makeManager(5, { heartbeatIntervalMs: 10, heartbeatTimeoutMs: 1000 })
   const sock = instances[0]
   sock.triggerOpen()
 
-  await sleep(25)
-  assert.ok(sentTypes(sock).includes('ping'), 'a ping should have gone out')
+  t.mock.timers.tick(9)
+  assert.deepEqual(sentTypes(sock), [], 'nothing before the first interval')
+  t.mock.timers.tick(1)
+  assert.deepEqual(sentTypes(sock), ['ping'], 'a ping should have gone out')
 
   manager.close()
 })
 
-test('SocketManager heartbeat: a pong keeps the connection alive', async () => {
+test('SocketManager heartbeat: a pong keeps the connection alive', (t) => {
+  fakeTimers(t)
   const { manager, instances } = makeManager(5, { heartbeatIntervalMs: 10, heartbeatTimeoutMs: 15 })
   const sock = instances[0]
   sock.triggerOpen()
@@ -416,20 +430,26 @@ test('SocketManager heartbeat: a pong keeps the connection alive', async () => {
     if (JSON.parse(data).type === 'ping') sock.triggerMessage({ type: 'pong' })
   }
 
-  await sleep(60)
+  t.mock.timers.tick(60)
+  assert.equal(sentTypes(sock).filter((type) => type === 'ping').length, 6, 'one ping per interval')
   assert.equal(instances.length, 1, 'a socket that answers pings should not be replaced')
   assert.equal(manager.status, 'connected')
 
   manager.close()
 })
 
-test('SocketManager heartbeat: no pong within the timeout drops the socket and reconnects at once', async () => {
+test('SocketManager heartbeat: no pong within the timeout drops the socket and reconnects at once', (t) => {
+  fakeTimers(t)
   const { manager, instances } = makeManager(1000, { heartbeatIntervalMs: 10, heartbeatTimeoutMs: 10 })
   const sock = instances[0]
   sock.triggerOpen()
 
-  await sleep(40)
-  assert.ok(instances.length >= 2, 'a silent socket should have been replaced')
+  t.mock.timers.tick(10)
+  assert.deepEqual(sentTypes(sock), ['ping'])
+  t.mock.timers.tick(9)
+  assert.equal(instances.length, 1, 'the pong deadline has not passed yet')
+  t.mock.timers.tick(1)
+  assert.equal(instances.length, 2, 'a silent socket should have been replaced')
   assert.equal(instances[0], sock)
   assert.equal(manager.status, 'connecting', 'reconnect should not wait for the (1s) backoff')
 
@@ -493,13 +513,16 @@ test('SocketManager.reconnectNow: after close() does nothing', () => {
 // Test 6: connect timeout — a dial that never opens is abandoned and retried
 // ---------------------------------------------------------------------------
 
-test('SocketManager connect timeout: a dial that never opens is abandoned and redialed', async () => {
+test('SocketManager connect timeout: a dial that never opens is abandoned and redialed', (t) => {
+  fakeTimers(t)
   const { manager, instances } = makeManager(5, { connectTimeoutMs: 10 })
   assert.equal(instances.length, 1)
   assert.equal(manager.status, 'connecting')
 
-  await sleep(60)
-  assert.ok(instances.length >= 2, 'the hung dial should have been replaced')
+  t.mock.timers.tick(10)
+  assert.equal(manager.status, 'disconnected', 'the hung dial is abandoned at the deadline')
+  t.mock.timers.tick(5)
+  assert.equal(instances.length, 2, 'the hung dial should have been replaced after the backoff')
   assert.equal(instances[0].readyState, CLOSED, 'the hung socket should have been closed')
   assert.equal(instances[0].onopen, null, 'the hung socket should be detached')
 
@@ -510,20 +533,22 @@ test('SocketManager connect timeout: a dial that never opens is abandoned and re
   manager.close()
 })
 
-test('SocketManager connect timeout: cleared once the dial opens', async () => {
+test('SocketManager connect timeout: cleared once the dial opens', (t) => {
+  fakeTimers(t)
   const { manager, instances } = makeManager(5, { connectTimeoutMs: 10 })
   instances[0].triggerOpen()
-  await sleep(40)
+  t.mock.timers.tick(40)
   assert.equal(instances.length, 1, 'an open socket must not be abandoned')
   assert.equal(manager.status, 'connected')
 
   manager.close()
 })
 
-test('SocketManager connect timeout: close() cancels a pending dial timer', async () => {
+test('SocketManager connect timeout: close() cancels a pending dial timer', (t) => {
+  fakeTimers(t)
   const { manager, instances } = makeManager(5, { connectTimeoutMs: 10 })
   manager.close()
-  await sleep(40)
+  t.mock.timers.tick(40)
   assert.equal(instances.length, 1)
 })
 
@@ -560,7 +585,8 @@ test('SocketManager.reconnectNow: mid-dial, leaves a fresh dial alone', () => {
 // Test 8: wake probe — coming back to the foreground judges the socket fast
 // ---------------------------------------------------------------------------
 
-test('SocketManager.reconnectNow: while connected, a dead socket is replaced within the wake timeout', async () => {
+test('SocketManager.reconnectNow: while connected, a dead socket is replaced within the wake timeout', (t) => {
+  fakeTimers(t)
   const { manager, instances } = makeManager(1000, {
     heartbeatIntervalMs: 0, heartbeatTimeoutMs: 10_000, wakeProbeTimeoutMs: 10,
   })
@@ -569,28 +595,30 @@ test('SocketManager.reconnectNow: while connected, a dead socket is replaced wit
 
   manager.reconnectNow()
   assert.deepEqual(sentTypes(sock), ['ping'])
-  await sleep(40)
+  t.mock.timers.tick(10)
   assert.equal(instances.length, 2, 'no pong within the wake timeout should replace the socket')
   assert.equal(manager.status, 'connecting', 'the redial should skip the backoff')
 
   manager.close()
 })
 
-test('SocketManager.reconnectNow: while connected, a pong keeps the socket', async () => {
+test('SocketManager.reconnectNow: while connected, a pong keeps the socket', (t) => {
+  fakeTimers(t)
   const { manager, instances } = makeManager(5, { heartbeatIntervalMs: 0, wakeProbeTimeoutMs: 10 })
   const sock = instances[0]
   sock.triggerOpen()
 
   manager.reconnectNow()
   sock.triggerMessage({ type: 'pong' })
-  await sleep(40)
+  t.mock.timers.tick(40)
   assert.equal(instances.length, 1)
   assert.equal(manager.status, 'connected')
 
   manager.close()
 })
 
-test('SocketManager.reconnectNow: the wake probe shortens a pong deadline already running', async () => {
+test('SocketManager.reconnectNow: the wake probe shortens a pong deadline already running', (t) => {
+  fakeTimers(t)
   const { manager, instances } = makeManager(5, {
     heartbeatIntervalMs: 0, heartbeatTimeoutMs: 10_000, wakeProbeTimeoutMs: 10,
   })
@@ -602,7 +630,7 @@ test('SocketManager.reconnectNow: the wake probe shortens a pong deadline alread
 
   // ...then the page wakes: the short deadline takes over.
   manager.reconnectNow()
-  await sleep(40)
+  t.mock.timers.tick(10)
   assert.equal(instances.length, 2, 'the wake deadline should have replaced the socket')
 
   manager.close()
@@ -612,16 +640,18 @@ test('SocketManager.reconnectNow: the wake probe shortens a pong deadline alread
 // Test 9: pause — a hidden page stops judging its socket
 // ---------------------------------------------------------------------------
 
-test('SocketManager.pause: stops the heartbeat and forgets a pending pong deadline', async () => {
+test('SocketManager.pause: stops the heartbeat and forgets a pending pong deadline', (t) => {
+  fakeTimers(t)
   const { manager, instances } = makeManager(5, { heartbeatIntervalMs: 10, heartbeatTimeoutMs: 10 })
   const sock = instances[0]
   sock.triggerOpen()
-  await sleep(15)
-  assert.ok(sentTypes(sock).includes('ping'), 'the heartbeat should be running before the pause')
+  t.mock.timers.tick(10)
+  assert.deepEqual(sentTypes(sock), ['ping'], 'the heartbeat should be running before the pause')
 
+  // Paused with that ping's pong deadline still open.
   manager.pause()
   const pingsAtPause = sock.sent.length
-  await sleep(50)
+  t.mock.timers.tick(50)
   assert.equal(instances.length, 1, 'a paused manager must not condemn the socket')
   assert.equal(sock.sent.length, pingsAtPause, 'no pings while paused')
   assert.equal(manager.status, 'connected')
@@ -629,7 +659,8 @@ test('SocketManager.pause: stops the heartbeat and forgets a pending pong deadli
   manager.close()
 })
 
-test('SocketManager.pause: reconnectNow resumes the heartbeat', async () => {
+test('SocketManager.pause: reconnectNow resumes the heartbeat', (t) => {
+  fakeTimers(t)
   const { manager, instances } = makeManager(5, { heartbeatIntervalMs: 10, heartbeatTimeoutMs: 1000, wakeProbeTimeoutMs: 1000 })
   const sock = instances[0]
   sock.triggerOpen()
@@ -639,17 +670,18 @@ test('SocketManager.pause: reconnectNow resumes the heartbeat', async () => {
   manager.reconnectNow()
   assert.deepEqual(sentTypes(sock), ['ping'], 'the wake probe goes out at once')
   sock.triggerMessage({ type: 'pong' })
-  await sleep(25)
-  assert.ok(sock.sent.length >= 2, 'the heartbeat should tick again after the wake')
+  t.mock.timers.tick(10)
+  assert.deepEqual(sentTypes(sock), ['ping', 'ping'], 'the heartbeat should tick again after the wake')
 
   manager.close()
 })
 
-test('SocketManager.pause: a socket that opens while paused does not start the heartbeat', async () => {
+test('SocketManager.pause: a socket that opens while paused does not start the heartbeat', (t) => {
+  fakeTimers(t)
   const { manager, instances } = makeManager(5, { heartbeatIntervalMs: 10, heartbeatTimeoutMs: 10 })
   manager.pause()
   instances[0].triggerOpen()
-  await sleep(50)
+  t.mock.timers.tick(50)
   assert.equal(instances.length, 1)
   assert.deepEqual(sentTypes(instances[0]), [])
 
