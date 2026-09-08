@@ -10,9 +10,12 @@ import fs from 'node:fs/promises'
 import type http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
+import { EventEmitter } from 'node:events'
+import type { WebSocket as ServerSocket } from 'ws'
 import { startServer, type ServerOptions } from '../index.ts'
 import { SEP, type TmuxExecutor } from '../tmux.ts'
 import type { PtySpawner } from '../pty-bridge.ts'
+import { handleConnection, type ConnectionDeps, type Logger } from '../ws-handler.ts'
 
 /** A parsed protocol message; the fields beyond `type` are whatever it carries. */
 export type Msg = { type: string } & Record<string, any>
@@ -20,6 +23,20 @@ export type Msg = { type: string } & Record<string, any>
 /** A fresh temp directory; the caller removes it. */
 export function tmpDir(prefix = 'nest-test-'): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix))
+}
+
+/** Poll `condition` until it holds; rejects naming `what` after `timeoutMs`. */
+export async function until(
+  condition: () => boolean,
+  what = 'the condition',
+  timeoutMs = 2000,
+  intervalMs = 5,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  while (!condition()) {
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`)
+    await new Promise((resolve) => setTimeout(resolve, intervalMs))
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -142,8 +159,14 @@ export interface FakePty {
   writes: string[]
   resizes: Array<{ cols: number; rows: number }>
   killed: boolean
+  /** How often the server asked the pty to stop reading (backpressure). */
+  pauses: number
+  /** How often the server asked it to read again. */
+  resumes: number
   /** Deliver output as if the pane printed it. */
   emit(data: string): void
+  /** End the pty as if `tmux attach` exited with `code`. */
+  exit(code: number): void
 }
 
 /** A spawner whose ptys record what the server does to them. */
@@ -151,6 +174,7 @@ export function fakePtySpawner(): { spawner: PtySpawner; ptys: FakePty[] } {
   const ptys: FakePty[] = []
   const spawner: PtySpawner = (file, args, options) => {
     let onData: (data: string) => void = () => {}
+    let onExit: (event: { exitCode: number }) => void = () => {}
     const pty: FakePty = {
       file,
       args,
@@ -159,23 +183,39 @@ export function fakePtySpawner(): { spawner: PtySpawner; ptys: FakePty[] } {
       writes: [],
       resizes: [],
       killed: false,
+      pauses: 0,
+      resumes: 0,
       emit: (data) => onData(data),
+      exit: (exitCode) => onExit({ exitCode }),
     }
     ptys.push(pty)
-    return {
-      onData: (cb) => {
+    // The extra members mirror node-pty's IPty (pause, resume, onExit) so a
+    // bridge that grows into them finds the fake ready; a bare PtyProcess
+    // return would flag them as excess properties.
+    const proc = {
+      onData: (cb: (data: string) => void) => {
         onData = cb
       },
-      write: (data) => {
+      onExit: (cb: (event: { exitCode: number }) => void) => {
+        onExit = cb
+      },
+      write: (data: string) => {
         pty.writes.push(data)
       },
-      resize: (cols, rows) => {
+      resize: (cols: number, rows: number) => {
         pty.resizes.push({ cols, rows })
       },
       kill: () => {
         pty.killed = true
       },
+      pause: () => {
+        pty.pauses++
+      },
+      resume: () => {
+        pty.resumes++
+      },
     }
+    return proc
   }
   return { spawner, ptys }
 }
@@ -209,6 +249,86 @@ export async function startTestServer(options: ServerOptions = {}): Promise<Test
     ...options,
   })
   return { url: started.url, server: started.server, close: started.close, tmux, ptys }
+}
+
+// ---------------------------------------------------------------------------
+// Direct ws-handler harness
+// ---------------------------------------------------------------------------
+
+/** Stand-in for the server-side `ws` socket handleConnection listens on. */
+export interface FakeSocket extends EventEmitter {
+  /** Bytes queued on the socket, as the real `ws` reports them; tests set it. */
+  bufferedAmount: number
+  /** Deliver a client message as if it arrived on the wire. */
+  receive(msg: object): void
+}
+
+export interface HandledConnection {
+  socket: FakeSocket
+  /** Messages sent to this client, in order. */
+  sent: Msg[]
+  /** Messages broadcast to every client, in order. */
+  broadcasts: Msg[]
+  /** Arguments of every logger.error call. */
+  errors: unknown[][]
+  tmux: FakeTmux
+  ptys: FakePty[]
+  /** Window ids handed to claimWindow, in order. */
+  claimed: number[]
+  /** How often releaseAllWindows was called. */
+  released: number
+}
+
+/**
+ * Run handleConnection against a fake socket, fake tmux and recording
+ * ptys, so a suite can drive one connection's handler directly and see
+ * what it sends, logs and does to its ptys. Ownership callbacks only
+ * record; there is no other connection to hand off to.
+ */
+export function handleTestConnection(overrides: Partial<ConnectionDeps> = {}): HandledConnection {
+  const tmux = fakeTmux()
+  const { spawner, ptys } = fakePtySpawner()
+  const sent: Msg[] = []
+  const broadcasts: Msg[] = []
+  const errors: unknown[][] = []
+  const claimed: number[] = []
+  const emitter = new EventEmitter()
+  const socket: FakeSocket = Object.assign(emitter, {
+    bufferedAmount: 0,
+    receive: (msg: object) => {
+      emitter.emit('message', Buffer.from(JSON.stringify(msg)))
+    },
+  })
+  const logger: Logger = {
+    log: () => {},
+    error: (...args) => {
+      errors.push(args)
+    },
+  }
+  const conn: HandledConnection = { socket, sent, broadcasts, errors, tmux, ptys, claimed, released: 0 }
+  handleConnection(socket as unknown as ServerSocket, {
+    remoteAddress: 'test',
+    send: (msg) => {
+      sent.push(msg as Msg)
+    },
+    broadcast: (msg) => {
+      broadcasts.push(msg as Msg)
+    },
+    ptySpawner: spawner,
+    tmuxExec: tmux.exec,
+    logger,
+    claimWindow: (windowId) => {
+      claimed.push(windowId)
+    },
+    releaseAllWindows: () => {
+      conn.released++
+    },
+    userAgent: 'test',
+    serverBuild: 'test',
+    servedClientBuild: async () => null,
+    ...overrides,
+  })
+  return conn
 }
 
 // ---------------------------------------------------------------------------
