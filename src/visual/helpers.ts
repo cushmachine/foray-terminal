@@ -83,7 +83,12 @@ export async function killSession(page: Page, name: string): Promise<void> {
 /** Open the drawer on a mobile viewport. */
 export async function openDrawer(page: Page): Promise<void> {
   await page.getByTestId('sidebar-toggle').click()
-  await expect(page.getByTestId('sidebar')).toBeVisible()
+  const drawer = page.getByTestId('sidebar')
+  await expect(drawer).toBeVisible()
+  // Visible flips at once, but the drawer is still sliding in for 0.2s;
+  // a boundingBox read from the moving composited layer comes back a
+  // float32 ulp short (43.99998 for a 44px target). Let the slide finish.
+  await drawer.evaluate((el) => Promise.allSettled(el.getAnimations().map((a) => a.finished)))
 }
 
 type NestActions = { sendKeys(data: string): void; submit(text: string): void }
