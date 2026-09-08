@@ -16,6 +16,7 @@ import { MONO_FONT, THEME } from './theme'
 import { joinWrapped } from './links'
 import { linkifyRows } from './linkify'
 import { snapshotText } from './selectMode'
+import { ANCHOR_ROWS, findAnchorRow, type RowAnchor } from './scrollAnchor'
 
 interface TerminalProps {
   windowId: number
@@ -316,6 +317,44 @@ export function Terminal({
       return joinWrapped(rows)
     }
 
+    // Content-relative scroll position, taken before a history swap (see
+    // scrollAnchor.ts). Null when pinned: the bottom follows on its own.
+    type ScrollAnchor = { kind: 'row'; row: RowAnchor } | { kind: 'screen'; offset: number }
+    const contentTop = (el: Element): number =>
+      el.getBoundingClientRect().top - scrollEl.getBoundingClientRect().top + scrollEl.scrollTop
+    const rowText = (row: Element): string => (row.textContent === '\u00a0' ? '' : row.textContent ?? '')
+    const captureAnchor = (): ScrollAnchor | null => {
+      if (stickRef.current) return null
+      const top = scrollEl.scrollTop
+      const rows = historyEl.children
+      // First history row whose bottom edge is below the viewport top.
+      let lo = 0
+      let hi = rows.length
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1
+        const el = rows[mid]
+        if (contentTop(el) + el.getBoundingClientRect().height > top) hi = mid
+        else lo = mid + 1
+      }
+      if (lo >= rows.length) return { kind: 'screen', offset: top - contentTop(container) }
+      const texts: string[] = []
+      for (let i = lo; i < rows.length && texts.length < ANCHOR_ROWS; i++) texts.push(rowText(rows[i]))
+      return { kind: 'row', row: { index: lo, texts, offset: top - contentTop(rows[lo]) } }
+    }
+    const restoreAnchor = (anchor: ScrollAnchor) => {
+      if (anchor.kind === 'screen') {
+        scrollEl.scrollTop = contentTop(container) + anchor.offset
+        return
+      }
+      const rows = historyEl.children
+      const texts = Array.from(rows, rowText)
+      const i = findAnchorRow(texts, anchor.row)
+      // Not found (trimmed away, or the history changed shape): the pixel
+      // position stands, which is what happened before anchoring existed.
+      if (i < 0) return
+      scrollEl.scrollTop = contentTop(rows[i]) + anchor.row.offset
+    }
+
     const appendHistoryLines = (lines: string[]) => {
       if (lines.length === 0) return
       const frag = document.createDocumentFragment()
@@ -345,10 +384,14 @@ export function Terminal({
       }
       if (msg.type === 'terminal:history') {
         if (msg.reset) {
+          const anchor = captureAnchor()
           historyEl.replaceChildren()
           historyCount = 0
+          appendHistoryLines(msg.lines)
+          if (anchor) restoreAnchor(anchor)
+        } else {
+          appendHistoryLines(msg.lines)
         }
-        appendHistoryLines(msg.lines)
       }
       if (msg.type === 'terminal:detached') {
         setDetached(true)

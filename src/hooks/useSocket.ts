@@ -191,9 +191,21 @@ export class SocketManager {
     }
   }
 
+  /** Earliest time the next dial may start; set by dropForTest. */
+  private holdUntil = 0
+
+  /**
+   * Test hook: lose the socket the way a sleeping phone does, and hold the
+   * reconnect off for `holdMs` so a test can change the pane meanwhile.
+   */
+  dropForTest(holdMs = 0): void {
+    this.holdUntil = this.now() + holdMs
+    this.ws?.close()
+  }
+
   private scheduleReconnect(): void {
     if (this.closed) return
-    const delay = this.backoff(this.reconnectAttempt)
+    const delay = Math.max(this.backoff(this.reconnectAttempt), this.holdUntil - this.now())
     this.reconnectAttempt += 1
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null
@@ -380,6 +392,9 @@ export function useSocket(): UseSocketReturn {
   useEffect(() => {
     const manager = new SocketManager(socketUrl())
     managerRef.current = manager
+    // Test hook (see SocketManager.dropForTest).
+    const w = window as unknown as { __nestSocket?: { drop: (holdMs?: number) => void } }
+    w.__nestSocket = { drop: (holdMs) => manager.dropForTest(holdMs) }
     setStatus(manager.status)
     const unsubscribe = manager.onStatusChange(setStatus)
 
@@ -404,6 +419,7 @@ export function useSocket(): UseSocketReturn {
       unsubscribe()
       manager.close()
       managerRef.current = null
+      delete w.__nestSocket
     }
   }, [])
 
