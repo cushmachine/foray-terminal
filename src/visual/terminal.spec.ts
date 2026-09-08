@@ -1,4 +1,4 @@
-// Terminal: AUDIT.md items 2, 17, 18.
+// Terminal: WebGL renderer, copy to clipboard, Shift+Enter passthrough.
 import { test, expect } from '@playwright/test'
 import { DESKTOP, createSession, expectTerminalReady, expectTerminalText, killSession, terminalScreen, uniqueName } from './helpers.ts'
 

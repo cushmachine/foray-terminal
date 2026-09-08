@@ -1,4 +1,4 @@
-// sortSessions: AUDIT.md item 4.
+// sortSessions: natural order so bash-2 sorts before bash-10.
 //
 // Run with: npx tsx --test src/__tests__/sessions-sort.test.ts
 

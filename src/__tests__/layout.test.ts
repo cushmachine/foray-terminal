@@ -1,4 +1,4 @@
-// Pure helpers behind AUDIT.md items 5, 6, 9, 10.
+// Pure helpers behind the chrome: overflow hint, panel exclusivity, shortcuts, toolbar visibility.
 //
 // Run with: npx tsx --test src/__tests__/layout.test.ts
 
