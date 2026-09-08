@@ -14,7 +14,7 @@ import assert from 'node:assert/strict'
 import type { ClientMessage } from '../../shared/protocol.ts'
 import { ClientError, safeErrorMessage } from '../errors.ts'
 import { validateMessage } from '../ws-handler.ts'
-import { handleTestConnection, until, type HandledConnection, type Msg } from './helpers.ts'
+import { fakeTmux, handleTestConnection, until, type HandledConnection, type Msg } from './helpers.ts'
 
 // ---------------------------------------------------------------------------
 // validateMessage
@@ -360,28 +360,40 @@ test('session:rename broadcasts the new name and marks the session named', async
   conn.socket.emit('close')
 })
 
-test('session:rename to an empty name is refused with a message for the user', async () => {
+test('session:rename to an empty or blank name is refused with a message for the user', async () => {
   const conn = handleTestConnection()
   conn.tmux.add('shell')
   await handled(conn, { type: 'session:rename', windowId: 0, name: '' })
-  assert.deepEqual(sentOf(conn, 'error'), [
-    { type: 'error', message: 'Invalid session name', request: 'session:rename', windowId: 0 },
-  ])
+  await handled(conn, { type: 'session:rename', windowId: 0, name: '   ' })
+  const refused = { type: 'error', message: 'Invalid session name', request: 'session:rename', windowId: 0 }
+  assert.deepEqual(sentOf(conn, 'error'), [refused, refused])
   assert.deepEqual(conn.broadcasts, [])
   assert.equal(conn.tmux.sessions.get(0)?.name, 'nest_shell', 'the session keeps its name')
   conn.socket.emit('close')
 })
 
-test('session:kill removes the tmux session, drops this connection\'s attachment, and broadcasts', async () => {
-  const conn = handleTestConnection()
-  conn.tmux.add('shell')
-  conn.tmux.add('other')
+test('session:kill drops the attachments, then removes the tmux session, then broadcasts', async () => {
+  const tmux = fakeTmux()
+  tmux.add('shell')
+  tmux.add('other')
+  // Whether the pty was already gone when tmux was told to kill the session.
+  let ptyKilledFirst: boolean | null = null
+  const conn = handleTestConnection({
+    tmuxExec: (cmd, args) => {
+      if (args[0] === 'kill-session') ptyKilledFirst = conn.ptys[0].killed
+      return tmux.exec(cmd, args)
+    },
+  })
   await attached(conn, 0)
   await attached(conn, 1)
   await handled(conn, { type: 'session:kill', windowId: 0 })
   assert.deepEqual(conn.broadcasts, [{ type: 'session:killed', windowId: 0 }])
-  assert.equal(conn.tmux.sessions.has(0), false)
+  assert.equal(tmux.sessions.has(0), false)
   assert.equal(conn.ptys[0].killed, true, 'the attachment to the killed window is gone')
+  // The pty would see tmux end the session and report it as an exit; with
+  // the pty gone first the client only ever hears session:killed.
+  assert.equal(ptyKilledFirst, true, 'the pty is killed before tmux is asked to kill the session')
+  assert.deepEqual(sentOf(conn, 'terminal:exited'), [], 'the kill is not reported as the pty exiting')
   assert.equal(conn.ptys[1].killed, false, 'the other window is untouched')
   // Nothing to type into any more.
   await handled(conn, { type: 'terminal:input', windowId: 0, data: 'late' })
@@ -467,6 +479,35 @@ test('errors: a failed attach reports against the window, releases it, and leave
   assert.equal(conn.errors.length, 1, 'the spawn failure is logged in full')
   await handled(conn, { type: 'terminal:detach', windowId: 0 })
   assert.deepEqual(conn.releasedWindows, [0, 0], 'a detach for it only releases; there is nothing to kill')
+  conn.socket.emit('close')
+})
+
+test('errors: an attach to a window tmux does not have is refused before anything is spawned', async () => {
+  const conn = handleTestConnection()
+  conn.tmux.add('shell')
+  await handled(conn, { type: 'terminal:attach', windowId: 5 })
+  assert.deepEqual(sentOf(conn, 'error'), [
+    { type: 'error', message: 'Session not found', request: 'terminal:attach', windowId: 5 },
+  ])
+  assert.deepEqual(conn.ptys, [], 'no pty is spawned for a window that is gone')
+  assert.deepEqual(conn.claimed, [], 'nothing was claimed')
+  assert.deepEqual(sentOf(conn, 'terminal:exited'), [], 'and the window is not reported as having ended')
+  assert.deepEqual(conn.errors, [], 'a window that is gone is not an operator error')
+  conn.socket.emit('close')
+})
+
+test('errors: a re-attach to a window that has since died drops the old attachment and releases it', async () => {
+  const conn = handleTestConnection()
+  conn.tmux.add('shell')
+  await attached(conn, 0)
+  conn.tmux.sessions.delete(0)
+  await handled(conn, { type: 'terminal:attach', windowId: 0 })
+  assert.deepEqual(sentOf(conn, 'error').map((e) => e.message), ['Session not found'])
+  assert.equal(conn.ptys.length, 1, 'no second pty')
+  assert.equal(conn.ptys[0].killed, true, 'the first attachment is gone')
+  assert.deepEqual(conn.releasedWindows, [0], 'and its ownership with it')
+  await handled(conn, { type: 'terminal:input', windowId: 0, data: 'late' })
+  assert.deepEqual(conn.ptys[0].writes, [], 'nothing is written to the dead attachment')
   conn.socket.emit('close')
 })
 

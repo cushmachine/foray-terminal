@@ -55,11 +55,13 @@ const SHELLS = new Set(['bash', 'zsh', 'sh', 'fish', 'dash'])
 
 /**
  * The tmux session name for a user-facing session name. tmux rejects '.'
- * and ':' (they are target syntax), so both become '-'. Create and rename
- * go through here so the same input always lands on the same name.
+ * and ':' (they are target syntax), so both become '-'; surrounding
+ * whitespace is dropped, and a name with nothing left is refused. Create
+ * and rename go through here so the same input always lands on the same
+ * name.
  */
 export function sessionNameFor(name: string): string {
-  const safe = name.replace(/[.:]/g, '-')
+  const safe = name.trim().replace(/[.:]/g, '-')
   if (!safe) throw new ClientError('Invalid session name')
   return `${PREFIX}${safe}`
 }
@@ -72,6 +74,9 @@ function failureMentions(err: unknown, text: string): boolean {
 
 /** True when tmux failed because its server is not running (no sessions at all). */
 const isNoServer = (err: unknown): boolean => failureMentions(err, 'no server running')
+
+/** True when tmux failed because the target session is gone (or the whole server with it). */
+const isMissingTarget = (err: unknown): boolean => failureMentions(err, "can't find") || isNoServer(err)
 
 const isDuplicate = (err: unknown): boolean => failureMentions(err, 'duplicate session')
 
@@ -157,6 +162,9 @@ export async function createWindow(
       if (name) {
         await exec('tmux', ['set', '-t', actualName, NAMED_OPTION, '1']).catch(() => {})
       }
+      // The server is up now, whether or not a listing has shown it yet; a
+      // server that started with this session has none of the options.
+      await enableExtendedKeys(exec)
 
       const parsed = parseLine(stdout.trim(), hostname)
       if (!parsed) throw new Error(`Failed to parse new session output: ${stdout}`)
@@ -178,17 +186,17 @@ export async function createWindow(
  * as ESC[13;2u; with tmux's default `extended-keys off` the server parses
  * that as Shift+Enter and hands the pane a bare carriage return, so Claude
  * Code inside submits instead of inserting a newline. These are server
- * options (global to the tmux server) and idempotent; a tmux too old to
- * know them just keeps its defaults. Returns false when the tmux server
- * was not running to take them: the caller tries again once it is.
+ * options (global to the tmux server) and idempotent. Returns false when
+ * tmux did not take them, most often because its server was not running:
+ * the caller tries again once it is.
  */
 export async function enableExtendedKeys(exec: TmuxExecutor = defaultExec): Promise<boolean> {
   try {
     await exec('tmux', ['set', '-s', 'extended-keys', 'always'])
     await exec('tmux', ['set', '-s', 'extended-keys-format', 'csi-u'])
     return true
-  } catch (err) {
-    return !isNoServer(err)
+  } catch {
+    return false
   }
 }
 
@@ -196,14 +204,22 @@ export async function enableExtendedKeys(exec: TmuxExecutor = defaultExec): Prom
  * Where a session's pane history stands: how many lines it holds, where it
  * stops growing, and whether a full-screen app has frozen it. See
  * history.ts for how the server turns this into scrollback for the client.
+ * Throws a ClientError when the session no longer exists.
  */
 export async function paneHistoryState(
   sessionId: number,
   exec: TmuxExecutor = defaultExec,
 ): Promise<PaneHistoryState> {
-  const { stdout } = await exec('tmux', [
-    'display-message', '-p', '-t', `$${sessionId}`, '-F', '#{history_size} #{history_limit} #{alternate_on}',
-  ])
+  let stdout: string
+  try {
+    ;({ stdout } = await exec('tmux', [
+      'display-message', '-p', '-t', `$${sessionId}`, '-F', '#{history_size} #{history_limit} #{alternate_on}',
+    ]))
+  } catch (err) {
+    // Killed since it was listed, by another client or from inside tmux.
+    if (isMissingTarget(err)) throw new ClientError('Session not found')
+    throw err
+  }
   const [size = '0', limit = '0', alternate = '0'] = stdout.trim().split(/\s+/)
   return {
     size: parseInt(size, 10) || 0,

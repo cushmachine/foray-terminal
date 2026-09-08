@@ -326,6 +326,9 @@ export function handleConnection(ws: WebSocket, deps: ConnectionDeps): Connectio
       tracker.known = state.size
       send({ type: 'terminal:history', windowId, lines, reset: true })
     } catch (err) {
+      // The attach awaits its sync and reports the failure to the client;
+      // a background check has no one to tell.
+      if (force) throw err
       log.error('history sync error:', err)
     } finally {
       tracker.running = false
@@ -371,7 +374,14 @@ export function handleConnection(ws: WebSocket, deps: ConnectionDeps): Connectio
 
     // The client's scrollback is the pane's history; send all of it before
     // the pty spawns so it sits above the live screen from the first paint.
-    await syncHistory(windowId, true)
+    // A window tmux no longer has fails here, rather than as a pty that
+    // exits at once and is reported as the session ending.
+    try {
+      await syncHistory(windowId, true)
+    } catch (err) {
+      detach(windowId)
+      throw err
+    }
     // The socket may have closed, or the window been killed or taken over,
     // while tmux answered.
     if (closed || attachments.get(windowId) !== attachment) return
@@ -420,8 +430,10 @@ export function handleConnection(ws: WebSocket, deps: ConnectionDeps): Connectio
       broadcast({ type: 'session:created', window: await createWindow(msg.name, msg.cwd, tmuxExec) })
     },
     'session:kill': async (msg) => {
-      await killWindow(msg.windowId, tmuxExec)
+      // Attachments go first: a pty still attached would see tmux end the
+      // session and report it as the pane exiting.
       dropAttachmentsFor(msg.windowId)
+      await killWindow(msg.windowId, tmuxExec)
       broadcast({ type: 'session:killed', windowId: msg.windowId })
     },
     'session:rename': async (msg) => {

@@ -120,6 +120,22 @@ test('alignHistory needs more than a one-line overlap when it has more to compar
   assert.deepEqual(fresh(['a'], ['a', 'b']), ['b'])
 })
 
+test('alignHistory matches a short sent tail at its oldest occurrence', () => {
+  // A tail shorter than the overlap it would want is the whole history as
+  // it was, so it sits at the front of the capture. Matching the newest
+  // repeat of a blank line or a prompt instead drops everything between
+  // and leaves the tail as it was, so the next capture drops lines again.
+  const aligned = alignHistory([''], ['', 'line 1', 'line 2', 'line 3', ''])
+  assert.deepEqual(aligned?.fresh, ['line 1', 'line 2', 'line 3', ''])
+  assert.deepEqual(aligned?.tail, ['', 'line 1', 'line 2', 'line 3', ''], 'the tail moves on')
+  assert.deepEqual(
+    fresh(['$ ls', 'a.txt'], ['$ ls', 'a.txt', 'b.txt', '$ ls', 'a.txt', 'c.txt']),
+    ['b.txt', '$ ls', 'a.txt', 'c.txt'],
+  )
+  // The short tail may still be growing.
+  assert.deepEqual(fresh(['xxxx'], ['xxxxyy', 'c', 'xxxx']), ['yy', 'c', 'xxxx'])
+})
+
 test('alignHistory lets the last sent line grow: a wrapped line still scrolling into history', () => {
   // The line was captured as far as it had got; now two more rows of it are in.
   const aligned = alignHistory(['a', 'b', 'xxxx'], ['a', 'b', 'xxxxyyyyzz', 'c'])

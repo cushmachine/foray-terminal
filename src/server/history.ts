@@ -72,9 +72,10 @@ export interface Alignment {
 /**
  * Lines in `captured` (a fresh tail of the history) that come after the
  * last lines already sent. Matches the longest run of `sentTail`'s end
- * found in `captured`, searching from the newest end. Returns null when
- * they don't overlap at all, meaning the client is too far behind to
- * append and must reset.
+ * found in `captured`, searching from the newest end; a tail too short to
+ * give `minOverlap` lines is searched from the oldest end instead. Returns
+ * null when they don't overlap at all, meaning the client is too far
+ * behind to append and must reset.
  *
  * History rows never change once written, with one exception: a line
  * still being wrapped onto the visible screen is captured as its history
@@ -93,9 +94,15 @@ export function alignHistory(
   const minRun = Math.min(minOverlap, sentTail.length)
   const last = sentTail[sentTail.length - 1]
   const extends_ = (line: string): boolean => last !== '' && line.length > last.length && line.startsWith(last)
+  // A tail shorter than the overlap it would want is the whole history as
+  // it was, so it sits at the oldest end of the capture: a blank line or a
+  // prompt that recurs nearer the new end is a later line, not the tail.
+  const oldestFirst = sentTail.length < minOverlap
   for (let run = maxRun; run >= minRun; run--) {
     const block = sentTail.slice(sentTail.length - run)
-    for (let at = captured.length - run; at >= 0; at--) {
+    const lastStart = captured.length - run
+    for (let i = 0; i <= lastStart; i++) {
+      const at = oldestFirst ? i : lastStart - i
       let matches = true
       for (let j = 0; j < run - 1; j++) {
         if (captured[at + j] !== block[j]) {

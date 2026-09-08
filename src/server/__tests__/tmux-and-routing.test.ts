@@ -13,9 +13,12 @@ import {
   renameWindow,
   paneHistoryState,
   captureHistoryLines,
+  enableExtendedKeys,
+  sessionNameFor,
   SEP,
   type TmuxExecutor,
 } from '../tmux.ts'
+import { ClientError } from '../errors.ts'
 
 import {
   attachToPane,
@@ -23,7 +26,7 @@ import {
   type PtyProcess,
 } from '../pty-bridge.ts'
 
-import { connect, fakeTmux, startTestServer, waitForType } from './helpers.ts'
+import { connect, fakeTmux, startTestServer, until, waitForType } from './helpers.ts'
 
 /** Hostname passed to the parser; tmux initialises every pane title to this. */
 const HOST = 'testhost'
@@ -222,6 +225,73 @@ test('createWindow defaults name to bash when not provided and leaves it unnamed
     !calls.some((c) => c.args.includes('@nest_named')),
     'an auto-named session must not be stamped as named',
   )
+})
+
+test('createWindow applies the extended-keys options: a session proves the server is up', async () => {
+  const tmux = fakeTmux()
+  await createWindow('w', undefined, tmux.exec)
+  const at = (option: string): number =>
+    tmux.calls.findIndex((args) => args[0] === 'set' && args[1] === '-s' && args[2] === option)
+  const created = tmux.calls.findIndex((args) => args[0] === 'new-session')
+  assert.ok(at('extended-keys') > created, 'extended-keys is set after the session exists')
+  assert.ok(at('extended-keys-format') > created, 'extended-keys-format is set after the session exists')
+})
+
+// ---------------------------------------------------------------------------
+// Test 2a: tmux.enableExtendedKeys
+// ---------------------------------------------------------------------------
+
+test('enableExtendedKeys sets both server options and reports whether tmux took them', async () => {
+  const tmux = fakeTmux()
+  assert.equal(await enableExtendedKeys(tmux.exec), true)
+  assert.deepEqual(tmux.calls, [
+    ['set', '-s', 'extended-keys', 'always'],
+    ['set', '-s', 'extended-keys-format', 'csi-u'],
+  ])
+  // Any failure means the options are not on, whatever the reason.
+  for (const message of ['no server running on /tmp/tmux-0/default', 'lost server', 'invalid option: extended-keys']) {
+    const failing: TmuxExecutor = async () => {
+      throw new Error(message)
+    }
+    assert.equal(await enableExtendedKeys(failing), false, message)
+  }
+})
+
+test('the server sets extended keys once tmux is listed, and again after tmux restarts', async () => {
+  const tmux = fakeTmux()
+  // Real tmux answers everything but new-session with "no server running"
+  // once its last session is gone; the fake keeps answering, so add that.
+  let emptyListings = 0
+  const exec: TmuxExecutor = (cmd, args) => {
+    if (tmux.sessions.size === 0 && args[0] !== 'new-session') {
+      if (args[0] === 'list-sessions') emptyListings++
+      const message = 'no server running on /tmp/tmux-0/default'
+      return Promise.reject(Object.assign(new Error(message), { stderr: message }))
+    }
+    return tmux.exec(cmd, args)
+  }
+  const extendedKeySets = (): number =>
+    tmux.calls.filter((args) => args[0] === 'set' && args.includes('extended-keys')).length
+
+  const { url, close } = await startTestServer({ tmuxExec: exec, pollIntervalMs: 10 })
+  try {
+    const { ws } = await connect(url)
+    assert.equal(extendedKeySets(), 0, 'nothing to set while tmux is down')
+    tmux.add('shell')
+    await until(() => extendedKeySets() === 1, 'the options to be set once a listing shows the server')
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    assert.equal(extendedKeySets(), 1, 'set once while the server stays up, not every poll')
+
+    // tmux exits with its last session and comes back with a new one.
+    const seenEmpty = emptyListings
+    tmux.sessions.clear()
+    await until(() => emptyListings > seenEmpty, 'a poll to find the server gone')
+    tmux.add('shell')
+    await until(() => extendedKeySets() === 2, 'the options to be set again on the new server')
+    ws.close()
+  } finally {
+    await close()
+  }
 })
 
 // ---------------------------------------------------------------------------
@@ -481,4 +551,12 @@ test('listWindows throws for tmux failures other than a missing server', async (
     throw new Error('lost server')
   }
   await assert.rejects(() => listWindows(mockExec, HOST), /lost server/)
+})
+
+test('sessionNameFor trims the name and refuses one with nothing in it', () => {
+  assert.equal(sessionNameFor(' deploy '), 'nest_deploy')
+  assert.equal(sessionNameFor('a.b:c'), 'nest_a-b-c')
+  for (const name of ['', '   ', '\t\n']) {
+    assert.throws(() => sessionNameFor(name), ClientError, JSON.stringify(name))
+  }
 })

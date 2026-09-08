@@ -229,8 +229,9 @@ export function startServer(
   const tmuxExec = options.tmuxExec
 
   // Modified keys reach panes as CSI u only once the tmux server has these
-  // options; set them once here. A tmux server that is not up yet cannot
-  // take them, so the listing below retries while they are unset.
+  // options. A tmux server that is not up yet cannot take them, and one
+  // that exits (it does, with its last session) comes back without them,
+  // so the listing below applies them to every server it sees.
   let extendedKeysSet = false
   const ensureExtendedKeys = async (): Promise<void> => {
     if (extendedKeysSet) return
@@ -250,8 +251,10 @@ export function startServer(
   const currentWindows = async (): Promise<TmuxWindow[]> => {
     try {
       lastWindows = await listWindows(tmuxExec)
-      // A listing proves the tmux server is up.
+      // A listing proves the tmux server is up; an empty one is what a
+      // server that has gone looks like, and its successor starts bare.
       if (lastWindows.length > 0) void ensureExtendedKeys()
+      else extendedKeysSet = false
     } catch (err) {
       log.error('list-sessions failed:', err)
     }
