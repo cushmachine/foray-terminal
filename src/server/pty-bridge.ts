@@ -67,12 +67,5 @@ export function attachToPane(
 
   proc.onData(events.onData)
   proc.onExit(({ exitCode }) => events.onExit(exitCode))
-
-  return {
-    write: (data) => proc.write(data),
-    resize: (cols, rows) => proc.resize(cols, rows),
-    kill: () => proc.kill(),
-    pause: () => proc.pause(),
-    resume: () => proc.resume(),
-  }
+  return proc
 }

@@ -116,7 +116,6 @@ export async function listWindows(
     if (isNoServer(err)) return []
     throw err
   }
-  if (!stdout.trim()) return []
   return stdout
     .trim()
     .split('\n')
@@ -140,15 +139,15 @@ export async function createWindow(
   let attempt = 0
   while (attempt <= 20) {
     const actualName = attempt === 0 ? sessionName : `${sessionName}-${attempt}`
+    // Always pass a start directory. Without -c, tmux uses the cwd of the
+    // process that ran the command, i.e. the Nest server itself (the nest
+    // repo under PM2), which is never where a new session should start.
     const args = [
       'new-session', '-d',
       '-s', actualName,
       '-P', '-F', FORMAT,
+      '-c', cwd || os.homedir(),
     ]
-    // Always pass a start directory. Without -c, tmux uses the cwd of the
-    // process that ran the command, i.e. the Nest server itself (the nest
-    // repo under PM2), which is never where a new session should start.
-    args.push('-c', cwd || os.homedir())
 
     try {
       const { stdout } = await exec('tmux', args)

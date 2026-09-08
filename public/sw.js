@@ -31,31 +31,17 @@ function shouldCache(url, method, origin) {
 }
 
 /**
- * The hashed bundle files a built index.html loads. Every build renames
- * them, so whatever an older page referenced is dead weight once a newer
- * page has been fetched. Pure, like shouldCache.
- * @param {string} html
- * @returns {Set<string>} pathnames under /assets/
- */
-function referencedAssets(html) {
-  const refs = new Set()
-  for (const match of html.matchAll(/\b(?:src|href)="(\/assets\/[^"]+)"/g)) refs.add(match[1])
-  return refs
-}
-
-/**
- * Drop cached /assets/* entries the freshly fetched page no longer loads.
- * Done after every successful navigation rather than on activate: this
- * file seldom changes between builds, so activate would almost never run.
+ * Drop cached /assets/* entries the freshly fetched page no longer loads:
+ * every build renames the hashed bundle files, so whatever an older page
+ * referenced is dead weight. Done after every successful navigation rather
+ * than on activate, since this file seldom changes between builds.
  */
 async function evictStaleAssets(cache, html) {
-  const live = referencedAssets(html)
-  const keys = await cache.keys()
-  const stale = keys.filter((req) => {
+  const live = new Set(Array.from(html.matchAll(/\b(?:src|href)="(\/assets\/[^"]+)"/g), (m) => m[1]))
+  for (const req of await cache.keys()) {
     const pathname = new URL(req.url).pathname
-    return pathname.startsWith('/assets/') && !live.has(pathname)
-  })
-  await Promise.all(stale.map((req) => cache.delete(req)))
+    if (pathname.startsWith('/assets/') && !live.has(pathname)) await cache.delete(req)
+  }
 }
 
 function offlinePage() {
@@ -132,4 +118,4 @@ self.addEventListener('fetch', (event) => {
 })
 
 // Exposed for tests, which run this file in a stub worker scope.
-self.__nest = { shouldCache, referencedAssets, CACHE, SHELL }
+self.__nest = { shouldCache, CACHE, SHELL }

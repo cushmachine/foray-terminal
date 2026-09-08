@@ -144,8 +144,8 @@ test('alignHistory does not let an empty or a shortened last line match by prefi
 // ---------------------------------------------------------------------------
 
 test('nextTail keeps only the newest lines up to the cap', () => {
-  assert.deepEqual(nextTail(['a', 'b', 'c'], ['d', 'e'], 4), ['b', 'c', 'd', 'e'])
-  assert.deepEqual(nextTail([], ['a', 'b'], 50), ['a', 'b'])
-  assert.deepEqual(nextTail(lines(1, 60), [], 50), lines(11, 60))
-  assert.deepEqual(nextTail(['a'], ['b'], 5), ['a', 'b'])
+  assert.deepEqual(nextTail(['a', 'b', 'c', 'd', 'e'], 4), ['b', 'c', 'd', 'e'])
+  assert.deepEqual(nextTail(['a', 'b'], 50), ['a', 'b'])
+  assert.deepEqual(nextTail(lines(1, 60), 50), lines(11, 60))
+  assert.deepEqual(nextTail([], 5), [])
 })

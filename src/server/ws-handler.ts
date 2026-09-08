@@ -137,7 +137,19 @@ export interface Connection {
 // Validation
 // ---------------------------------------------------------------------------
 
-type FieldType = 'string' | 'number' | 'string?' | 'number?' | 'string|null'
+const isString = (value: unknown): boolean => typeof value === 'string'
+const isNumber = (value: unknown): boolean => typeof value === 'number' && Number.isFinite(value)
+
+/** How each field type is checked, and how a rejection describes it. */
+const FIELD_TYPES = {
+  string: { ok: isString, expected: 'a string' },
+  number: { ok: isNumber, expected: 'a number' },
+  'string?': { ok: (value: unknown) => value === undefined || isString(value), expected: 'a string when given' },
+  'number?': { ok: (value: unknown) => value === undefined || isNumber(value), expected: 'a number when given' },
+  'string|null': { ok: (value: unknown) => value === null || isString(value), expected: 'a string or null' },
+} satisfies Record<string, { ok: (value: unknown) => boolean; expected: string }>
+
+type FieldType = keyof typeof FIELD_TYPES
 
 type MessageOf<T extends ClientMessage['type']> = Extract<ClientMessage, { type: T }>
 
@@ -168,25 +180,6 @@ const SHAPES: Shapes = {
   'client:hello': { build: 'string|null' },
 }
 
-const FIELD_DESCRIPTIONS: Record<FieldType, string> = {
-  string: 'a string',
-  number: 'a number',
-  'string?': 'a string when given',
-  'number?': 'a number when given',
-  'string|null': 'a string or null',
-}
-
-function fieldOk(value: unknown, type: FieldType): boolean {
-  const isNumber = typeof value === 'number' && Number.isFinite(value)
-  switch (type) {
-    case 'string': return typeof value === 'string'
-    case 'number': return isNumber
-    case 'string?': return value === undefined || typeof value === 'string'
-    case 'number?': return value === undefined || isNumber
-    case 'string|null': return value === null || typeof value === 'string'
-  }
-}
-
 function isKnownType(type: unknown): type is ClientMessage['type'] {
   return typeof type === 'string' && Object.prototype.hasOwnProperty.call(SHAPES, type)
 }
@@ -200,8 +193,8 @@ export function validateMessage(raw: unknown): ClientMessage {
   if (!isKnownType(msg.type)) throw new ClientError(`Invalid message: unknown type ${JSON.stringify(msg.type)}`)
   const shape: Record<string, FieldType> = SHAPES[msg.type]
   for (const [field, type] of Object.entries(shape)) {
-    if (!fieldOk(msg[field], type)) {
-      throw new ClientError(`Invalid message: ${msg.type} requires ${field} to be ${FIELD_DESCRIPTIONS[type]}`)
+    if (!FIELD_TYPES[type].ok(msg[field])) {
+      throw new ClientError(`Invalid message: ${msg.type} requires ${field} to be ${FIELD_TYPES[type].expected}`)
     }
   }
   return msg as unknown as ClientMessage
@@ -261,6 +254,12 @@ export function handleConnection(ws: WebSocket, deps: ConnectionDeps): Connectio
     attachment.pty?.kill()
   }
 
+  /** Let go of a window: kill this connection's pty for it and give up ownership. */
+  const detach = (windowId: number): void => {
+    dropAttachment(windowId)
+    releaseWindow(windowId)
+  }
+
   /** Check the history once output has settled; a burst becomes one check. */
   const scheduleHistory = (windowId: number): void => {
     const tracker = attachments.get(windowId)?.tracker
@@ -309,7 +308,7 @@ export function handleConnection(ws: WebSocket, deps: ConnectionDeps): Connectio
         if (stale()) return
         const aligned = alignHistory(tracker.sentTail, captured)
         if (aligned !== null) {
-          tracker.sentTail = nextTail([], aligned.tail, HISTORY_TAIL)
+          tracker.sentTail = nextTail(aligned.tail, HISTORY_TAIL)
           if (aligned.fresh.length > 0) {
             send({ type: 'terminal:history', windowId, lines: aligned.fresh, reset: false })
           }
@@ -323,7 +322,7 @@ export function handleConnection(ws: WebSocket, deps: ConnectionDeps): Connectio
       // size so later syncs append from the right place.
       const lines = await captureHistoryLines(windowId, Math.min(state.size, MAX_HISTORY_LINES), tmuxExec)
       if (stale()) return
-      tracker.sentTail = nextTail([], lines, HISTORY_TAIL)
+      tracker.sentTail = nextTail(lines, HISTORY_TAIL)
       tracker.known = state.size
       send({ type: 'terminal:history', windowId, lines, reset: true })
     } catch (err) {
@@ -389,10 +388,8 @@ export function handleConnection(ws: WebSocket, deps: ConnectionDeps): Connectio
         ptySpawner,
       )
     } catch (err) {
-      // No pty ever existed, so there is nothing to kill; the dispatcher
-      // reports the failure against this attach.
-      attachments.delete(windowId)
-      releaseWindow(windowId)
+      // The dispatcher reports the failure against this attach.
+      detach(windowId)
       throw err
     }
   }
@@ -432,10 +429,7 @@ export function handleConnection(ws: WebSocket, deps: ConnectionDeps): Connectio
       broadcast({ type: 'session:renamed', windowId: msg.windowId, name: msg.name })
     },
     'terminal:attach': attach,
-    'terminal:detach': (msg) => {
-      dropAttachment(msg.windowId)
-      releaseWindow(msg.windowId)
-    },
+    'terminal:detach': (msg) => detach(msg.windowId),
     'terminal:input': (msg) => {
       attachments.get(msg.windowId)?.pty?.write(msg.data)
     },

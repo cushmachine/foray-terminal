@@ -14,7 +14,7 @@ import { EventEmitter } from 'node:events'
 import type { WebSocket as ServerSocket } from 'ws'
 import { startServer, type ServerOptions } from '../index.ts'
 import { SEP, type TmuxExecutor } from '../tmux.ts'
-import type { PtySpawner } from '../pty-bridge.ts'
+import type { PtyProcess, PtySpawner } from '../pty-bridge.ts'
 import { handleConnection, type ConnectionDeps } from '../ws-handler.ts'
 import type { Logger } from '../log.ts'
 
@@ -203,20 +203,17 @@ export function fakePtySpawner(): { spawner: PtySpawner; ptys: FakePty[] } {
       exit: (exitCode) => onExit({ exitCode }),
     }
     ptys.push(pty)
-    // The extra members mirror node-pty's IPty (pause, resume, onExit) so a
-    // bridge that grows into them finds the fake ready; a bare PtyProcess
-    // return would flag them as excess properties.
-    const proc = {
-      onData: (cb: (data: string) => void) => {
+    const proc: PtyProcess = {
+      onData: (cb) => {
         onData = cb
       },
-      onExit: (cb: (event: { exitCode: number }) => void) => {
+      onExit: (cb) => {
         onExit = cb
       },
-      write: (data: string) => {
+      write: (data) => {
         pty.writes.push(data)
       },
-      resize: (cols: number, rows: number) => {
+      resize: (cols, rows) => {
         pty.resizes.push({ cols, rows })
       },
       kill: () => {

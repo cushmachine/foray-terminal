@@ -120,8 +120,7 @@ export function alignHistory(
   return null
 }
 
-/** Keep the last `max` lines of `sent` plus `fresh`, for the next alignment. */
-export function nextTail(sent: readonly string[], fresh: readonly string[], max: number): string[] {
-  const all = sent.concat(fresh)
-  return all.length > max ? all.slice(all.length - max) : all
+/** The last `max` of `lines`, for the next alignment. */
+export function nextTail(lines: readonly string[], max: number): string[] {
+  return lines.length > max ? lines.slice(lines.length - max) : [...lines]
 }
