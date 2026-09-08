@@ -19,7 +19,7 @@ The tmux server that holds every session runs in its own systemd unit, `nest-tmu
 
 ## Mobile architecture
 
-The app detects touch devices via `COARSE` (`pointer: coarse` media query). Key differences on mobile:
+The app detects touch devices via `IS_TOUCH` in `src/mobile.ts` (the `pointer: coarse` media query). Key differences on mobile:
 
 - **Composer** (`Composer.tsx`) is mobile-only. It's a textarea input bar that pastes finished text into the terminal, avoiding IME ghost characters from typing directly into xterm.
 - **Keyboard is a curtain.** The soft keyboard shrinks the visual viewport; `useAppHeight` sets `--app-height` from it so the layout ends where the keyboard begins, the pty is not resized, and the Composer dims while xterm has focus (`[data-main-column]:has(.xterm.focus)` in `styles.css`). Nothing is hidden when the keyboard is up.
