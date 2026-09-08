@@ -2,7 +2,7 @@
 
 ## Deploy
 
-Run `npm run deploy` to build and restart the app. This does `vite build && pm2 restart nest`. The app prompts connected clients to reload via `VersionBanner`. Do not use the dev server — we deploy straight to prod.
+Run `npm run deploy` to build and restart the app. This is just `pm2 restart nest`: pm2 runs `scripts/start.sh`, which builds the client and then starts the server, so every restart is a full deploy and the server and page stamps always match. The app prompts connected clients to reload via `VersionBanner`. Do not use the dev server — we deploy straight to prod. Changes to `ecosystem.config.cjs` itself need `pm2 restart ecosystem.config.cjs --update-env && pm2 save`.
 
 ## Build & check
 

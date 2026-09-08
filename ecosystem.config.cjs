@@ -1,8 +1,11 @@
 module.exports = {
   apps: [{
     name: 'nest',
-    script: 'src/server/index.ts',
-    interpreter: './node_modules/.bin/tsx',
+    // Builds the client, then execs the server (scripts/start.sh), so any
+    // restart is a deploy. Changes to THIS file need
+    // `pm2 restart ecosystem.config.cjs --update-env && pm2 save`.
+    script: 'scripts/start.sh',
+    interpreter: 'bash',
     env: {
       NODE_ENV: 'production',
       PORT: '3000',
