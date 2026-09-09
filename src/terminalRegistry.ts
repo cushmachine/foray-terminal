@@ -18,28 +18,61 @@ export interface TerminalActions {
   upload(files: File[]): void
   /** Freeze the screen as selectable text, or return to the live one. */
   toggleSelectMode(): void
+  /** Scroll back to the user's latest prompt line; again for the one before it. */
+  jumpToPrompt(): void
 }
 
 class TerminalRegistry {
   private readonly terminals = new Map<number, TerminalActions>()
+  /** Per window: whether its scrollback holds a prompt line to jump to. */
+  private readonly prompts = new Map<number, boolean>()
+  private readonly listeners = new Set<() => void>()
   private activeId: number | null = null
 
   /** Register a window's actions. Returns the matching unregister. */
   register(windowId: number, actions: TerminalActions): () => void {
     this.terminals.set(windowId, actions)
     return () => {
-      if (this.terminals.get(windowId) === actions) this.terminals.delete(windowId)
+      if (this.terminals.get(windowId) !== actions) return
+      this.terminals.delete(windowId)
+      this.prompts.delete(windowId)
+      this.notify()
     }
   }
 
   setActive(windowId: number | null): void {
+    if (this.activeId === windowId) return
     this.activeId = windowId
+    this.notify()
   }
 
   /** The active window's actions, or null when none is mounted for it. */
   active(): TerminalActions | null {
     if (this.activeId === null) return null
     return this.terminals.get(this.activeId) ?? null
+  }
+
+  setPromptAvailable(windowId: number, available: boolean): void {
+    if (this.prompts.get(windowId) === available) return
+    this.prompts.set(windowId, available)
+    this.notify()
+  }
+
+  // Bound, so a React component can hand them to useSyncExternalStore as they are.
+
+  /** Whether the active terminal has a prompt line to jump back to. */
+  promptAvailable = (): boolean => this.activeId !== null && (this.prompts.get(this.activeId) ?? false)
+
+  /** Hear about changes to the active window or any window's prompt availability. */
+  subscribe = (listener: () => void): (() => void) => {
+    this.listeners.add(listener)
+    return () => {
+      this.listeners.delete(listener)
+    }
+  }
+
+  private notify(): void {
+    for (const listener of this.listeners) listener()
   }
 }
 

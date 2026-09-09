@@ -70,7 +70,7 @@ export function Terminal({
   const containerRef = useRef<HTMLDivElement>(null)
   const hostRef = useRef<HTMLDivElement>(null)
   const { send, status } = useSocketContext()
-  const { term, state, wasAttached, reattach, sendInput } = useTerminal({
+  const { term, state, wasAttached, reattach, sendInput, promptAvailable, jumpToPrompt } = useTerminal({
     windowId,
     touch,
     isActive,
@@ -131,6 +131,7 @@ export function Terminal({
       },
       upload: (files) => void upload.uploadFiles(files),
       toggleSelectMode,
+      jumpToPrompt,
     }
     const unregister = terminalRegistry.register(windowId, actions)
     const unpublish = isActive ? publishTerm(term, actions) : null
@@ -138,7 +139,12 @@ export function Terminal({
       unregister()
       unpublish?.()
     }
-  }, [term, windowId, isActive, send, sendInput, upload.uploadFiles, toggleSelectMode])
+  }, [term, windowId, isActive, send, sendInput, upload.uploadFiles, toggleSelectMode, jumpToPrompt])
+
+  // The toolbar shows its prompt key only while the active scrollback has a prompt line.
+  useEffect(() => {
+    terminalRegistry.setPromptAvailable(windowId, promptAvailable)
+  }, [windowId, promptAvailable])
 
   return (
     <div

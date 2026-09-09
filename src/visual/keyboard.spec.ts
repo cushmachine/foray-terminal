@@ -9,6 +9,7 @@
 // session active on load may be someone's live shell.
 import { execFileSync } from 'node:child_process'
 import { test, expect, type Page } from '@playwright/test'
+import { PROMPT_JUMP_MARGIN_PX } from '../promptJump.ts'
 import {
   MOBILE,
   createSession,
@@ -275,6 +276,54 @@ test.describe('keyboard behavior on mobile', () => {
       await expect.poll(() => historyRows().first().textContent(), { timeout: 20_000 }).not.toBe(firstBefore)
       // …and the same text still sits at the top of the viewport.
       await expect.poll(topRowText, { timeout: 5_000 }).toBe(before)
+    } finally {
+      await page.setViewportSize(MOBILE)
+      await killMobileSession(page, name).catch(() => {})
+    }
+  })
+
+  // Back to your last prompt: Claude Code echoes each submitted prompt as a
+  // ❯ line. The key appears once the scrollback holds one, brings the latest
+  // to the top of the viewport, and steps back through earlier ones.
+  test('prompt key: hidden without a prompt line; jumps to the latest, then earlier ones', async ({ page }) => {
+    await page.goto('/')
+    const name = uniqueName('kb-prompt')
+    const jumpKey = page.getByRole('button', { name: 'Back to your last prompt' })
+    /** Top edge of the first scrollback row starting with `text`, relative to the viewport top. */
+    const rowTop = (text: string) => active(page).getByTestId('terminal-scroll').evaluate((el, t) => {
+      const rows = Array.from(el.firstElementChild?.children ?? []) as HTMLElement[]
+      const row = rows.find((r) => (r.textContent ?? '').startsWith(t))
+      return row ? row.getBoundingClientRect().top - el.getBoundingClientRect().top : NaN
+    }, text)
+    const expectAtTop = async (text: string) => {
+      await expect.poll(() => rowTop(text), { timeout: 5_000 }).toBeGreaterThanOrEqual(0)
+      expect(await rowTop(text)).toBeLessThanOrEqual(PROMPT_JUMP_MARGIN_PX + 1)
+    }
+    try {
+      await createMobileSession(page, name)
+      await expectTerminalReady(page)
+      await page.setViewportSize({ width: MOBILE.width, height: 500 })
+      await page.waitForTimeout(400)
+      // A plain shell has no ❯ line: no key.
+      await expect(jumpKey).toBeHidden()
+
+      await sendKeys(page, "printf '❯ first ask\\n'; seq 1 60; printf '❯ second ask\\n'; seq 101 160; echo PROMPTS-DONE\r")
+      await expectTerminalText(page, 'PROMPTS-DONE')
+      // Appears once the prompt lines have reached the scrollback.
+      await expect(jumpKey).toBeVisible()
+
+      await jumpKey.click()
+      await expectAtTop('❯ second ask')
+      await jumpKey.click()
+      await expectAtTop('❯ first ask')
+
+      // A scroll gesture starts over at the latest prompt.
+      await active(page).getByTestId('terminal-scroll').evaluate((el) => {
+        el.dispatchEvent(new WheelEvent('wheel', { deltaY: 40, bubbles: true }))
+        el.scrollTop += 40
+      })
+      await jumpKey.click()
+      await expectAtTop('❯ second ask')
     } finally {
       await page.setViewportSize(MOBILE)
       await killMobileSession(page, name).catch(() => {})

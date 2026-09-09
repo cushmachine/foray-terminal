@@ -21,6 +21,7 @@ import { URL_RE, cleanUrl } from '../urls'
 import { TerminalController, type AttachState } from './TerminalController'
 import { createHistoryPane } from './historyPane'
 import { bottomInset, composerFocused } from './bottomInset'
+import { screenLinesAboveCursor } from './screenRows'
 
 // onSelectionChange fires continuously during a drag; copy once it settles.
 const COPY_ON_SELECT_MS = 120
@@ -49,6 +50,10 @@ export interface UseTerminalResult {
   reattach: () => void
   /** Send input with the toolbar's sticky modifiers applied. */
   sendInput: (data: string) => void
+  /** The scrollback holds a prompt line the reader can jump back to. */
+  promptAvailable: boolean
+  /** Scroll to the latest prompt line; again for the one before it. */
+  jumpToPrompt: () => void
 }
 
 interface Live {
@@ -88,6 +93,7 @@ export function useTerminal({
   const { send, onMessage, status } = useSocketContext()
   const [live, setLive] = useState<Live | null>(null)
   const [state, setState] = useState<AttachState>('idle')
+  const [promptAvailable, setPromptAvailable] = useState(false)
   // Read by listeners installed once, so they see the current values
   // without re-subscribing.
   const fontSizeRef = useRef(fontSize)
@@ -169,7 +175,9 @@ export function useTerminal({
       history: createHistoryPane(historyEl, palette),
       screen: container,
       inset: touch ? () => (composerFocused() ? bottomInset(term, scrollEl) : 0) : undefined,
+      screenLines: () => screenLinesAboveCursor(term, scrollEl),
       onStateChange: setState,
+      onPromptAvailable: setPromptAvailable,
     })
     const unsubscribe = onMessage((msg) => controller.handle(msg))
 
@@ -265,6 +273,7 @@ export function useTerminal({
     return () => {
       setLive(null)
       setState('idle')
+      setPromptAvailable(false)
       webgl?.dispose()
       webgl = null
       if (copyTimer) clearTimeout(copyTimer)
@@ -309,6 +318,9 @@ export function useTerminal({
   }, [fontSize, live])
 
   const reattach = useCallback(() => live?.controller.attach(), [live])
+  const jumpToPrompt = useCallback(() => {
+    live?.controller.jumpToPrompt()
+  }, [live])
 
   return {
     term: live?.term ?? null,
@@ -316,5 +328,7 @@ export function useTerminal({
     wasAttached: live?.controller.wasAttached ?? false,
     reattach,
     sendInput,
+    promptAvailable,
+    jumpToPrompt,
   }
 }

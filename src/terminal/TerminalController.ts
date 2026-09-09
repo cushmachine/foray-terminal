@@ -26,8 +26,15 @@ import { MAX_HISTORY_LINES } from '../shared/protocol'
 import type { SocketStatus } from '../hooks/useSocket'
 import { nextResize, type TerminalDims } from '../terminalSize'
 import { ANCHOR_ROWS, findAnchorRow, type RowAnchor } from '../scrollAnchor'
+import { PROMPT_JUMP_MARGIN_PX, isPromptLine, nextPromptIndex, promptLineIndices } from '../promptJump'
 
 export type AttachState = 'idle' | 'attaching' | 'attached' | 'takenOver' | 'exited'
+
+/** The live screen's rows above the cursor, for the prompt jump (screenRows.ts). */
+export interface ScreenLines {
+  texts: string[]
+  rowTop(index: number): number
+}
 
 /** What the controller needs of the xterm. */
 export interface TermLike {
@@ -78,7 +85,11 @@ export interface TerminalControllerOptions {
   screen?: { getBoundingClientRect(): { top: number } }
   /** Pixels to keep below the fold while pinned (composer mode on touch). */
   inset?: () => number
+  /** The live screen's rows above the cursor, so a prompt still on screen can be jumped to. */
+  screenLines?: () => ScreenLines
   onStateChange?: (state: AttachState) => void
+  /** The scrollback gained or lost its last prompt line (see promptAvailable). */
+  onPromptAvailable?: (available: boolean) => void
 }
 
 /** How far above the bottom (past the inset) still counts as pinned. */
@@ -105,6 +116,12 @@ export class TerminalController {
   wasAttached = false
   /** Whether the view is pinned to the bottom, following output. */
   stick = true
+  /**
+   * Whether the scrollback holds a prompt line to jump back to (promptJump.ts).
+   * The live screen is not counted: what is still on it has not scrolled
+   * away, and it changes with every output chunk.
+   */
+  promptAvailable = false
 
   private readonly term: TermLike
   private readonly windowId: number
@@ -116,7 +133,11 @@ export class TerminalController {
   private readonly history: HistoryPane | null
   private readonly screen: { getBoundingClientRect(): { top: number } } | null
   private readonly insetSource: () => number
+  private readonly screenLines: (() => ScreenLines) | null
   private readonly onStateChange: ((state: AttachState) => void) | null
+  private readonly onPromptAvailable: ((available: boolean) => void) | null
+  /** Line index (history rows, then screen rows) the last prompt jump landed on; null once the reader scrolls. */
+  private promptCursor: number | null = null
 
   /** Every frame scheduled and not yet run, so dispose() can cancel them all. */
   private readonly frames = new Set<number>()
@@ -145,7 +166,9 @@ export class TerminalController {
     this.history = options.history ?? null
     this.screen = options.screen ?? null
     this.insetSource = options.inset ?? (() => 0)
+    this.screenLines = options.screenLines ?? null
     this.onStateChange = options.onStateChange ?? null
+    this.onPromptAvailable = options.onPromptAvailable ?? null
   }
 
   // -- attach state ---------------------------------------------------------
@@ -281,6 +304,48 @@ export class TerminalController {
    */
   onScrollGesture(): void {
     this.run = null
+    // The reader moved on their own: the next prompt jump starts over at the latest.
+    this.promptCursor = null
+  }
+
+  // -- prompt jump ------------------------------------------------------------
+
+  /**
+   * Bring the latest prompt line to the top of the viewport; pressed again,
+   * the one before it (promptJump.ts). Scrollback rows come first, then the
+   * screen rows above the cursor. False when there is no prompt line at all.
+   */
+  jumpToPrompt(): boolean {
+    if (!this.scroll || !this.history || this.disposed) return false
+    const rows = this.history.rows
+    const texts = Array.from(rows, TerminalController.rowText)
+    const screen = this.screenLines?.() ?? null
+    const all = screen ? texts.concat(screen.texts) : texts
+    const index = nextPromptIndex(promptLineIndices(all), this.promptCursor)
+    if (index === null) return false
+    this.promptCursor = index
+    const top = index < texts.length ? this.contentTop(rows[index]) : (screen as ScreenLines).rowTop(index - texts.length)
+    // A pin scheduled for this frame would undo the jump; the view is the reader's now.
+    this.cancel(this.scrollFrame)
+    this.scrollFrame = null
+    this.scrollSmooth = false
+    this.run = null
+    this.stick = false
+    this.scroll.scrollTop = Math.max(0, top - PROMPT_JUMP_MARGIN_PX)
+    return true
+  }
+
+  private setPromptAvailable(available: boolean): void {
+    if (this.promptAvailable === available) return
+    this.promptAvailable = available
+    if (!this.disposed) this.onPromptAvailable?.(available)
+  }
+
+  /** Whether any history row in [from, to) is a prompt line, checked newest first: the latest prompt is usually near the bottom. */
+  private rowsHavePrompt(from: number, to: number): boolean {
+    const rows = (this.history as HistoryPane).rows
+    for (let i = to - 1; i >= from; i--) if (isPromptLine(TerminalController.rowText(rows[i]))) return true
+    return false
   }
 
   /** Scroll to the bottom (less the inset) on the next frame. Calls in one frame coalesce; smooth wins. */
@@ -347,12 +412,18 @@ export class TerminalController {
     // who has scrolled up keeps the same text in view (scrollAnchor.ts).
     const over = this.historyCount + lines.length - MAX_HISTORY_LINES
     const anchor = over > 0 ? this.captureAnchor() : null
+    const before = this.historyCount
     this.history.append(lines)
     this.historyCount += lines.length
+    // Only the new rows need checking, unless a trim may have taken the last prompt.
+    let available = this.promptAvailable || this.rowsHavePrompt(before, this.historyCount)
     if (over > 0) {
       this.history.trimTop(over)
       this.historyCount -= over
+      if (this.promptCursor !== null) this.promptCursor -= over
+      if (available) available = this.rowsHavePrompt(0, this.historyCount)
     }
+    this.setPromptAvailable(available)
     if (anchor) this.restoreAnchor(anchor)
     this.maybeScrollToBottom()
   }
@@ -363,6 +434,8 @@ export class TerminalController {
     const anchor = this.captureAnchor()
     this.history.clear()
     this.historyCount = 0
+    this.promptCursor = null
+    this.setPromptAvailable(false)
     this.appendHistory(lines)
     if (anchor) this.restoreAnchor(anchor)
   }

@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { ChangeEvent, PointerEvent as ReactPointerEvent } from 'react'
 import {
   PRIMARY_KEYS,
+  PROMPT_KEY,
   SECONDARY_KEYS,
   TAP_SLOP_PX,
   overflowHint,
@@ -47,6 +48,8 @@ export function KeyToolbar({ modifiers, onToggleModifier, isMobile }: KeyToolbar
   const row = useRef<HTMLDivElement>(null)
   // Which edges of the primary row hide more keys, so a fade can hint that it scrolls.
   const [overflow, setOverflow] = useState({ left: false, right: false })
+  // The prompt key shows only while the active scrollback has a prompt line to go back to.
+  const canJump = useSyncExternalStore(terminalRegistry.subscribe, terminalRegistry.promptAvailable)
 
   useEffect(() => {
     const el = row.current
@@ -92,6 +95,9 @@ export function KeyToolbar({ modifiers, onToggleModifier, isMobile }: KeyToolbar
         break
       case 'select':
         terminal?.toggleSelectMode()
+        break
+      case 'prompt':
+        terminal?.jumpToPrompt()
         break
       case 'paste': {
         // Must run inside the user gesture; browsers refuse otherwise.
@@ -255,13 +261,21 @@ export function KeyToolbar({ modifiers, onToggleModifier, isMobile }: KeyToolbar
           {SECONDARY_KEYS.map(renderKey)}
         </div>
       )}
-      <div style={{ position: 'relative' }}>
-        <div ref={row} data-testid="key-toolbar-row" style={rowStyle}>
-          {PRIMARY_KEYS.map(renderKey)}
+      <div style={{ display: 'flex', alignItems: 'center' }}>
+        {/* Outside the scrolling row, so it stays put at the far left. */}
+        {canJump && (
+          <div data-testid="jump-to-prompt" style={{ flexShrink: 0, padding: '6px 0 6px 8px' }}>
+            {renderKey(PROMPT_KEY)}
+          </div>
+        )}
+        <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
+          <div ref={row} data-testid="key-toolbar-row" style={rowStyle}>
+            {PRIMARY_KEYS.map(renderKey)}
+          </div>
+          {/* Edge fades hint that the row scrolls; each goes away at its end. */}
+          {overflow.left && <div data-testid="keytoolbar-fade-left" style={fadeStyle('left')} />}
+          {overflow.right && <div data-testid="keytoolbar-fade-right" style={fadeStyle('right')} />}
         </div>
-        {/* Edge fades hint that the row scrolls; each goes away at its end. */}
-        {overflow.left && <div data-testid="keytoolbar-fade-left" style={fadeStyle('left')} />}
-        {overflow.right && <div data-testid="keytoolbar-fade-right" style={fadeStyle('right')} />}
       </div>
       <input
         ref={fileInput}

@@ -20,6 +20,8 @@ export type KeyKind =
   | 'photo'
   /** Shows or hides the secondary row. */
   | 'more'
+  /** Scrolls back to the user's latest prompt line, then earlier ones (promptJump.ts). */
+  | 'prompt'
 
 export interface KeyDef {
   id: string
@@ -34,6 +36,9 @@ export interface KeyDef {
 }
 
 const ESC = '\x1b'
+
+/** Fixed at the far left of the bar, only while the scrollback holds a prompt line. */
+export const PROMPT_KEY: KeyDef = { id: 'prompt', label: '↑❯', kind: 'prompt', title: 'Back to your last prompt' }
 
 /** Always visible. Ordered for Claude Code: Esc, Tab/Shift-Tab, arrows, Ctrl-C, Enter. */
 export const PRIMARY_KEYS: KeyDef[] = [

@@ -7,6 +7,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { MAX_HISTORY_LINES, type ClientMessage } from '../shared/protocol.ts'
+import { PROMPT_JUMP_MARGIN_PX } from '../promptJump.ts'
 import {
   STICK_SLOP_PX,
   TerminalController,
@@ -394,6 +395,117 @@ test('history: trimming the top under a scrolled-up view keeps the same text at 
   assert.equal(history.lines[0], '100', 'the 100 oldest rows went')
   assert.equal(history.lines[900], '1000')
   assert.equal(scroll.scrollTop, 9_000, 'row 1000 is still at the top of the viewport')
+})
+
+// -- prompt jump ----------------------------------------------------------------
+
+const filler = (n: number, tag = 'line') => Array.from({ length: n }, (_, i) => `${tag} ${i}`)
+const historyMsg = (lines: string[], reset = false) => ({ type: 'terminal:history', windowId: WINDOW, lines, reset }) as const
+
+test('prompt jump: the latest prompt line comes to the top of the viewport, then each earlier one, wrapping', () => {
+  const scroll = fakeScroll(200 * 10 + 400, 400)
+  const history = fakeHistory(10, scroll)
+  const { frames, controller, bringUp } = setup({ scroll, history })
+  bringUp()
+  // '❯ first ask' is row 51, '❯ second ask' row 132.
+  controller.handle(historyMsg(['$ start', ...filler(50), '❯ first ask', ...filler(80), '❯ second ask', ...filler(60)]))
+  frames.flush()
+  assert.equal(controller.promptAvailable, true)
+  assert.equal(controller.stick, true, 'pinned at the bottom before the jump')
+
+  assert.equal(controller.jumpToPrompt(), true)
+  assert.equal(scroll.scrollTop, 132 * 10 - PROMPT_JUMP_MARGIN_PX)
+  assert.equal(controller.stick, false, 'the view is the reader\'s now')
+  frames.flush()
+  assert.equal(scroll.scrollTop, 132 * 10 - PROMPT_JUMP_MARGIN_PX, 'no pending pin undid it')
+
+  controller.jumpToPrompt()
+  assert.equal(scroll.scrollTop, 51 * 10 - PROMPT_JUMP_MARGIN_PX, 'the one before')
+  controller.jumpToPrompt()
+  assert.equal(scroll.scrollTop, 132 * 10 - PROMPT_JUMP_MARGIN_PX, 'past the first: back to the latest')
+
+  // A scroll gesture starts over at the latest.
+  controller.jumpToPrompt()
+  assert.equal(scroll.scrollTop, 51 * 10 - PROMPT_JUMP_MARGIN_PX)
+  controller.onScrollGesture()
+  controller.jumpToPrompt()
+  assert.equal(scroll.scrollTop, 132 * 10 - PROMPT_JUMP_MARGIN_PX)
+})
+
+test('prompt jump: nothing to jump to without a prompt line; the empty input box does not count', () => {
+  const scroll = fakeScroll(400, 400)
+  const history = fakeHistory(10, scroll)
+  const { frames, controller, bringUp } = setup({ scroll, history })
+  bringUp()
+  controller.handle(historyMsg(['hello', '❯', '❯ ', 'more']))
+  frames.flush()
+  assert.equal(controller.promptAvailable, false)
+  const before = scroll.scrollTop
+  assert.equal(controller.jumpToPrompt(), false)
+  assert.equal(scroll.scrollTop, before)
+})
+
+test('prompt jump: a prompt still on the live screen is reachable, after the scrollback rows', () => {
+  const scroll = fakeScroll(10 * 10 + 400, 400)
+  const history = fakeHistory(10, scroll)
+  const screenLines = () => ({ texts: ['reply', '❯ on screen', 'more reply'], rowTop: (i: number) => 1000 + i * 10 })
+  const { frames, controller, bringUp } = setup({ scroll, history, screenLines })
+  bringUp()
+  controller.handle(historyMsg(['❯ old ask', ...filler(9)]))
+  frames.flush()
+
+  controller.jumpToPrompt()
+  assert.equal(scroll.scrollTop, 1010 - PROMPT_JUMP_MARGIN_PX, 'the screen row, measured where the screen sits')
+  controller.jumpToPrompt()
+  assert.equal(scroll.scrollTop, 0, 'row 0 of the scrollback, clamped at the top')
+})
+
+test('prompt jump: availability follows the scrollback through resets and trims', () => {
+  const scroll = fakeScroll(MAX_HISTORY_LINES * 10 + 400, 400)
+  const history = fakeHistory(10, scroll)
+  const seen: boolean[] = []
+  const { frames, controller, bringUp } = setup({ scroll, history, onPromptAvailable: (v) => seen.push(v) })
+  bringUp()
+  assert.equal(controller.promptAvailable, false)
+
+  controller.handle(historyMsg(['❯ only ask', ...filler(MAX_HISTORY_LINES - 1)]))
+  frames.flush()
+  assert.equal(controller.promptAvailable, true)
+
+  // The cap pushes the only prompt off the top.
+  controller.handle(historyMsg(filler(5, 'later')))
+  frames.flush()
+  assert.equal(history.lines[0], 'line 4')
+  assert.equal(controller.promptAvailable, false)
+
+  controller.handle(historyMsg(['❯ again'], true))
+  frames.flush()
+  assert.equal(controller.promptAvailable, true)
+  controller.handle(historyMsg(['plain'], true))
+  frames.flush()
+  assert.equal(controller.promptAvailable, false)
+  assert.deepEqual(seen, [true, false, true, false])
+})
+
+test('prompt jump: a trim under the reader keeps the step order by shifting the cursor', () => {
+  const scroll = fakeScroll(MAX_HISTORY_LINES * 10 + 400, 400)
+  const history = fakeHistory(10, scroll)
+  const { frames, controller, bringUp } = setup({ scroll, history })
+  bringUp()
+  const lines = filler(MAX_HISTORY_LINES)
+  lines[1000] = '❯ a'
+  lines[2000] = '❯ b'
+  lines[2500] = '❯ c'
+  controller.handle(historyMsg(lines))
+  frames.flush()
+  controller.jumpToPrompt() // c
+  controller.jumpToPrompt() // b
+  assert.equal(scroll.scrollTop, 2000 * 10 - PROMPT_JUMP_MARGIN_PX)
+  // 100 rows fall off the top; b is now row 1900 and the next step must still be a, not b again.
+  controller.handle(historyMsg(filler(100, 'new')))
+  frames.flush()
+  controller.jumpToPrompt()
+  assert.equal(scroll.scrollTop, 900 * 10 - PROMPT_JUMP_MARGIN_PX)
 })
 
 test('history: messages for another window are ignored', () => {
