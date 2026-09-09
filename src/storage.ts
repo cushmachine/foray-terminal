@@ -9,6 +9,8 @@ export const LAST_SESSION_KEY = 'nest:lastSession'
 export const FONT_SIZE_KEY = 'nest:fontSize'
 /** The desktop key-toolbar choice ('true' | 'false'); touch layouts ignore it. */
 export const KEY_TOOLBAR_KEY = 'nest:keyToolbar'
+/** Whether the sidebar's past-sessions section is open ('true' / 'false'). */
+export const PAST_SESSIONS_KEY = 'nest:pastSessions'
 
 /** The Composer's unsent text, one entry per session id. */
 export function draftKeyFor(sessionId: number): string {

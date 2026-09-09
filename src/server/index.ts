@@ -13,9 +13,12 @@ import { existsSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import { WebSocketServer, type WebSocket } from 'ws'
 import type { ServerMessage, TmuxWindow } from '../shared/protocol.ts'
-import { enableExtendedKeys, listWindows, type TmuxExecutor } from './tmux.ts'
+import { enableExtendedKeys, listWindows, mirrorTitles, type TmuxExecutor } from './tmux.ts'
 import type { PtySpawner } from './pty-bridge.ts'
 import { handleConnection, type Connection } from './ws-handler.ts'
+import { PastSessions } from './pastSessions.ts'
+import { providersFromEnv } from './agents/index.ts'
+import type { AgentProvider } from './agents/types.ts'
 import { describeCheckout, readServedClientBuild } from './build.ts'
 import { SILENT, scopedLog, type Logger } from './log.ts'
 import {
@@ -74,6 +77,12 @@ export interface ServerOptions {
   ptySpawner?: PtySpawner
   /** Override how tmux is invoked (tests inject an in-memory fake). */
   tmuxExec?: TmuxExecutor
+  /**
+   * Agents whose past sessions the sidebar lists (src/server/agents).
+   * Defaults to those found on this machine per the environment; tests
+   * pass [] so they never read this machine's transcripts.
+   */
+  agents?: AgentProvider[]
   /**
    * Directory holding the built client to serve. Defaults to <cwd>/dist
    * when NODE_ENV is production, and to nothing otherwise; an explicit
@@ -250,7 +259,8 @@ export function startServer(
   /** The session list now, or the last good one when tmux itself failed. */
   const currentWindows = async (): Promise<TmuxWindow[]> => {
     try {
-      lastWindows = await listWindows(tmuxExec)
+      // Unnamed sessions take their program's title as their tmux name.
+      lastWindows = await mirrorTitles(await listWindows(tmuxExec), tmuxExec)
       // A listing proves the tmux server is up; an empty one is what a
       // server that has gone looks like, and its successor starts bare.
       if (lastWindows.length > 0) void ensureExtendedKeys()
@@ -362,6 +372,8 @@ export function startServer(
     return true
   }
 
+  const pastSessions = new PastSessions(options.agents ?? providersFromEnv(), { tmuxExec })
+
   wss.on('connection', (ws, req) => {
     const remote = req.socket.remoteAddress ?? 'unknown'
     const userAgent = String(req.headers['user-agent'] ?? '').slice(0, 160)
@@ -375,6 +387,7 @@ export function startServer(
       broadcast: (msg) => broadcast(wss, msg),
       ptySpawner: options.ptySpawner,
       tmuxExec,
+      pastSessions,
       logger,
       // The welcome is the session list. If any windows already have
       // clients attached (this is a tab reconnecting to a server other

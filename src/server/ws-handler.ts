@@ -9,8 +9,10 @@
 import type { WebSocket } from 'ws'
 import { MAX_HISTORY_LINES, type ClientMessage, type ErrorMessage, type ServerMessage } from '../shared/protocol.ts'
 import {
-  listWindows, createWindow, killWindow, renameWindow, paneHistoryState, captureHistoryLines, type TmuxExecutor,
+  listWindows, createWindow, killWindow, renameWindow, runInWindow, unmarkNamed, paneHistoryState,
+  captureHistoryLines, type TmuxExecutor,
 } from './tmux.ts'
+import type { PastSessions } from './pastSessions.ts'
 import { planHistoryUpdate, alignHistory, nextTail } from './history.ts'
 import { attachToPane, type PtyHandle, type PtySpawner } from './pty-bridge.ts'
 import { getTree, readFile, writeFile, watchDir, resolveRoot, type Watcher } from './files.ts'
@@ -103,6 +105,8 @@ export interface ConnectionDeps {
   ptySpawner?: PtySpawner
   /** How tmux is invoked; undefined means the real binary. */
   tmuxExec?: TmuxExecutor
+  /** Past agent sessions and their revival; undefined means none are configured. */
+  pastSessions?: PastSessions
   logger: Logger
   /**
    * Send the welcome (session list and, if any, ownership). Runs as the
@@ -172,6 +176,8 @@ const SHAPES: Shapes = {
   'session:create': { name: 'string?', cwd: 'string?' },
   'session:kill': { windowId: 'number' },
   'session:rename': { windowId: 'number', name: 'string' },
+  'sessions:past': {},
+  'session:revive': { agent: 'string', sessionId: 'string' },
   'files:tree': { cwd: 'string' },
   'files:read': { path: 'string' },
   'files:write': { path: 'string', content: 'string' },
@@ -240,7 +246,7 @@ type Handlers = { [T in ClientMessage['type']]: (msg: MessageOf<T>) => void | Pr
  */
 export function handleConnection(ws: WebSocket, deps: ConnectionDeps): Connection {
   const {
-    remoteAddress, send, broadcast, ptySpawner, tmuxExec, logger, welcome, claimWindow, releaseWindow,
+    remoteAddress, send, broadcast, ptySpawner, tmuxExec, pastSessions, logger, welcome, claimWindow, releaseWindow,
     releaseAllWindows, dropAttachmentsFor, userAgent, serverBuild, servedClientBuild,
   } = deps
   const log = scopedLog(logger, 'ws')
@@ -445,6 +451,20 @@ export function handleConnection(ws: WebSocket, deps: ConnectionDeps): Connectio
     'session:rename': async (msg) => {
       await renameWindow(msg.windowId, msg.name, tmuxExec)
       broadcast({ type: 'session:renamed', windowId: msg.windowId, name: msg.name })
+    },
+    'sessions:past': async () => {
+      // A read-only query: answered to the asker, not broadcast.
+      send({ type: 'sessions:past', sessions: pastSessions ? await pastSessions.list() : [] })
+    },
+    'session:revive': async (msg) => {
+      if (!pastSessions) throw new ClientError('No agents configured')
+      const { name, cwd, command } = await pastSessions.resolve(msg.agent, msg.sessionId)
+      const window = await createWindow(name, cwd, tmuxExec)
+      // The name is Nest's guess from the transcript, not the user's: the
+      // agent's own title takes over once it is running (mirrorTitles).
+      await unmarkNamed(window.id, tmuxExec)
+      await runInWindow(window.id, command, tmuxExec)
+      broadcast({ type: 'session:created', window: { ...window, named: false } })
     },
     'terminal:attach': attach,
     'terminal:detach': (msg) => detach(msg.windowId),

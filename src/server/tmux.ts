@@ -66,6 +66,101 @@ export function sessionNameFor(name: string): string {
   return `${PREFIX}${safe}`
 }
 
+/** The user-facing name of a Nest session from its tmux session name; undefined when it is not one. */
+export function nestNameOf(tmuxSession: string): string | undefined {
+  return tmuxSession.startsWith(PREFIX) ? tmuxSession.slice(PREFIX.length) : undefined
+}
+
+/** Longest session name made from a title. */
+const SLUG_CHARS = 24
+
+/**
+ * A short tmux-safe name from a free-text title: lowercase, runs of
+ * anything but [a-z0-9_-] collapsed to one '-' (so a program's status
+ * glyph in front of its title goes too), cut to SLUG_CHARS at a word
+ * boundary. `fallback` when nothing is left.
+ */
+export function slugName(title: string, fallback: string): string {
+  const slug = title
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+  if (slug.length <= SLUG_CHARS) return slug || fallback
+  const cut = slug.slice(0, SLUG_CHARS)
+  // Drop the word the cut landed in, unless it is the only one.
+  const atWord = cut.lastIndexOf('-')
+  return (atWord > 0 ? cut.slice(0, atWord) : cut).replace(/-+$/, '') || fallback
+}
+
+/** How many `-N` suffixes to try when a mirrored name is taken. */
+const MIRROR_ATTEMPTS = 10
+
+/**
+ * Give every session the user has not named a tmux name that mirrors the
+ * title its program set (Claude Code's own title or its /rename, say), so
+ * `tmux ls`, the agent's own records and the sidebar all call a session
+ * the same thing. Called on each listing; a session whose name already
+ * matches costs nothing, and one without a meaningful title keeps the
+ * name it has (its last title, or the default). A taken name gets a `-N`
+ * suffix. Rename failures are left for the next listing to retry.
+ * Returns the list with the new names in place.
+ */
+export async function mirrorTitles(
+  windows: TmuxWindow[],
+  exec: TmuxExecutor = defaultExec,
+): Promise<TmuxWindow[]> {
+  const out: TmuxWindow[] = []
+  for (const w of windows) {
+    if (w.named || !w.title) {
+      out.push(w)
+      continue
+    }
+    const wanted = slugName(w.title, '')
+    // Already the slug, or the slug with the suffix a collision gave it.
+    if (!wanted || w.name === wanted || /^-\d+$/.test(w.name.slice(wanted.length)) && w.name.startsWith(`${wanted}-`)) {
+      out.push(w)
+      continue
+    }
+    let renamedTo: string | undefined
+    for (let attempt = 0; attempt < MIRROR_ATTEMPTS; attempt++) {
+      const candidate = attempt === 0 ? wanted : `${wanted}-${attempt}`
+      if (candidate === w.name) break
+      try {
+        await exec('tmux', ['rename-session', '-t', `$${w.id}`, `${PREFIX}${candidate}`])
+        renamedTo = candidate
+        break
+      } catch (err) {
+        if (isDuplicate(err)) continue
+        break
+      }
+    }
+    out.push(renamedTo === undefined ? w : { ...w, name: renamedTo })
+  }
+  return out
+}
+
+/**
+ * Every tmux window on the server, by window id ("@6"), to the name of
+ * the session holding it. Window ids never change, session names do
+ * (see mirrorTitles), so a record that names a session by its window id
+ * can still be resolved after a rename. Empty when tmux is not running.
+ */
+export async function listWindowSessions(exec: TmuxExecutor = defaultExec): Promise<Map<string, string>> {
+  let stdout: string
+  try {
+    ;({ stdout } = await exec('tmux', ['list-windows', '-a', '-F', `#{window_id}${SEP}#{session_name}`]))
+  } catch (err) {
+    if (isNoServer(err)) return new Map()
+    throw err
+  }
+  const map = new Map<string, string>()
+  for (const line of stdout.trim().split('\n')) {
+    const [windowId, session] = line.split(SEP)
+    if (windowId && session) map.set(windowId, session)
+  }
+  return map
+}
+
 /** Whether a tmux failure's stderr or message mentions `text`. */
 function failureMentions(err: unknown, text: string): boolean {
   const e = err as { stderr?: string; message?: string } | null
@@ -262,6 +357,29 @@ export async function killWindow(
   exec: TmuxExecutor = defaultExec,
 ): Promise<void> {
   await exec('tmux', ['kill-session', '-t', `$${sessionId}`])
+}
+
+/**
+ * Drop the "user named this" stamp so the session's name mirrors its
+ * program's title again (mirrorTitles). For sessions created with a
+ * name Nest chose, not the user.
+ */
+export async function unmarkNamed(sessionId: number, exec: TmuxExecutor = defaultExec): Promise<void> {
+  await exec('tmux', ['set', '-u', '-t', `$${sessionId}`, NAMED_OPTION])
+}
+
+/**
+ * Type a command line into a Nest session's shell and press Enter, as the
+ * user would. The command runs under the interactive shell (its rc file
+ * loaded) and the shell outlives it. Callers quote the command; tmux
+ * passes it through as keystrokes.
+ */
+export async function runInWindow(
+  sessionId: number,
+  command: string,
+  exec: TmuxExecutor = defaultExec,
+): Promise<void> {
+  await exec('tmux', ['send-keys', '-t', `$${sessionId}`, command, 'Enter'])
 }
 
 /**

@@ -38,6 +38,7 @@ import { TopBar } from './TopBar'
 import { Toast, failureText } from './Toast'
 import { VersionBanner } from './VersionBanner'
 import { readPageBuild, versionNotice, type VersionNotice } from './version'
+import type { PastSession } from './shared/protocol'
 
 function useFontSize(isMobile: boolean): [number, (size: number) => void] {
   const [fontSize, setFontSizeState] = useState(() =>
@@ -79,6 +80,8 @@ export function App() {
   // A failure nothing else shows (a rejected session op); see Toast.
   const [toast, setToast] = useState<string | null>(null)
   const dismissToast = useCallback(() => setToast(null), [])
+  // Past agent sessions from disk; null until the first reply arrives.
+  const [pastSessions, setPastSessions] = useState<PastSession[] | null>(null)
 
   const isMobile = useIsMobile()
   // Listeners installed once (the socket handler, the keyboard shortcuts)
@@ -158,6 +161,14 @@ export function App() {
         setOwnership(next)
         return
       }
+      if (msg.type === 'sessions:past') {
+        setPastSessions(msg.sessions)
+        return
+      }
+      // The server sends a list on connect and whenever it changes (a
+      // session appearing, a shell becoming an agent); each is a moment
+      // the past list and its live chips may have changed too.
+      if (msg.type === 'session:list') send({ type: 'sessions:past' })
       // Errors the file panel (files:*) and the terminals (terminal:*, shown
       // as the exited overlay) do not own go to the toast so a failed
       // session op isn't silent. The reducer sees every error too: a
@@ -175,7 +186,7 @@ export function App() {
         savedRaw: msg.type === 'session:list' ? storageGet(LAST_SESSION_KEY) : null,
       })
     })
-  }, [onMessage])
+  }, [onMessage, send])
 
   // The toolbar and the Composer act on the active terminal through the
   // registry; neither knows about sessions or the socket.
@@ -205,6 +216,13 @@ export function App() {
 
   const killSession = useCallback((id: number) => {
     send({ type: 'session:kill', windowId: id })
+  }, [send])
+
+  // A revive arrives as an ordinary session:created, so the same wait
+  // makes only this device switch to it.
+  const reviveSession = useCallback((agent: string, sessionId: string) => {
+    dispatchSessions({ type: 'create' })
+    send({ type: 'session:revive', agent, sessionId })
   }, [send])
 
   const renameSession = useCallback((id: number, name: string) => {
@@ -274,6 +292,8 @@ export function App() {
           onCreate={createSession}
           onKill={killSession}
           onRename={renameSession}
+          pastSessions={pastSessions}
+          onRevive={reviveSession}
           onClose={() => applyPanelAction('close-sidebar')}
           isOpen={sidebarOpen}
           isMobile={isMobile}

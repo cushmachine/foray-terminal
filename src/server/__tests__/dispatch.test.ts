@@ -12,7 +12,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import type { ClientMessage } from '../../shared/protocol.ts'
-import { connect, startTestServer, tmpDir, waitForMessage, waitForType, type Msg } from './helpers.ts'
+import { connect, fakeAgent, fakeSession, startTestServer, tmpDir, waitForMessage, waitForType, type Msg } from './helpers.ts'
 
 interface Case {
   /** Required field with the wrong type; absent for types with no fields. */
@@ -45,7 +45,7 @@ async function sendThenSettle(ws: WebSocket, msg: object): Promise<Msg[]> {
 test('every client message type rejects a wrong-typed field and accepts a well-formed one', async () => {
   const dir = await tmpDir()
   await fs.writeFile(path.join(dir, 'a.txt'), 'a')
-  const { url, close, tmux } = await startTestServer()
+  const { url, close, tmux } = await startTestServer({ agents: [fakeAgent([fakeSession('old')])] })
   tmux.add('shell')
   try {
     const { ws } = await connect(url)
@@ -57,6 +57,8 @@ test('every client message type rejects a wrong-typed field and accepts a well-f
       'session:list': { good: {}, reply: 'session:list' },
       'session:create': { bad: { name: 42 }, good: { name: 'made' }, reply: 'session:created' },
       'session:rename': { bad: { windowId: 0, name: 42 }, good: { windowId: 0, name: 'renamed' }, reply: 'session:renamed' },
+      'sessions:past': { good: {}, reply: 'sessions:past' },
+      'session:revive': { bad: { agent: 'fake', sessionId: 42 }, good: { agent: 'fake', sessionId: 'old' }, reply: 'session:created' },
       'terminal:attach': { bad: { windowId: '0' }, good: { windowId: 0, cols: 80, rows: 24 }, reply: 'terminal:history' },
       'terminal:input': { bad: { windowId: 0, data: 42 }, good: { windowId: 0, data: 'x' } },
       'terminal:resize': { bad: { windowId: 0, cols: '80', rows: 24 }, good: { windowId: 0, cols: 81, rows: 24 } },

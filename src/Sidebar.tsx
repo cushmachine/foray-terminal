@@ -3,6 +3,9 @@ import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { displayName, sortSessions, type Session } from './sessionState'
 import { isEditableTarget, useEscape } from './hooks/useEscape'
 import { MAX_FONT_SIZE, MIN_FONT_SIZE } from './mobile'
+import { relativeTime, showsAgent, visiblePast } from './pastSessionsView'
+import { PAST_SESSIONS_KEY, storageGet, storageSet } from './storage'
+import type { PastSession } from './shared/protocol'
 
 interface SidebarProps {
   sessions: Session[]
@@ -11,6 +14,10 @@ interface SidebarProps {
   onCreate: () => void
   onKill: (id: number) => void
   onRename: (id: number, name: string) => void
+  /** Past agent sessions on disk, newest first; null while the first scan is pending. */
+  pastSessions?: PastSession[] | null
+  /** Open a new session resuming a past one. */
+  onRevive?: (agent: string, sessionId: string) => void
   /** Close the drawer (mobile only; desktop uses the top-bar toggle). */
   onClose: () => void
   isOpen: boolean
@@ -38,6 +45,8 @@ export function Sidebar({
   onCreate,
   onKill,
   onRename,
+  pastSessions = null,
+  onRevive,
   onClose,
   isOpen,
   isMobile,
@@ -58,6 +67,23 @@ export function Sidebar({
     const timer = setTimeout(() => setConfirmKillId(null), KILL_CONFIRM_MS)
     return () => clearTimeout(timer)
   }, [confirmKillId])
+
+  // The past-sessions section folds away and remembers it; "show more"
+  // does not, so a long list is short again next time.
+  const [pastOpen, setPastOpen] = useState(() => storageGet(PAST_SESSIONS_KEY) === 'true')
+  const [pastExpanded, setPastExpanded] = useState(false)
+  const togglePast = () => {
+    setPastOpen(open => {
+      storageSet(PAST_SESSIONS_KEY, open ? 'false' : 'true')
+      return !open
+    })
+  }
+  const past = visiblePast(pastSessions ?? [], pastExpanded)
+  const showAgent = showsAgent(pastSessions ?? [])
+  const now = Date.now()
+  /** The live Nest session a running past session is in, if it is one of ours. */
+  const liveWindowFor = (row: PastSession): Session | undefined =>
+    row.liveIn === undefined ? undefined : sessions.find(s => s.name === row.liveIn)
 
   // The drawer is a modal layer: Escape closes it, and keyboard focus
   // moves in while it is open and back out when it closes. Focus is not
@@ -355,6 +381,142 @@ export function Sidebar({
             </div>
           )
         })}
+      </div>
+
+      {/* Past sessions: agent transcripts on disk, one tap to resume. */}
+      <div data-testid="past-sessions" style={{
+        borderTop: '1px solid var(--border-subtle)',
+        display: 'flex',
+        flexDirection: 'column',
+        flexShrink: 0,
+        maxHeight: '45%',
+        minHeight: 0,
+      }}>
+        <button
+          className="btn-ghost"
+          data-testid="past-sessions-toggle"
+          aria-expanded={pastOpen}
+          onClick={togglePast}
+          style={{
+            justifyContent: 'space-between',
+            padding: '8px 16px',
+            minHeight: hit,
+            borderRadius: 0,
+            flexShrink: 0,
+          }}
+        >
+          <span style={{
+            fontSize: 10,
+            fontWeight: 600,
+            textTransform: 'uppercase',
+            letterSpacing: '0.1em',
+            color: 'var(--text-faint)',
+          }}>
+            Past sessions{pastSessions && pastSessions.length > 0 ? ` · ${pastSessions.length}` : ''}
+          </span>
+          <span aria-hidden style={{ fontSize: 11, color: 'var(--text-faint)' }}>{pastOpen ? '▾' : '▸'}</span>
+        </button>
+        {pastOpen && (
+          <div data-testid="past-session-list" style={{ overflowY: 'auto', minHeight: 0, padding: '0 8px 8px', overscrollBehavior: 'contain' }}>
+            {pastSessions === null || pastSessions.length === 0 ? (
+              <div style={{ padding: '4px 12px 8px', fontSize: 12, color: 'var(--text-faint)' }}>
+                {pastSessions === null ? 'scanning…' : 'no past sessions'}
+              </div>
+            ) : (
+              <>
+                {past.shown.map(row => {
+                  const liveWindow = liveWindowFor(row)
+                  // A running session cannot be resumed (that would fork it);
+                  // when it lives in one of our sessions the row jumps there.
+                  const disabled = row.live && !liveWindow
+                  const hint = row.live
+                    ? liveWindow ? `Running in "${displayName(liveWindow)}" — open it` : 'Running outside nest'
+                    : `Resume: ${row.lastPrompt || row.title}`
+                  return (
+                    <button
+                      key={`${row.agent}:${row.id}`}
+                      className="btn-ghost"
+                      data-testid="past-session-item"
+                      data-live={row.live ? 'true' : 'false'}
+                      disabled={disabled}
+                      title={hint}
+                      aria-label={row.live ? `Open ${row.title}` : `Resume ${row.title}`}
+                      onClick={() => {
+                        if (liveWindow) onSelect(liveWindow.id)
+                        else if (!row.live) onRevive?.(row.agent, row.id)
+                      }}
+                      style={{
+                        width: '100%',
+                        minHeight: hit,
+                        justifyContent: 'flex-start',
+                        gap: 10,
+                        padding: '6px 12px',
+                        marginBottom: 2,
+                        textAlign: 'left',
+                        whiteSpace: 'normal',
+                      }}
+                    >
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          fontSize: 13,
+                          color: row.live ? 'var(--text-dim)' : 'var(--text)',
+                          overflow: 'hidden',
+                        }}>
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {row.title}
+                          </span>
+                          {row.live && (
+                            <span style={{
+                              flexShrink: 0,
+                              fontSize: 9,
+                              fontWeight: 600,
+                              letterSpacing: '0.08em',
+                              textTransform: 'uppercase',
+                              color: 'var(--accent)',
+                              border: '1px solid var(--accent-dim)',
+                              borderRadius: 'var(--radius-sm)',
+                              padding: '0 4px',
+                            }}>
+                              live
+                            </span>
+                          )}
+                          {showAgent && (
+                            <span style={{ flexShrink: 0, fontSize: 10, color: 'var(--text-faint)' }}>
+                              {row.agentLabel}
+                            </span>
+                          )}
+                        </div>
+                        <div style={{
+                          fontSize: 11,
+                          color: 'var(--text-dim)',
+                          marginTop: 1,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}>
+                          {shortenPath(row.cwd)} · {relativeTime(row.lastActive, now)}
+                        </div>
+                      </div>
+                    </button>
+                  )
+                })}
+                {past.hidden > 0 && (
+                  <button
+                    className="btn-ghost"
+                    data-testid="past-sessions-more"
+                    onClick={() => setPastExpanded(true)}
+                    style={{ width: '100%', minHeight: hit, fontSize: 12, color: 'var(--text-dim)' }}
+                  >
+                    show {past.hidden} more
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+        )}
       </div>
 
       {/* New session */}

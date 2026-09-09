@@ -17,6 +17,7 @@ import { SEP, type TmuxExecutor } from '../tmux.ts'
 import type { PtyProcess, PtySpawner } from '../pty-bridge.ts'
 import { handleConnection, type ConnectionDeps } from '../ws-handler.ts'
 import type { Logger } from '../log.ts'
+import type { AgentProvider, AgentSession, LiveSession } from '../agents/types.ts'
 
 /** A parsed protocol message; the fields beyond `type` are whatever it carries. */
 export type Msg = { type: string } & Record<string, any>
@@ -127,12 +128,24 @@ export function fakeTmux(): FakeTmux {
       case 'kill-session':
         sessions.delete(target(args).id)
         return ok()
-      case 'rename-session':
-        target(args).name = args[args.length - 1]
+      case 'rename-session': {
+        // As tmux does: its own name is fine, anyone else's is a duplicate.
+        const name = args[args.length - 1]
+        const s = target(args)
+        if ([...sessions.values()].some((other) => other !== s && other.name === name)) fail(`duplicate session: ${name}`)
+        s.name = name
+        return ok()
+      }
+      case 'list-windows':
+        // One window per fake session; its id is the session's.
+        return ok([...sessions.values()].map((s) => `@${s.id}${SEP}${s.name}\n`).join(''))
+      case 'send-keys':
+        // Recorded in `calls`; the fake pane runs nothing.
+        target(args)
         return ok()
       case 'set':
         // Server options (-s) and `status off` change nothing observable here.
-        if (args.includes(NAMED_OPTION)) target(args).named = true
+        if (args.includes(NAMED_OPTION)) target(args).named = !args.includes('-u')
         return ok()
       case 'display-message': {
         const s = target(args)
@@ -159,6 +172,34 @@ export function fakeTmux(): FakeTmux {
   }
 
   return { exec, sessions, calls, add }
+}
+
+// ---------------------------------------------------------------------------
+// Fake agent
+// ---------------------------------------------------------------------------
+
+/** A past session of the fake agent with sensible defaults. */
+export function fakeSession(id: string, overrides: Partial<AgentSession> = {}): AgentSession {
+  return { id, title: `Session ${id}`, lastPrompt: '', cwd: os.homedir(), branch: '', lastActive: 1000, ...overrides }
+}
+
+/**
+ * An agent whose sessions are the given lists and whose ids are short
+ * words. Its resume command is `agent --resume <id>`.
+ */
+export function fakeAgent(
+  sessions: AgentSession[] = [],
+  live: LiveSession[] = [],
+  id = 'fake',
+): AgentProvider {
+  return {
+    id,
+    label: `Fake ${id}`,
+    isSessionId: (candidate) => /^[a-z0-9-]{1,32}$/.test(candidate),
+    scan: async () => sessions,
+    live: async () => live,
+    resumeCommand: (session) => ['agent', '--resume', session],
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -257,6 +298,8 @@ export async function startTestServer(options: ServerOptions = {}): Promise<Test
     tmuxExec: tmux.exec,
     ptySpawner: spawner,
     quiet: true,
+    // Never this machine's own transcripts; a suite injects its own provider.
+    agents: [],
     ...options,
   })
   return { url: started.url, server: started.server, close: started.close, tmux, ptys }

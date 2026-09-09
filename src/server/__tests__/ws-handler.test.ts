@@ -63,6 +63,15 @@ const VALIDATION: Record<ClientMessage['type'], ValidationCase> = {
     bad: [{ payload: { windowId: true }, field: 'windowId' }],
   },
   'session:list': { good: {}, bad: [] },
+  'sessions:past': { good: {}, bad: [] },
+  'session:revive': {
+    good: { agent: 'claude', sessionId: 'abc' },
+    bad: [
+      { payload: { agent: 1, sessionId: 'abc' }, field: 'agent' },
+      { payload: { agent: 'claude', sessionId: null }, field: 'sessionId' },
+      { payload: { agent: 'claude' }, field: 'sessionId' },
+    ],
+  },
   'session:create': {
     good: {},
     bad: [
@@ -348,10 +357,13 @@ test('session:create without a name makes an unnamed "bash" session', async () =
 test('session:create and session:rename sanitise the name the same way', async () => {
   const conn = handleTestConnection()
   await handled(conn, { type: 'session:create', name: 'a.b:c' })
-  await handled(conn, { type: 'session:create', name: 'plain' })
-  await handled(conn, { type: 'session:rename', windowId: 1, name: 'a.b:c' })
-  assert.equal(conn.tmux.sessions.get(0)?.name, conn.tmux.sessions.get(1)?.name)
-  assert.doesNotMatch(conn.tmux.sessions.get(1)!.name, /[.:]/, 'tmux would reject this name')
+  const created = conn.tmux.sessions.get(0)!.name
+  assert.doesNotMatch(created, /[.:]/, 'tmux would reject this name')
+  // Renaming to the same raw input must land on the same tmux name: the
+  // fake, like tmux, accepts a session's own name and rejects a taken one.
+  await handled(conn, { type: 'session:rename', windowId: 0, name: 'a.b:c' })
+  assert.deepEqual(sentOf(conn, 'error'), [])
+  assert.equal(conn.tmux.sessions.get(0)?.name, created)
   conn.socket.emit('close')
 })
 

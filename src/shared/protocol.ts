@@ -32,6 +32,31 @@ export interface TmuxWindow {
   named: boolean
 }
 
+/**
+ * A past agent session found on disk (src/server/agents), revivable into
+ * a new Nest session. `agent` is the provider id ("claude"); the client
+ * hands it back unchanged in `session:revive`.
+ */
+export interface PastSession {
+  agent: string
+  /** Human name of the agent, shown when more than one is configured. */
+  agentLabel: string
+  /** The agent's own session id. */
+  id: string
+  title: string
+  /** The user's latest ask, or '' when unknown. */
+  lastPrompt: string
+  cwd: string
+  /** Git branch at the time, or ''. */
+  branch: string
+  /** Last activity, ms since the epoch. */
+  lastActive: number
+  /** Running right now; cannot be revived without forking it. */
+  live: boolean
+  /** The Nest session (tmux name without the nest_ prefix) it runs in, when known. */
+  liveIn?: string
+}
+
 /** A node in a file tree — either a file or a directory. */
 export interface FileNode {
   name: string
@@ -105,6 +130,22 @@ export interface SessionRenameMessage {
   name: string
 }
 
+/** Ask for the past sessions of every configured agent; answered with `sessions:past`. */
+export interface PastSessionsRequest {
+  type: 'sessions:past'
+}
+
+/**
+ * Open a new Nest session in the past session's directory, running the
+ * agent's resume command. Answered with the usual `session:created`
+ * broadcast, or an `error` naming `session:revive`.
+ */
+export interface SessionReviveMessage {
+  type: 'session:revive'
+  agent: string
+  sessionId: string
+}
+
 export interface FilesTreeRequest {
   type: 'files:tree'
   cwd: string
@@ -162,6 +203,8 @@ export type ClientMessage =
   | SessionCreateMessage
   | SessionKillMessage
   | SessionRenameMessage
+  | PastSessionsRequest
+  | SessionReviveMessage
   | FilesTreeRequest
   | FilesReadMessage
   | FilesWriteMessage
@@ -199,6 +242,12 @@ export interface SessionRenamedMessage {
   type: 'session:renamed'
   windowId: number
   name: string
+}
+
+/** Reply to `sessions:past`: newest first, live ones marked. */
+export interface PastSessionsMessage {
+  type: 'sessions:past'
+  sessions: PastSession[]
 }
 
 /**
@@ -333,6 +382,7 @@ export type ServerMessage =
   | SessionCreatedMessage
   | SessionKilledMessage
   | SessionRenamedMessage
+  | PastSessionsMessage
   | FilesTreeMessage
   | FilesContentMessage
   | FilesSavedMessage
