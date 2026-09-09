@@ -3,8 +3,9 @@
 # deploy; safe to run by hand. Idempotent. It only ever starts the unit;
 # stopping or restarting it kills every session, so nothing here does that.
 #
-# 1. Install scripts/systemd/nest-tmux.service (and the pm2 OOM drop-in)
-#    when the copy under /etc differs, then start/enable the unit.
+# 1. Install scripts/systemd/nest-tmux.service (plus the pm2 OOM drop-in and
+#    the needrestart exclusion) when the copy under /etc differs, then
+#    start/enable the unit.
 # 2. If a tmux server is running outside that unit (e.g. one the nest app
 #    spawned under pm2 before the unit existed), move it and all of its
 #    descendants into the unit's cgroup. cgroup v2 lets root re-home live
@@ -29,6 +30,9 @@ changed=0
 install_if_changed scripts/systemd/nest-tmux.service "/etc/systemd/system/$UNIT" && changed=1
 install_if_changed scripts/systemd/pm2-root-override.conf \
   /etc/systemd/system/pm2-root.service.d/override.conf && changed=1
+# needrestart (run by unattended-upgrades) must never restart the unit.
+install_if_changed scripts/systemd/needrestart-nest-tmux.conf \
+  /etc/needrestart/conf.d/nest-tmux.conf
 if [ "$changed" = 1 ]; then
   systemctl daemon-reload
   systemctl enable "$UNIT" >/dev/null 2>&1
