@@ -2,7 +2,7 @@
 //
 // Run with: npm run test:keys   (requires tmux)
 //
-// Nest's xterm sends Shift+Enter as CSI u (ESC [ 13 ; 2 u). tmux parses
+// Foray's xterm sends Shift+Enter as CSI u (ESC [ 13 ; 2 u). tmux parses
 // that as the key Enter+Shift and, unless told to pass extended keys on to
 // the pane, re-encodes it as a plain carriage return. Claude Code inside
 // the pane then sees Enter and submits instead of inserting a newline.

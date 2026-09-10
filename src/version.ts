@@ -36,7 +36,7 @@ export function versionNotice(
   // The bundle on disk is not the one this page is running: the page is
   // stale. Checked first because it is the case a reload actually fixes.
   if (hello.clientBuild !== null && hello.clientBuild !== pageBuild) {
-    return { kind: 'stale-page', text: 'Nest was updated. Reload to get the new version.' }
+    return { kind: 'stale-page', text: 'Foray was updated. Reload to get the new version.' }
   }
 
   // The server process was started from a different commit than this page

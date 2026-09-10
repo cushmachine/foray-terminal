@@ -1,4 +1,4 @@
-// Express + WebSocket server for Nest.
+// Express + WebSocket server for Foray.
 //
 // Serves the built client (in production), accepts image uploads at
 // POST /api/upload, and upgrades `/ws` connections for the
@@ -220,7 +220,7 @@ function servedClientDist(options: ServerOptions): string | null {
 }
 
 /**
- * Start the Nest server. Pass port 0 to let the OS assign a free port
+ * Start the Foray server. Pass port 0 to let the OS assign a free port
  * (used by tests so multiple suites can run without colliding).
  */
 export function startServer(
@@ -248,7 +248,7 @@ export function startServer(
   }
   void ensureExtendedKeys()
 
-  // Live refresh. Only changes made through Nest (create/kill/rename) reach
+  // Live refresh. Only changes made through Foray (create/kill/rename) reach
   // us as messages. A `cd` in the shell, or a program retitling its
   // terminal (Claude Code's /rename), changes what the sidebar should show
   // with no message at all. tmux has no hook for cwd changes, so while

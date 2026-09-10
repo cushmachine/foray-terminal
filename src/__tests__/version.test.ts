@@ -15,7 +15,7 @@ test('readBuildIdFromHtml finds the meta tag vite injects', () => {
 })
 
 test('readBuildIdFromHtml is null for a page without one, or an empty one', () => {
-  assert.equal(readBuildIdFromHtml('<html><head><title>Nest</title></head></html>'), null)
+  assert.equal(readBuildIdFromHtml('<html><head><title>Foray</title></head></html>'), null)
   assert.equal(readBuildIdFromHtml('<meta name="nest-build" content="">'), null)
 })
 

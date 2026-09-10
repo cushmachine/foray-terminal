@@ -1,7 +1,7 @@
 // PTY bridge: attaches to a tmux session via node-pty.
 //
 // Each WebSocket client that views a terminal gets its own pty process
-// running `tmux attach-session -t $<windowId>`: every Nest session is its own
+// running `tmux attach-session -t $<windowId>`: every Foray session is its own
 // tmux session, and windowId is that session's tmux id.
 
 import * as pty from 'node-pty'
@@ -45,7 +45,7 @@ export interface PtyEvents {
 }
 
 /**
- * Attach a pty to a Nest session (a tmux session whose id is `windowId`).
+ * Attach a pty to a Foray session (a tmux session whose id is `windowId`).
  * The pty runs `tmux attach-session -t $<windowId>`.
  */
 export function attachToPane(

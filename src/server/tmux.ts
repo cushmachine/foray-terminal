@@ -1,6 +1,6 @@
-// Tmux CLI wrapper for Nest.
+// Tmux CLI wrapper for Foray.
 //
-// Each Nest "session" is its own tmux session (not a window within one
+// Each Foray "session" is its own tmux session (not a window within one
 // session). This avoids shared views and size-mismatch artifacts when
 // multiple terminals are open. Sessions are named with a "nest_" prefix.
 
@@ -26,7 +26,7 @@ const PREFIX = 'nest_'
 /**
  * Session user option stamped once the user has explicitly named a session
  * (at create or rename). Lets the UI prefer that name over whatever title
- * the running program sets. Lives in tmux, so it survives Nest restarts.
+ * the running program sets. Lives in tmux, so it survives Foray restarts.
  */
 const NAMED_OPTION = '@nest_named'
 
@@ -66,7 +66,7 @@ export function sessionNameFor(name: string): string {
   return `${PREFIX}${safe}`
 }
 
-/** The user-facing name of a Nest session from its tmux session name; undefined when it is not one. */
+/** The user-facing name of a Foray session from its tmux session name; undefined when it is not one. */
 export function nestNameOf(tmuxSession: string): string | undefined {
   return tmuxSession.startsWith(PREFIX) ? tmuxSession.slice(PREFIX.length) : undefined
 }
@@ -200,8 +200,8 @@ function parseLine(line: string, hostname: string): TmuxWindow | null {
 }
 
 /**
- * List all Nest sessions (tmux sessions with the "nest_" prefix).
- * Returns [] when no Nest sessions exist or the tmux server is not
+ * List all Foray sessions (tmux sessions with the "nest_" prefix).
+ * Returns [] when no Foray sessions exist or the tmux server is not
  * running; any other tmux failure is thrown, so a caller can tell "no
  * sessions" from "tmux is broken" and keep its last good list.
  */
@@ -224,7 +224,7 @@ export async function listWindows(
 }
 
 /**
- * Create a new Nest session. Each session is its own tmux session with
+ * Create a new Foray session. Each session is its own tmux session with
  * one window and the status bar disabled.
  */
 export async function createWindow(
@@ -277,7 +277,7 @@ export async function createWindow(
 }
 
 /**
- * Let modified keys reach the pane as CSI u. Nest's client sends Shift+Enter
+ * Let modified keys reach the pane as CSI u. Foray's client sends Shift+Enter
  * as ESC[13;2u; with tmux's default `extended-keys off` the server parses
  * that as Shift+Enter and hands the pane a bare carriage return, so Claude
  * Code inside submits instead of inserting a newline. These are server
@@ -350,7 +350,7 @@ export async function captureHistoryLines(
 }
 
 /**
- * Kill a Nest session by its tmux session id.
+ * Kill a Foray session by its tmux session id.
  */
 export async function killWindow(
   sessionId: number,
@@ -362,14 +362,14 @@ export async function killWindow(
 /**
  * Drop the "user named this" stamp so the session's name mirrors its
  * program's title again (mirrorTitles). For sessions created with a
- * name Nest chose, not the user.
+ * name Foray chose, not the user.
  */
 export async function unmarkNamed(sessionId: number, exec: TmuxExecutor = defaultExec): Promise<void> {
   await exec('tmux', ['set', '-u', '-t', `$${sessionId}`, NAMED_OPTION])
 }
 
 /**
- * Type a command line into a Nest session's shell and press Enter, as the
+ * Type a command line into a Foray session's shell and press Enter, as the
  * user would. The command runs under the interactive shell (its rc file
  * loaded) and the shell outlives it. Callers quote the command; tmux
  * passes it through as keystrokes.
@@ -383,7 +383,7 @@ export async function runInWindow(
 }
 
 /**
- * Rename a Nest session by its tmux session id, and mark it as explicitly
+ * Rename a Foray session by its tmux session id, and mark it as explicitly
  * named so the UI stops preferring the pane title.
  */
 export async function renameWindow(

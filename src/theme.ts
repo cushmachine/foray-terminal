@@ -9,7 +9,7 @@
 
 import type { ThemeColors } from './ansi'
 
-/** xterm's ITheme, minus the keys Nest leaves at xterm's defaults. */
+/** xterm's ITheme, minus the keys Foray leaves at xterm's defaults. */
 export interface TerminalTheme extends ThemeColors {
   cursor: string
   cursorAccent: string

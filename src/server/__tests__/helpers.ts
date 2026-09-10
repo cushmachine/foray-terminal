@@ -65,7 +65,7 @@ export interface FakeTmux {
   sessions: Map<number, FakeSession>
   /** Every argv handed to tmux, oldest first. */
   calls: string[][]
-  /** Add a Nest session as `tmux new-session` would; ids count up from 0. */
+  /** Add a Foray session as `tmux new-session` would; ids count up from 0. */
   add(name: string, overrides?: Partial<Omit<FakeSession, 'id' | 'name'>>): FakeSession
 }
 

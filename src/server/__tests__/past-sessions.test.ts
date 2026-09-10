@@ -265,7 +265,7 @@ test('session:revive creates a session in the transcript cwd, types the resume c
     const msg = await created
     assert.equal(msg.window.name, 'old-work')
     assert.equal(msg.window.cwd, dir)
-    // Nest's guess at a name, not the user's: the agent's title will replace it.
+    // Foray's guess at a name, not the user's: the agent's title will replace it.
     assert.equal(msg.window.named, false)
     assert.equal(tmux.sessions.get(msg.window.id)?.named, false)
     assert.deepEqual((await seenByOther).window, msg.window, 'every client learns of the new session')

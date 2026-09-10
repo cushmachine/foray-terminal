@@ -4,7 +4,7 @@
 # Normally runs the tmux server in the foreground (`tmux -D`: no daemon,
 # exit-empty off) so the unit owns it and its cgroup holds every session.
 #
-# If a server is already up on the default socket, one that the nest app
+# If a server is already up on the default socket, one that the Foray app
 # spawned under pm2 before this unit existed, we cannot start a second one.
 # Instead hold the unit open while that server lives, so its cgroup exists
 # for scripts/ensure-tmux-unit.sh to adopt the server into. When the old

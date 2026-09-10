@@ -1,4 +1,4 @@
-// Which agents this Nest knows about, from the environment.
+// Which agents this Foray knows about, from the environment.
 //
 // By default every agent whose data directory exists is offered. NEST_AGENTS
 // (comma-separated provider ids) narrows or forces the list; an unknown id

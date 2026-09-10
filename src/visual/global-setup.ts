@@ -36,7 +36,7 @@ export default function globalSetup(config: FullConfig): void {
   try {
     tmux(['has-session', '-t', SEED_SESSION])
   } catch {
-    // The same options Nest's own create applies, so the seed looks like
+    // The same options Foray's own create applies, so the seed looks like
     // any other session in the list.
     tmux(['new-session', '-d', '-s', SEED_SESSION, '-c', cwd])
     tmux(['set', '-t', SEED_SESSION, 'status', 'off'])

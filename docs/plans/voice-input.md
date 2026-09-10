@@ -1,6 +1,6 @@
 # Voice input (BYO transcription API) + settings page — plan
 
-**Status: deferred indefinitely (2026-09-09).** On-phone dictation may be the better route: the Composer is a plain text field, so any keyboard mic (e.g. FUTO Voice Input, which runs Whisper on the phone) already types into it with no Nest changes. Revisit this plan only if a Whisper-class keyboard still gets technical words wrong in real use. Phase 1 (settings page) is not worth building on its own.
+**Status: deferred indefinitely (2026-09-09).** On-phone dictation may be the better route: the Composer is a plain text field, so any keyboard mic (e.g. FUTO Voice Input, which runs Whisper on the phone) already types into it with no Foray changes. Revisit this plan only if a Whisper-class keyboard still gets technical words wrong in real use. Phase 1 (settings page) is not worth building on its own.
 
 Written 2026-09-09. No code yet. Supersedes the earlier draft in this file.
 
@@ -11,7 +11,7 @@ Written 2026-09-09. No code yet. Supersedes the earlier draft in this file.
 - **Transcript lands in the textarea, never in the pty.** The user reviews,
   edits, taps send. A mis-heard shell command must never be able to run.
 - **BYO API key, stored on the server.** The phone never holds the key. One
-  entry works on every device. Nest has no login: the Tailscale network is the
+  entry works on every device. Foray has no login: the Tailscale network is the
   perimeter, and anyone who can reach the page can already run a shell, so
   a settings page adds no new exposure. Say so in the open-source docs.
 - **Provider picker, not a "use whisper" toggle.** Off / OpenAI / Groq / Custom.
@@ -65,7 +65,7 @@ Written 2026-09-09. No code yet. Supersedes the earlier draft in this file.
 - Shape (v1):
   ```json
   { "transcription": { "provider": "groq", "apiKey": "…", "model": "whisper-large-v3-turbo",
-                       "baseUrl": null, "hintWords": "pm2, tsx, tmux, Nest, Claude Code" } }
+                       "baseUrl": null, "hintWords": "pm2, tsx, tmux, Foray, Claude Code" } }
   ```
 - `readConfig()`, `writeConfig(partial)`. Never log the key. Unit test with
   a temp dir: round trip, missing file, corrupt file → empty config + warning.
@@ -122,7 +122,7 @@ Written 2026-09-09. No code yet. Supersedes the earlier draft in this file.
   API key    [ ••••••••4f2a ]  [Remove]      (password field; blank = keep)
   Model      [ whisper-large-v3-turbo ]      (preset default, editable)
   Base URL   [ … ]                           (Custom only)
-  Hint words [ pm2, tsx, tmux, Nest ]        (sent with every clip)
+  Hint words [ pm2, tsx, tmux, Foray ]        (sent with every clip)
   [ Validate & save ]   ✓ Working, 1.2 s   /   ✗ Invalid key (401)
   ```
   Status line shows `validatedAt` from GET /api/settings on open.

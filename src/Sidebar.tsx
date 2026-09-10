@@ -81,7 +81,7 @@ export function Sidebar({
   const past = visiblePast(pastSessions ?? [], pastExpanded)
   const showAgent = showsAgent(pastSessions ?? [])
   const now = Date.now()
-  /** The live Nest session a running past session is in, if it is one of ours. */
+  /** The live Foray session a running past session is in, if it is one of ours. */
   const liveWindowFor = (row: PastSession): Session | undefined =>
     row.liveIn === undefined ? undefined : sessions.find(s => s.name === row.liveIn)
 
@@ -189,7 +189,7 @@ export function Sidebar({
             letterSpacing: '0.04em',
             color: 'var(--accent)',
           }}>
-            nest
+            foray
           </div>
           <div style={{
             fontSize: 11,

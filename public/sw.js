@@ -1,8 +1,8 @@
-// Nest service worker.
+// Foray service worker.
 //
-// Nest is useless without its server, so this is not an "offline app". It
+// Foray is useless without its server, so this is not an "offline app". It
 // exists so a Home Screen launch paints the shell instantly from cache and
-// a flaky connection shows a real "can't reach nest" screen instead of the
+// a flaky connection shows a real "can't reach Foray" screen instead of the
 // browser's white error page. Strategy: network first, cache as fallback,
 // for same-origin GETs only. The WebSocket and the upload API are never
 // touched.
@@ -10,7 +10,7 @@
 // Registered by src/main.tsx in production builds only. Bump CACHE when
 // the shell list or the offline page changes.
 
-const CACHE = 'nest-shell-v1'
+const CACHE = 'foray-shell-v1'
 const SHELL = ['/', '/manifest.json']
 
 /** Paths the worker must stay out of: live protocol, uploads, health. */
@@ -48,7 +48,7 @@ function offlinePage() {
   const html = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Nest</title>
+<title>Foray</title>
 <style>
   html { background: #0a0a0c; color: #d4d4d8; font: 15px -apple-system, system-ui, sans-serif; }
   body { margin: 0; min-height: 100vh; display: grid; place-items: center; text-align: center; }
@@ -58,7 +58,7 @@ function offlinePage() {
     padding: 12px 22px; font: 600 14px ui-monospace, monospace; min-height: 44px; }
 </style>
 <div>
-  <h1>nest</h1>
+  <h1>foray</h1>
   <p>can't reach the server</p>
   <button onclick="location.reload()">retry</button>
 </div>`

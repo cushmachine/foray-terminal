@@ -3,7 +3,7 @@
 // Run with: npm run test:visual
 //
 // The webServer command builds the client into .playwright/root-<port>/dist and
-// runs the real Nest server from that root, so production code paths
+// runs the real Foray server from that root, so production code paths
 // (static dist, SPA fallback, version handshake) are what gets tested.
 // vite is invoked directly rather than `npm run build`: the build script
 // type-checks first, and a red unit test (an import of a helper that does
@@ -34,7 +34,7 @@ export default defineConfig({
   // create several.
   timeout: 60_000,
   expect: { timeout: 10_000 },
-  // One worker: every test shares one tmux server and one Nest server.
+  // One worker: every test shares one tmux server and one Foray server.
   workers: 1,
   retries: 0,
   reporter: [['list']],

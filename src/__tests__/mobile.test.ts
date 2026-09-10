@@ -309,7 +309,7 @@ async function loadServiceWorker(): Promise<{
   const source = await fs.readFile(path.join(PUBLIC_DIR, 'sw.js'), 'utf8')
   const listeners: Record<string, unknown[]> = {}
   const self: Record<string, unknown> = {
-    location: { origin: 'https://nest.example' },
+    location: { origin: 'https://foray.example' },
     addEventListener: (name: string, fn: unknown) => {
       ;(listeners[name] ??= []).push(fn)
     },
@@ -328,7 +328,7 @@ test('service worker: registers install, activate and fetch handlers', async () 
 
 test('service worker: caches same-origin GETs for the shell and assets', async () => {
   const { shouldCache } = await loadServiceWorker()
-  const origin = 'https://nest.example'
+  const origin = 'https://foray.example'
   assert.equal(shouldCache(new URL('/', origin), 'GET', origin), true)
   assert.equal(shouldCache(new URL('/assets/index-abc123.js', origin), 'GET', origin), true)
   assert.equal(shouldCache(new URL('/icons/icon-192.png', origin), 'GET', origin), true)
@@ -337,7 +337,7 @@ test('service worker: caches same-origin GETs for the shell and assets', async (
 
 test('service worker: never touches the WebSocket, the API, or health', async () => {
   const { shouldCache } = await loadServiceWorker()
-  const origin = 'https://nest.example'
+  const origin = 'https://foray.example'
   assert.equal(shouldCache(new URL('/ws', origin), 'GET', origin), false)
   assert.equal(shouldCache(new URL('/api/upload', origin), 'GET', origin), false)
   assert.equal(shouldCache(new URL('/api/upload', origin), 'POST', origin), false)
@@ -346,7 +346,7 @@ test('service worker: never touches the WebSocket, the API, or health', async ()
 
 test('service worker: ignores other origins and non-GET methods', async () => {
   const { shouldCache } = await loadServiceWorker()
-  const origin = 'https://nest.example'
+  const origin = 'https://foray.example'
   assert.equal(shouldCache(new URL('https://fonts.example/a.css'), 'GET', origin), false)
   assert.equal(shouldCache(new URL('/', origin), 'POST', origin), false)
 })

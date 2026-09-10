@@ -37,7 +37,7 @@ export interface Revival {
 export interface PastSessionsOptions {
   /** Where a session starts when its directory is gone. Defaults to the home dir. */
   homeDir?: string
-  /** How tmux is invoked, for resolving which Nest session a live one is in. */
+  /** How tmux is invoked, for resolving which Foray session a live one is in. */
   tmuxExec?: TmuxExecutor
 }
 

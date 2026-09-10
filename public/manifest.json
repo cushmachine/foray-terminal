@@ -1,7 +1,7 @@
 {
   "id": "/",
-  "name": "Nest",
-  "short_name": "Nest",
+  "name": "Foray",
+  "short_name": "Foray",
   "description": "Remote dev cockpit",
   "start_url": "/",
   "scope": "/",

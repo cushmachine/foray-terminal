@@ -241,7 +241,7 @@ test('displayName: auto-named session shows the live program title over "bash"',
   assert.equal(displayName(win), '✳ Test session')
 })
 
-test('displayName: an explicit Nest name beats the program title', () => {
+test('displayName: an explicit Foray name beats the program title', () => {
   const win: TmuxWindow = { ...WIN_A, name: 'deploy', title: '✳ Test session', named: true }
   assert.equal(displayName(win), 'deploy')
 })

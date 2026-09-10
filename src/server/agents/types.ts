@@ -1,5 +1,5 @@
-// The contract between Nest and a coding agent whose sessions it can list
-// and revive. Nest itself knows nothing about any agent's files or CLI:
+// The contract between Foray and a coding agent whose sessions it can list
+// and revive. Foray itself knows nothing about any agent's files or CLI:
 // everything agent-specific lives behind this interface, one file per
 // agent under src/server/agents/. Adding an agent means adding a provider
 // and registering it in index.ts; the protocol, client and tests stay put.

@@ -6,11 +6,11 @@
 
 import type { ServerMessage, TmuxWindow } from './shared/protocol'
 
-/** A Nest session as displayed in the UI. */
+/** A Foray session as displayed in the UI. */
 export type Session = TmuxWindow
 
 /**
- * Name to show for a session. An explicit Nest name always wins. Otherwise
+ * Name to show for a session. An explicit Foray name always wins. Otherwise
  * the live terminal title the running program set (Claude Code's /rename,
  * for instance) beats the auto-generated session name.
  */

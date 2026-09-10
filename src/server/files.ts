@@ -1,4 +1,4 @@
-// Filesystem operations for Nest.
+// Filesystem operations for Foray.
 //
 // Backs the files:tree / files:read / files:write / files:watch protocol
 // messages defined in src/shared/protocol.ts.

@@ -1,4 +1,4 @@
-// E2E integration tests for Nest, against this machine's real tmux server.
+// E2E integration tests for Foray, against this machine's real tmux server.
 //
 // Run with: npm run test:e2e   (requires tmux; not part of `npm test`)
 //
@@ -9,7 +9,7 @@
 // Covers:
 //  1. terminal I/O round-trip through a real pty
 //  2. terminal resize leaves the connection working
-//  3. the poller notices changes made to tmux behind Nest's back
+//  3. the poller notices changes made to tmux behind Foray's back
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -50,7 +50,7 @@ function closeWs(ws: WebSocket): void {
 }
 
 /**
- * Kill a Nest session by its numeric tmux session id, ignoring errors.
+ * Kill a Foray session by its numeric tmux session id, ignoring errors.
  * Targets `$id` (a session), never `@id`: window ids are global across
  * tmux, so a window target could hit someone's live session.
  */
@@ -153,10 +153,10 @@ tmuxIt('e2e: terminal resize does not crash', async () => {
 })
 
 // ---------------------------------------------------------------------------
-// Test 3: Live refresh: changes made behind Nest's back reach clients
+// Test 3: Live refresh: changes made behind Foray's back reach clients
 // ---------------------------------------------------------------------------
 
-tmuxIt('e2e: poller broadcasts session:list when tmux changes outside Nest', async () => {
+tmuxIt('e2e: poller broadcasts session:list when tmux changes outside Foray', async () => {
   const { url, close } = await startServer(0, { pollIntervalMs: 200, quiet: true })
   let windowId: number | null = null
   try {

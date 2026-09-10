@@ -1,4 +1,4 @@
-// WebSocket connection manager for the Nest client.
+// WebSocket connection manager for the Foray client.
 //
 // `SocketManager` is a framework-agnostic class that owns the actual
 // connection lifecycle: connect, reconnect with exponential backoff,
@@ -411,7 +411,7 @@ function socketUrl(): string {
 }
 
 /**
- * Connects to the Nest WebSocket server and exposes status + send/receive.
+ * Connects to the Foray WebSocket server and exposes status + send/receive.
  *
  * The manager is created during the first render, not in an effect, so a
  * child's `onMessage` subscription in its own (earlier-running) effect

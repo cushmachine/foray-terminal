@@ -1,5 +1,5 @@
 // Claude Code as an agent provider: its transcripts, its live-session
-// markers and its resume command. The only file in Nest that knows what
+// markers and its resume command. The only file in Foray that knows what
 // ~/.claude looks like.
 //
 // Transcripts are one JSONL file per session under

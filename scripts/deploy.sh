@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Deploy nest: typecheck, then restart it under pm2, applying
+# Deploy Foray: typecheck, then restart it under pm2, applying
 # ecosystem.config.cjs if that changed. This is what `npm run deploy` runs.
 #
 # The typecheck comes first because scripts/start.sh builds with vite alone
@@ -35,7 +35,9 @@ started_ms=$(pm2 jlist 2>/dev/null | node -e '
   console.log(app ? app.pm2_env.pm_uptime : 0)
 ' "$APP")
 started_ms=${started_ms:-0}
-config_ms=$(( $(stat -c %Y "$CONFIG") * 1000 ))
+# GNU stat (Linux) and BSD stat (macOS) spell "mtime in seconds" differently.
+mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1"; }
+config_ms=$(( $(mtime "$CONFIG") * 1000 ))
 
 if [ "$started_ms" -eq 0 ]; then
   echo "[deploy] $APP is not running; starting it from $CONFIG"

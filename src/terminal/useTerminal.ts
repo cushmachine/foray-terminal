@@ -223,7 +223,7 @@ export function useTerminal({
     // xterm.js doesn't support the kitty keyboard protocol, so Shift+Enter
     // sends plain \r like Enter. Claude Code's input widget uses CSI u
     // encoding (ESC[13;2u) to tell them apart. Intercept here so multiline
-    // input works through Nest the same way it does in a local terminal.
+    // input works through Foray the same way it does in a local terminal.
     term.attachCustomKeyEventHandler((e) => {
       if (e.type === 'keydown' && e.key === 'Enter' && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
         send({ type: 'terminal:input', windowId, data: '\x1b[13;2u' })

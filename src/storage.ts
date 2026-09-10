@@ -1,7 +1,7 @@
-// localStorage with the keys Nest persists under, in one place.
+// localStorage with the keys Foray persists under, in one place.
 //
 // localStorage throws in some private-browsing and embedded contexts; none
-// of what Nest stores is worth crashing over, so a failure reads as absent
+// of what Foray stores is worth crashing over, so a failure reads as absent
 // and a write is silently dropped.
 
 /** The session this device last looked at, reopened on the next page load. */

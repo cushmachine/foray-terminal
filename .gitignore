@@ -3,3 +3,8 @@ dist
 dist.next/
 .env
 .playwright/
+.env.*
+*.log
+.DS_Store
+# Per-developer Claude Code settings, if a contributor creates them.
+.claude/settings.local.json

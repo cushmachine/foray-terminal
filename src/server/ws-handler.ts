@@ -1,4 +1,4 @@
-// Per-connection WebSocket handler for Nest.
+// Per-connection WebSocket handler for Foray.
 //
 // Owns one client's attachments (pty, history tracker and timers per
 // window), its file-panel state, and the validation and dispatch of its
@@ -460,7 +460,7 @@ export function handleConnection(ws: WebSocket, deps: ConnectionDeps): Connectio
       if (!pastSessions) throw new ClientError('No agents configured')
       const { name, cwd, command } = await pastSessions.resolve(msg.agent, msg.sessionId)
       const window = await createWindow(name, cwd, tmuxExec)
-      // The name is Nest's guess from the transcript, not the user's: the
+      // The name is Foray's guess from the transcript, not the user's: the
       // agent's own title takes over once it is running (mirrorTitles).
       await unmarkNamed(window.id, tmuxExec)
       await runInWindow(window.id, command, tmuxExec)

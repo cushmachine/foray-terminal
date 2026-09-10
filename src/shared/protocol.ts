@@ -1,4 +1,4 @@
-// Shared WebSocket protocol types for Nest.
+// Shared WebSocket protocol types for Foray.
 //
 // This file is imported by both the client (Vite/React, bundler resolution)
 // and the server (tsx, Node ESM). Keep it free of Node- or DOM-specific APIs
@@ -12,7 +12,7 @@
  */
 export const MAX_HISTORY_LINES = 3000
 
-/** A single Nest session (one tmux session), as exposed to the client. */
+/** A single Foray session (one tmux session), as exposed to the client. */
 export interface TmuxWindow {
   id: number
   /** Session name: what the user typed at create/rename, or the auto default ("bash"). */
@@ -34,7 +34,7 @@ export interface TmuxWindow {
 
 /**
  * A past agent session found on disk (src/server/agents), revivable into
- * a new Nest session. `agent` is the provider id ("claude"); the client
+ * a new Foray session. `agent` is the provider id ("claude"); the client
  * hands it back unchanged in `session:revive`.
  */
 export interface PastSession {
@@ -53,7 +53,7 @@ export interface PastSession {
   lastActive: number
   /** Running right now; cannot be revived without forking it. */
   live: boolean
-  /** The Nest session (tmux name without the nest_ prefix) it runs in, when known. */
+  /** The Foray session (tmux name without the nest_ prefix) it runs in, when known. */
   liveIn?: string
 }
 
@@ -136,7 +136,7 @@ export interface PastSessionsRequest {
 }
 
 /**
- * Open a new Nest session in the past session's directory, running the
+ * Open a new Foray session in the past session's directory, running the
  * agent's resume command. Answered with the usual `session:created`
  * broadcast, or an `error` naming `session:revive`.
  */
