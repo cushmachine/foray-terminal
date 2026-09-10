@@ -433,6 +433,10 @@ export async function killWindow(
  */
 export async function unmarkNamed(sessionId: number, exec: TmuxExecutor = defaultExec): Promise<void> {
   await exec('tmux', ['set', '-u', '-t', `$${sessionId}`, NAMED_OPTION])
+  // A session named before the rename carries the old stamp, and FORMAT
+  // falls back to it, so clearing only the new one would leave the session
+  // still reading as named. Unsetting an absent option is not an error.
+  await exec('tmux', ['set', '-u', '-t', `$${sessionId}`, LEGACY_NAMED_OPTION])
 }
 
 /**

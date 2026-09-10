@@ -79,10 +79,15 @@ test('listWindowSessions maps window ids to current session names', async () => 
   assert.deepEqual([...(await listWindowSessions(noServer))], [])
 })
 
-test('unmarkNamed clears the named stamp', async () => {
+test('unmarkNamed clears both the current and the pre-rename stamp', async () => {
   const tmux = fakeTmux()
   const s = tmux.add('x', { named: true })
   await unmarkNamed(s.id, tmux.exec)
   assert.equal(s.named, false)
-  assert.deepEqual(tmux.calls.at(-1), ['set', '-u', '-t', '$0', '@foray_named'])
+  // Both, because the list format falls back to the old option: clearing
+  // only the new one would leave a pre-rename session still reading as named.
+  assert.deepEqual(tmux.calls.slice(-2), [
+    ['set', '-u', '-t', '$0', '@foray_named'],
+    ['set', '-u', '-t', '$0', '@nest_named'],
+  ])
 })
