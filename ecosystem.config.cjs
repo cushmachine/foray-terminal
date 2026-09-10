@@ -10,12 +10,14 @@ module.exports = {
     env: {
       NODE_ENV: 'production',
       PORT: '3000',
-      // Foray listens on every interface unless HOST is set. It always
-      // requires the access token (~/.foray/token, `npm run token`), so
-      // this is safe on a private network; on a machine with a public
-      // address, set HOST to '127.0.0.1' and reach it through
-      // `tailscale serve` (see SECURITY.md).
-      // HOST: '127.0.0.1',
+      // Foray binds loopback only; it is reached through `tailscale serve`
+      // (or your own HTTPS proxy) forwarding to 127.0.0.1, never by opening
+      // the port to the network directly. To bind wider on purpose — a LAN
+      // with its own firewall, a container fronted by another proxy — set
+      // HOST to '' (every interface) or a specific address; the access
+      // token (~/.foray/token, `npm run token`) is still required either
+      // way. See SECURITY.md.
+      HOST: '127.0.0.1',
       // Extra args for the agent's resume command when reviving a past
       // session from the sidebar (src/server/agents), e.g. '--model x'.
       // One variable per agent: FORAY_<AGENT ID, uppercased>_ARGS. pm2 does

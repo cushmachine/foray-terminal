@@ -9,23 +9,25 @@
 #   3. Clones the repo (or uses an existing checkout)
 #   4. Runs npm install (dev deps included: prod runs with tsx and vite)
 #   5. Writes the tmux config Foray expects
-#   6. Installs pm2, deploys Foray under it (npm run deploy), and registers
+#   6. Checks for Tailscale — refuses to continue without it unless told
+#      otherwise — and turns on `tailscale serve` when it can
+#   7. Installs pm2, deploys Foray under it (npm run deploy), and registers
 #      pm2 to start at boot: with systemd on Linux, with a per-user
 #      LaunchAgent on macOS (so it runs inside the logged-in user's session,
 #      where the agent's Keychain login lives)
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/cushmachine/foray-terminal/main/install.sh | bash
-#
-# Or, if the repo is private:
 #   git clone https://github.com/cushmachine/foray-terminal.git ~/foray
 #   cd ~/foray && bash install.sh
 #
 # Environment variables:
 #   FORAY_DIR   — where to install (default: ~/foray)
 #   FORAY_SKIP_SERVICE — set to 1 to skip pm2 and the boot service (for Docker)
+#   FORAY_ALLOW_NO_TAILSCALE — set to 1 to install without Tailscale present
+#   FORAY_ALLOW_ROOT — set to 1 to install as root with no terminal to confirm
 #
-# The port is 3000, set in ecosystem.config.cjs.
+# The port is 3000, set in ecosystem.config.cjs; Foray binds it to 127.0.0.1
+# only, so Tailscale (or your own HTTPS proxy) is what makes it reachable.
 
 set -euo pipefail
 
@@ -56,8 +58,16 @@ elif [ "$(id -u)" -ne 0 ]; then
   SUDO="sudo"
 else
   warn "Running as root: every Foray session will be a root shell. A dedicated"
-  warn "user is safer (see SECURITY.md); continuing in 5 seconds."
-  sleep 5
+  warn "user is safer (see SECURITY.md's Recommended deployment section)."
+  if [ -t 0 ]; then
+    read -r -p "Continue as root anyway? Type 'yes' to proceed: " REPLY || REPLY=""
+    [ "$REPLY" = yes ] || die "Aborted. Create a dedicated user and re-run install.sh as it."
+  elif [ "${FORAY_ALLOW_ROOT:-0}" != "1" ]; then
+    die "Running as root with no terminal to confirm." \
+        "Re-run with FORAY_ALLOW_ROOT=1 to continue anyway, or as a dedicated user."
+  else
+    warn "Continuing as root (FORAY_ALLOW_ROOT=1)."
+  fi
 fi
 
 # ---------- system deps ----------
@@ -164,6 +174,46 @@ set -s extended-keys-format csi-u
 TMUX
 fi
 
+# ---------- Tailscale ----------
+
+# Foray binds 127.0.0.1 (ecosystem.config.cjs) and stays that way; the only
+# way another device reaches it is Tailscale (or your own HTTPS proxy) in
+# front of that loopback port. Check for it now, before Foray starts, not
+# as a footnote after the fact. Skipped along with the rest of this section
+# when FORAY_SKIP_SERVICE=1 — nothing is being exposed to reach in the
+# first place.
+if [ "${FORAY_SKIP_SERVICE:-0}" = "1" ]; then
+  :
+elif [ "$OS" = Linux ]; then
+  if ! command -v tailscale >/dev/null 2>&1; then
+    if [ "${FORAY_ALLOW_NO_TAILSCALE:-0}" != "1" ]; then
+      die "No Tailscale binary found. Foray only listens on 127.0.0.1, so" \
+          "without Tailscale (or your own HTTPS proxy already in place)" \
+          "nothing but this machine can reach it: https://tailscale.com/download" \
+          "To install anyway, rerun with FORAY_ALLOW_NO_TAILSCALE=1."
+    fi
+    warn "No Tailscale binary found; continuing (FORAY_ALLOW_NO_TAILSCALE=1)."
+    warn "Foray will be reachable only from this machine until you set up"
+    warn "Tailscale or another HTTPS proxy — see SECURITY.md."
+  elif tailscale status --json 2>/dev/null | grep -q '"BackendState": *"Running"'; then
+    info "Exposing Foray over Tailscale HTTPS..."
+    if tailscale serve --bg "$FORAY_PORT" >/dev/null 2>&1; then
+      info "Done — run 'tailscale serve status' any time to see the URL."
+    else
+      warn "tailscale serve failed; run it yourself: tailscale serve --bg $FORAY_PORT"
+    fi
+  else
+    warn "Tailscale is installed but not logged in. After 'tailscale up', run:"
+    warn "  tailscale serve --bg $FORAY_PORT"
+  fi
+else
+  # The macOS CLI is usually not on PATH (see the alias in the closing
+  # steps below), so this stays print-only here even when a `tailscale`
+  # binary happens to be found.
+  warn "Foray binds 127.0.0.1. See the Tailscale step below to reach it from"
+  warn "another device."
+fi
+
 # ---------- pm2 + boot service ----------
 
 if [ "${FORAY_SKIP_SERVICE:-0}" = "1" ]; then
@@ -266,15 +316,13 @@ if [ "$OS" = Darwin ]; then
   echo "     and sign in. Its CLI lives inside the app bundle:"
   echo "       alias tailscale=/Applications/Tailscale.app/Contents/MacOS/Tailscale"
   echo ""
-  echo "  2. Open Foray from any device on your tailnet:"
-  echo "       http://${MAC_NAME}:${FORAY_PORT}"
-  echo ""
-  echo "  3. Or expose via Tailscale HTTPS (needed to install Foray as a"
-  echo "     home-screen app on iPhone):"
+  echo "  2. Expose Foray over Tailscale HTTPS — Foray binds 127.0.0.1, not"
+  echo "     the network, so this is the only way in (and how you install it"
+  echo "     as a home-screen app on iPhone):"
   echo "       tailscale serve --bg ${FORAY_PORT}"
   echo "       Then open https://${MAC_NAME}.<your-tailnet>.ts.net"
   echo ""
-  echo "  4. Keep the Mac awake and logged in, or sessions vanish with it:"
+  echo "  3. Keep the Mac awake and logged in, or sessions vanish with it:"
   echo "       sudo pmset -c sleep 0 disksleep 0     # never sleep on power"
   echo "     A closed lid still sleeps a MacBook unless it has power and an"
   echo "     external display, or you run: sudo pmset -a disablesleep 1"
@@ -285,11 +333,9 @@ else
   echo "  1. Install Tailscale (if not already):"
   echo "       curl -fsSL https://tailscale.com/install.sh | sh && tailscale up"
   echo ""
-  echo "  2. Expose Foray over Tailscale HTTPS (recommended; see SECURITY.md):"
+  echo "  2. Expose Foray over Tailscale HTTPS — Foray binds 127.0.0.1, not"
+  echo "     the network, so this is the only way in (see SECURITY.md):"
   echo "       tailscale serve --bg ${FORAY_PORT}"
   echo "       Then open https://$(hostname).<your-tailnet>.ts.net"
-  echo ""
-  echo "  3. Or open it over plain http from any device on your tailnet:"
-  echo "       http://$(hostname):${FORAY_PORT}"
   echo ""
 fi

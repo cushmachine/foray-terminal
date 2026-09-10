@@ -87,7 +87,9 @@ proxy for anything but a tailnet.
 **Running as root multiplies every mistake.** The default Linux install
 runs pm2, the server and every session as the user who ran `install.sh`.
 If that is root, every session is a root shell and the token guards the
-whole machine. Prefer a dedicated user (below).
+whole machine. `install.sh` refuses to continue as root without an
+explicit "yes" (or `FORAY_ALLOW_ROOT=1` off a terminal) — treat that
+prompt as your cue to stop and create a dedicated user instead (below).
 
 **The file panel follows the session.** It opens whatever directory the
 session is in, which the session can change with `cd`. This is by design:
@@ -106,11 +108,15 @@ deploys; see DEPLOY.md.
 ## Recommended deployment
 
 1. **A dedicated user.** Create `foray`, install as that user, and let the
-   sessions run as it. Give it `sudo` only if you need it inside sessions.
-2. **Bind to loopback and serve over Tailscale HTTPS.** Set
-   `HOST: '127.0.0.1'` in `ecosystem.config.cjs` and run
-   `tailscale serve --bg 3000`. Foray is then reachable only through the
-   Tailscale proxy, over TLS, by devices on your tailnet.
+   sessions run as it. `install.sh` writes the systemd unit's `User=` (and
+   working directory) for whichever account runs it, so sessions run as
+   that user, not root, with nothing to edit by hand. Give the user `sudo`
+   only if you need it inside sessions.
+2. **Bind to loopback and serve over Tailscale HTTPS.** `ecosystem.config.cjs`
+   already sets `HOST: '127.0.0.1'`; `install.sh` runs
+   `tailscale serve --bg 3000` for you when it can, or prints the command.
+   Foray is then reachable only through the Tailscale proxy, over TLS, by
+   devices on your tailnet.
 3. **Pin the host name.** Set `FORAY_ALLOWED_HOSTS` to the names you use
    (`foray.tail1234.ts.net,foray`). Requests for any other name are refused
    with 421, which closes DNS rebinding independently of the cookie.

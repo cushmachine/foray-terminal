@@ -14,9 +14,9 @@ Open any session there and run:
 cd ~/foray && npm run token
 ```
 
-(On the original box the checkout is `~/GitHub/nest`.) Paste the token
-into the login screen on the other device. Save it in your password
-manager this time.
+(Use whatever directory you installed into, if not the default.) Paste
+the token into the login screen on the other device. Save it in your
+password manager this time.
 
 ## No device is logged in
 
@@ -25,7 +25,7 @@ You need a terminal on the server that does not go through Foray.
 **Over Tailscale SSH, from your laptop** (the usual way):
 
 ```bash
-ssh root@foray
+ssh <user>@<server>
 ```
 
 Use the server's tailnet name and the user Foray runs as. If SSH is
@@ -41,7 +41,7 @@ cat ~/.foray/token
 If that file is missing, Foray makes a new one the next time it starts:
 
 ```bash
-cd ~/GitHub/nest && npm run deploy && npm run token
+cd ~/foray && npm run deploy && npm run token
 ```
 
 ## I want a new token
@@ -50,7 +50,7 @@ Anywhere you have a shell on the server:
 
 ```bash
 openssl rand -base64 32 > ~/.foray/token
-cd ~/GitHub/nest && npm run deploy
+cd ~/foray && npm run deploy
 npm run token
 ```
 
