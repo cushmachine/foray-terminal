@@ -2,7 +2,9 @@
 
 Foray is a browser terminal, backed by tmux sessions on a server you run, built for checking on and driving coding agents like Claude Code from your phone.
 
-<!-- docs/img/desktop.png — batch 4 -->
+<img src="docs/img/desktop.png" alt="Foray's desktop view: a sidebar listing tmux sessions next to a terminal with a live shell" width="100%">
+
+<img src="docs/img/phone.png" alt="Foray on a phone: the terminal with the composer input bar and key toolbar for Ctrl, Esc and arrow keys" width="280">
 
 ## Install
 
