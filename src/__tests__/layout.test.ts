@@ -156,12 +156,12 @@ test('resolvePanels: on desktop mobileView is left alone and the sidebar stays p
   assert.equal(resolvePanels(start, 'show-files', DESKTOP, false), start)
 })
 
-test('#10 readToolbarVisible: always on for touch layouts, off by default on desktop, persisted choice wins', () => {
+test('#10 readToolbarVisible: always on for touch layouts, on by default on desktop, a stored off wins', () => {
   assert.equal(readToolbarVisible(null, true), true)
   assert.equal(readToolbarVisible('false', true), true)
-  assert.equal(readToolbarVisible(null, false), false)
+  assert.equal(readToolbarVisible(null, false), true)
   assert.equal(readToolbarVisible('true', false), true)
   assert.equal(readToolbarVisible('false', false), false)
-  assert.equal(readToolbarVisible('garbage', false), false)
+  assert.equal(readToolbarVisible('garbage', false), true)
   assert.equal(typeof KEY_TOOLBAR_KEY, 'string')
 })

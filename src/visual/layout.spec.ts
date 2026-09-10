@@ -5,18 +5,18 @@ import { DESKTOP, MOBILE, NARROW, TABLET, openDrawer } from './helpers.ts'
 test.describe('key toolbar on desktop', () => {
   test.use({ viewport: DESKTOP })
 
-  test('#10 is hidden by default, can be shown, and the choice persists', async ({ page }) => {
+  test('#10 is shown by default, can be hidden, and the choice persists', async ({ page }) => {
     await page.goto('/')
     const toolbar = page.getByTestId('key-toolbar')
     const toggle = page.getByTestId('keytoolbar-toggle')
-    await expect(toolbar).toBeHidden()
+    await expect(toolbar).toBeVisible()
     await expect(toggle).toBeVisible()
     await toggle.click()
-    await expect(toolbar).toBeVisible()
+    await expect(toolbar).toBeHidden()
     await page.reload()
-    await expect(page.getByTestId('key-toolbar')).toBeVisible()
-    await page.getByTestId('keytoolbar-toggle').click()
     await expect(page.getByTestId('key-toolbar')).toBeHidden()
+    await page.getByTestId('keytoolbar-toggle').click()
+    await expect(page.getByTestId('key-toolbar')).toBeVisible()
   })
 })
 

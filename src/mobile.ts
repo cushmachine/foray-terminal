@@ -227,15 +227,15 @@ export function resolvePanels(
 }
 
 // ---------------------------------------------------------------------------
-// Key toolbar on desktop: off by default next to a physical keyboard
+// Key toolbar on desktop: on by default so people find it; a stored choice hides it
 // ---------------------------------------------------------------------------
 
 /**
  * Whether the key toolbar shows. Touch layouts always need it. On desktop
- * it is clutter next to a physical keyboard, so it is off unless the user
- * turned it on and that choice was stored.
+ * it starts on, so a new user sees it exists, and stays hidden only once
+ * they have turned it off and that choice was stored.
  */
 export function readToolbarVisible(raw: string | null | undefined, isMobile: boolean): boolean {
   if (isMobile) return true
-  return raw === 'true'
+  return raw !== 'false'
 }
