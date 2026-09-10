@@ -18,6 +18,48 @@ registers pm2 to start at boot. Foray ships its own tmux config
 socket (see "Sessions live in foray-tmux.service" in CLAUDE.md) — it never
 writes or edits `~/.tmux.conf`.
 
+## Installed from npm
+
+```bash
+npx foray-terminal setup
+```
+
+`npx foray-terminal setup` runs the package's `bin/foray.mjs`. It copies
+the package's own files — the built client included — into `~/foray` (or
+`$FORAY_DIR`) when nothing is installed there yet, then runs the very same
+`install.sh` as "First install" above against that directory. Nothing is
+cloned: the package already carries everything, which is what makes this
+work on a box with no git, and on a release you have in hand. If that
+directory already holds an install, `setup` leaves it alone and says so
+rather than writing over it. `install.sh` prints which path it is on
+("Running as `foray setup`..." vs "Running from a git checkout...") so you
+can always tell. It finishes the same way either path: your access token
+printed once, and the Tailscale step if it could not run that for you.
+
+Two more commands come from the package's `bin/`:
+
+```bash
+foray token   # print the access token again, any time
+foray update  # pull the latest release and redeploy
+```
+
+`foray update` acts on `$FORAY_DIR` (default `~/foray`) and never discards
+local changes. Inside a git checkout it runs
+`git pull --ff-only && npm install && npm run deploy`. If that directory is
+not a git checkout — the npm install path — it reinstalls the package
+(`npm i -g foray-terminal@latest`) and refreshes the directory from the new
+copy. Either way a dirty checkout stops it: it prints what it found rather
+than resetting anything.
+
+There is also `foray start`: the server in the foreground, no pm2 and no
+build, run from the checkout at `$FORAY_DIR` — for Docker or local dev
+against an already-built `dist/`. It needs that directory's own
+`node_modules` (Foray runs its TypeScript server through `tsx`, a dev
+dependency), which `install.sh` puts there; a bare `npm i -g
+foray-terminal` installs production dependencies only, so `start` before a
+`setup` tells you exactly which path is missing. The normal path here is
+`setup`, not `start`.
+
 ## macOS as the server
 
 The same installer works on a Mac (a MacBook or Mac mini at home, reached
@@ -60,10 +102,11 @@ build keeps the previous `dist/` serving. Never run `pm2 restart` or
 
 ## Network and access
 
-Foray listens on port 3000 on every interface (`ecosystem.config.cjs`;
-set `HOST` to bind one, `PORT` to pick the port). Every socket and upload
-requires the access token, which the server writes to `~/.foray/token` on
-its first start. Print it with:
+Foray binds `127.0.0.1:3000` by default (`ecosystem.config.cjs`; `HOST`
+picks the address, `PORT` the port — widen `HOST` only if you're fronting
+it with your own proxy or firewall instead of Tailscale). Every socket and
+upload requires the access token, which the server writes to
+`~/.foray/token` on its first start. Print it with:
 
 ```bash
 npm run token
@@ -76,15 +119,14 @@ of use. To log every device out, replace the file and redeploy:
 openssl rand -base64 32 > ~/.foray/token && npm run deploy
 ```
 
-Expose it over Tailscale HTTPS, which gives it a real certificate and
-keeps it off the open internet:
+Because Foray only listens on loopback, Tailscale HTTPS is the way in;
+`install.sh` runs this for you when it can, or prints it:
 
 ```bash
 tailscale serve --bg 3000
 ```
 
-Then open `https://<server>.tail<hash>.ts.net` from any device on the
-tailnet. Plain `http://<server>:3000` works too and is private over a
-tailnet (WireGuard encrypts it), but not over a LAN. SECURITY.md has the
-full picture and the recommended hardening: a dedicated user, `HOST` set
-to `127.0.0.1`, and `FORAY_ALLOWED_HOSTS` pinned to your host names.
+Then open `https://<server>.<tailnet>.ts.net` from any device on the
+tailnet. SECURITY.md has the full picture and the rest of the recommended
+hardening: a dedicated user and `FORAY_ALLOWED_HOSTS` pinned to your host
+names.

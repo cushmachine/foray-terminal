@@ -2,11 +2,22 @@
 # Foray installer — run on a fresh Ubuntu VPS (22.04+) or a Mac that will
 # act as the server (a MacBook or Mac mini at home, reached over Tailscale).
 #
+# This script has two callers, and does the same thing for both:
+#   - a contributor, running it by hand from a git clone (Usage below);
+#   - `foray setup`, from the foray-terminal npm package. It copies the
+#     package's own files (the built client included) into FORAY_DIR when
+#     nothing is installed there, then execs this file with FORAY_DIR
+#     pinned to that directory — so the clone step below is never reached
+#     on that path. Nothing needs git, and nothing is fetched: the package
+#     already carries everything.
+# It prints which one it thinks it is (see "running from" below) so a
+# reader watching the output knows which path they are on.
+#
 # What it does:
 #   1. Installs system deps (tmux, build tools for node-pty): apt on
 #      Linux, Homebrew plus the Xcode command-line tools on macOS
 #   2. Installs Node.js 24 via nvm
-#   3. Clones the repo (or uses an existing checkout)
+#   3. Uses whatever is already in FORAY_DIR, or clones the repo there
 #   4. Runs npm install (dev deps included: prod runs with tsx and vite)
 #   5. Checks for Tailscale — refuses to continue without it unless told
 #      otherwise — and turns on `tailscale serve` when it can
@@ -15,9 +26,12 @@
 #      LaunchAgent on macOS (so it runs inside the logged-in user's session,
 #      where the agent's Keychain login lives)
 #
-# Usage:
+# Usage (contributors, from a clone):
 #   git clone https://github.com/cushmachine/foray-terminal.git ~/foray
 #   cd ~/foray && bash install.sh
+#
+# Usage (everyone else, from npm — runs this same script for you):
+#   npx foray-terminal setup
 #
 # Environment variables:
 #   FORAY_DIR   — where to install (default: ~/foray)
@@ -37,6 +51,16 @@ NODE_MAJOR="24"
 info()  { printf '\033[1;32m→\033[0m %s\n' "$*"; }
 warn()  { printf '\033[1;33m!\033[0m %s\n' "$*"; }
 die()   { printf '\033[1;31m✗\033[0m %s\n' "$@" >&2; exit 1; }
+
+# A git checkout has a .git dir next to this script; the npm package never
+# does (npm does not ship it), so this tells the two callers above apart
+# without needing anything passed in from foray setup.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -d "$SCRIPT_DIR/.git" ]; then
+  info "Running from a git checkout at $SCRIPT_DIR (contributor path)."
+else
+  info "Running as \`foray setup\`, from the installed npm package."
+fi
 
 # ---------- preflight ----------
 
@@ -114,7 +138,7 @@ fi
 # ---------- clone or detect repo ----------
 
 if [ -f "$FORAY_DIR/package.json" ]; then
-  info "Using existing checkout at $FORAY_DIR."
+  info "Using the existing Foray install at $FORAY_DIR."
 else
   info "Cloning Foray into $FORAY_DIR..."
   if ! git clone https://github.com/cushmachine/foray-terminal.git "$FORAY_DIR" 2>/dev/null; then

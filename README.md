@@ -13,20 +13,21 @@ Foray runs on a server you control — a small Linux VPS or a Mac you leave on �
 3. `npx foray-terminal setup`
 4. Paste the token it prints into the login screen, once per device.
 
-> `npx foray-terminal setup` lands in 0.1.0. Until then, install from source below.
-
 ## From source
 
-For contributors, and for everyone else until the npm package ships:
+For contributors, or if you'd rather not go through npm:
 
 ```bash
 git clone https://github.com/cushmachine/foray-terminal.git ~/foray
 cd ~/foray && bash install.sh
 ```
 
-`install.sh` installs tmux and Node 24, runs `npm install`, writes the tmux
-config Foray needs, and deploys Foray under pm2. It works on the same Linux
-VPS or Mac described above.
+`install.sh` is the same script `npx foray-terminal setup` runs for you: it
+installs tmux and Node 24, runs `npm install`, and deploys Foray under pm2.
+It works on the same Linux VPS or Mac described above. Foray runs its own
+tmux server on its own socket, with its own config
+(`scripts/foray.tmux.conf`) — it never writes or edits your `~/.tmux.conf`,
+so it's safe to install alongside tmux sessions you already run.
 
 ## Security
 
@@ -39,10 +40,23 @@ tailnet, never exposed to the open internet directly. Read
 does not, and how to harden a deployment — before you put this on a box
 anyone else can reach.
 
-## Updating
+## Token & updates
 
-From npm, `foray update` will pull the latest release and redeploy — that
-also lands in 0.1.0. From a source checkout, update with:
+Print the access token again any time — a new device, or if you lost it:
+
+```bash
+foray token
+```
+
+Update to the latest release:
+
+```bash
+foray update
+```
+
+`foray update` never discards local changes: it pulls (or reinstalls) and
+redeploys, but stops and tells you if it finds any, rather than resetting
+anything. From a source checkout, the equivalents are `npm run token` and:
 
 ```bash
 cd ~/foray
