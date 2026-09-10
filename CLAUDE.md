@@ -6,9 +6,11 @@ Run `npm run deploy` to build and restart the app. It runs `scripts/deploy.sh`, 
 
 Prod runs from the checkout with `tsx` and builds with `vite`, so the dev dependencies must be installed on the box (`npm install`, never `--omit=dev`).
 
-## Sessions live in nest-tmux.service
+## Sessions live in foray-tmux.service
 
-The tmux server that holds every session runs in its own systemd unit, `nest-tmux.service` (`scripts/systemd/`, installed by `scripts/ensure-tmux-unit.sh` from `start.sh`), not under pm2. So a deploy, a pm2 crash, or an OOM teardown of pm2 leaves sessions alive. Never `systemctl stop` or `restart nest-tmux`: that kills every session. To recover lost sessions, find their uuids in `~/.claude/activity.log` and run `claude --resume <uuid>` inside a new `nest_<name>` tmux session.
+The tmux server that holds every session runs in its own systemd unit, `foray-tmux.service` (generated and installed by `scripts/ensure-tmux-unit.sh`, run from `start.sh` on every deploy), not under pm2. So a deploy, a pm2 crash, or an OOM teardown of pm2 leaves sessions alive. Never `systemctl stop` or `restart foray-tmux`: that kills every session. Foray runs on its own tmux socket (`tmux -L foray ls`; `FORAY_TMUX_SOCKET`, default `foray`), never the machine's default one, so it never touches a tmux server you already run. To recover lost sessions, find their uuids in `~/.claude/activity.log` and run `claude --resume <uuid>` inside a new `foray_<name>` tmux session on that socket.
+
+On a box installed before the rename, the unit is still `nest-tmux.service` and sessions are on the machine's default tmux socket (plain `tmux ls`, `nest_<name>` prefix) — `ecosystem.config.cjs` pins `FORAY_TMUX_SOCKET: ''` there on purpose, and `ensure-tmux-unit.sh` leaves that unit strictly alone. The same rule applies: never `systemctl stop` or `restart nest-tmux` either.
 
 On macOS there is no unit: `start.sh` skips it, and the tmux server survives pm2 restarts on its own because macOS has no cgroups. Boot persistence there is a LaunchAgent written by `install.sh` (see DEPLOY.md).
 

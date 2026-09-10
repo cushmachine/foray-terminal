@@ -38,7 +38,7 @@ default one.
    server is started (`tmux -L foray -f scripts/foray.tmux.conf -D` in
    `scripts/tmux-server.sh`; for the first `new-session` on macOS,
    where there is no unit, pass `-f` there too, since that call starts
-   the server). `enableExtendedKeys` in `tmux.ts` already sets the
+   the server). `applyTmuxServerOptions` in `tmux.ts` already sets the
    server options at runtime and stays as the belt to this brace.
 
 3. **The systemd unit runs the Foray socket.** `scripts/tmux-server.sh`

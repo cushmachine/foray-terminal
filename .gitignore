@@ -8,3 +8,6 @@ dist.next/
 .DS_Store
 # Per-developer Claude Code settings, if a contributor creates them.
 .claude/settings.local.json
+
+# Per-machine pm2 env overrides (see ecosystem.config.cjs).
+ecosystem.local.cjs

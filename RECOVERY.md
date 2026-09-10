@@ -67,8 +67,11 @@ That is not the token. Check the server is up:
 
 ```bash
 pm2 status
-pm2 logs nest --lines 50
+pm2 logs foray --lines 50
 ```
+
+(On a box installed before the rename, the pm2 app is still named `nest`:
+`pm2 logs nest --lines 50`.)
 
 And that Tailscale is serving it (`tailscale serve status`). See
 DEPLOY.md.
@@ -76,5 +79,9 @@ DEPLOY.md.
 ## Sessions are missing after a restart
 
 They are in tmux, which runs separately from Foray. From a server shell,
-`tmux ls` lists them. On Linux they live in `nest-tmux.service`; see
-CLAUDE.md for what never to do to it.
+`tmux -L foray ls` lists them (Foray runs its own tmux server, not the
+machine's default one). On Linux that server lives in its own systemd
+unit, `foray-tmux.service`; see CLAUDE.md for what never to do to it.
+
+(On a box installed before the rename, sessions are on the machine's
+default socket instead — plain `tmux ls`, no `-L` — in `nest-tmux.service`.)

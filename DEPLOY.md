@@ -12,8 +12,11 @@ git clone https://github.com/cushmachine/foray-terminal.git ~/foray
 cd ~/foray && bash install.sh
 ```
 
-`install.sh` installs tmux, Node 24 and pm2, writes the tmux settings Foray
-needs, runs `npm run deploy`, and registers pm2 to start at boot.
+`install.sh` installs tmux, Node 24 and pm2, runs `npm run deploy`, and
+registers pm2 to start at boot. Foray ships its own tmux config
+(`scripts/foray.tmux.conf`), applied only to its own server on its own
+socket (see "Sessions live in foray-tmux.service" in CLAUDE.md) — it never
+writes or edits `~/.tmux.conf`.
 
 ## macOS as the server
 
@@ -28,8 +31,10 @@ over Tailscale). Differences from Linux:
 - Boot persistence is a per-user LaunchAgent,
   `~/Library/LaunchAgents/com.foray.pm2.plist`, which runs `pm2 resurrect`
   at login. Turn on automatic login so it fires after an unattended reboot.
-- There is no `nest-tmux.service`. macOS has no cgroups, so the tmux server
-  daemonizes out of pm2's reach by itself and survives `npm run deploy`.
+- There is no tmux unit at all (Linux calls it `foray-tmux.service`, or
+  `nest-tmux.service` on a box installed before the rename). macOS has no
+  cgroups, so the tmux server daemonizes out of pm2's reach by itself and
+  survives `npm run deploy`.
 - Sleep kills the tailnet link. `sudo pmset -c sleep 0` keeps the Mac awake
   on power; a closed MacBook lid still sleeps unless it has power and an
   external display, or `sudo pmset -a disablesleep 1`.

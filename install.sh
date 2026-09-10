@@ -8,10 +8,9 @@
 #   2. Installs Node.js 24 via nvm
 #   3. Clones the repo (or uses an existing checkout)
 #   4. Runs npm install (dev deps included: prod runs with tsx and vite)
-#   5. Writes the tmux config Foray expects
-#   6. Checks for Tailscale — refuses to continue without it unless told
+#   5. Checks for Tailscale — refuses to continue without it unless told
 #      otherwise — and turns on `tailscale serve` when it can
-#   7. Installs pm2, deploys Foray under it (npm run deploy), and registers
+#   6. Installs pm2, deploys Foray under it (npm run deploy), and registers
 #      pm2 to start at boot: with systemd on Linux, with a per-user
 #      LaunchAgent on macOS (so it runs inside the logged-in user's session,
 #      where the agent's Keychain login lives)
@@ -132,47 +131,9 @@ cd "$FORAY_DIR"
 info "Installing npm dependencies (includes compiling node-pty)..."
 npm install 2>&1 | tail -5
 
-# ---------- tmux config ----------
-
-TMUX_CONF="$HOME/.tmux.conf"
-
-# Check whether the settings Foray needs are already present, regardless
-# of how they got there (hand-written, a previous install, etc.).
-has_mouse_off=false
-has_history_limit=false
-has_extended_keys=false
-has_extended_keys_format=false
-if [ -f "$TMUX_CONF" ]; then
-  grep -q 'set.*mouse off' "$TMUX_CONF" 2>/dev/null && has_mouse_off=true
-  grep -q 'set.*history-limit' "$TMUX_CONF" 2>/dev/null && has_history_limit=true
-  grep -q 'set.*extended-keys always' "$TMUX_CONF" 2>/dev/null && has_extended_keys=true
-  grep -q 'set.*extended-keys-format csi-u' "$TMUX_CONF" 2>/dev/null && has_extended_keys_format=true
-fi
-
-if $has_mouse_off && $has_history_limit && $has_extended_keys && $has_extended_keys_format; then
-  info "tmux config already has the settings Foray needs."
-elif [ -f "$TMUX_CONF" ]; then
-  warn "Existing ~/.tmux.conf found — appending Foray settings."
-  {
-    echo ""
-    echo "# Added by Foray installer"
-    $has_mouse_off  || echo "set -g mouse off"
-    $has_history_limit || echo "set -g history-limit 10000"
-    $has_extended_keys || echo "set -s extended-keys always"
-    $has_extended_keys_format || echo "set -s extended-keys-format csi-u"
-  } >> "$TMUX_CONF"
-else
-  info "Writing tmux config..."
-  cat > "$TMUX_CONF" <<'TMUX'
-# Foray: scrollback comes from tmux history, served as HTML to the browser.
-set -g mouse off
-set -g history-limit 10000
-# Modified keys (Shift+Enter in Claude Code) reach the pane as CSI u instead
-# of being downgraded to a plain Enter.
-set -s extended-keys always
-set -s extended-keys-format csi-u
-TMUX
-fi
+# Foray runs its own tmux server, on its own socket, with its own config
+# (scripts/foray.tmux.conf, applied by scripts/tmux-server.sh) — it never
+# writes or edits ~/.tmux.conf, so nothing to do here.
 
 # ---------- Tailscale ----------
 
@@ -276,10 +237,10 @@ PLIST
   fi
   pm2 save >/dev/null
 
-  if pm2 pid nest 2>/dev/null | grep -q '[1-9]'; then
+  if pm2 pid foray 2>/dev/null | grep -q '[1-9]'; then
     info "Foray is running on port $FORAY_PORT."
   else
-    warn "Foray did not start. Check: pm2 logs nest"
+    warn "Foray did not start. Check: pm2 logs foray"
   fi
 fi
 

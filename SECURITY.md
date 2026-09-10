@@ -100,25 +100,32 @@ from escaping into your browser and clipboard; it does not keep it from
 doing what the shell allows. That is the agent's sandbox to provide, not
 Foray's.
 
-**Existing tmux sessions.** Foray uses the default tmux server and shows
-sessions named `nest_*`. It does not touch your other sessions, but on
-Linux the tmux server is moved into Foray's systemd unit so it survives
-deploys; see DEPLOY.md.
+**Existing tmux sessions.** Foray runs its own tmux server, on its own
+socket (`FORAY_TMUX_SOCKET`, default `foray`; look with `tmux -L foray
+ls`), so it never adopts or shows sessions from a tmux server you already
+run. Its own sessions are named `foray_*`. On Linux that server lives in
+its own systemd unit, `foray-tmux.service`, so it survives deploys; see
+DEPLOY.md. On a box installed before the rename, Foray still shares the
+machine's default tmux socket (`nest_*` sessions, plain `tmux ls`) in
+`nest-tmux.service` — that box keeps `FORAY_TMUX_SOCKET` empty on purpose
+until every session on it has been closed or resumed.
 
 ## Recommended deployment
 
 1. **A dedicated user.** Create `foray`, install as that user, and let the
-   sessions run as it. `install.sh` writes the systemd unit's `User=` (and
-   working directory) for whichever account runs it, so sessions run as
-   that user, not root, with nothing to edit by hand. Give the user `sudo`
-   only if you need it inside sessions.
+   sessions run as it. On Linux, the tmux-unit setup
+   (`scripts/ensure-tmux-unit.sh`, run automatically by `npm run deploy`)
+   generates the systemd unit's `User=`, `Group=` and working directory for
+   whichever account runs it, so sessions run as that user, not root, with
+   nothing to edit by hand. Give the user `sudo` only if you need it inside
+   sessions.
 2. **Bind to loopback and serve over Tailscale HTTPS.** `ecosystem.config.cjs`
    already sets `HOST: '127.0.0.1'`; `install.sh` runs
    `tailscale serve --bg 3000` for you when it can, or prints the command.
    Foray is then reachable only through the Tailscale proxy, over TLS, by
    devices on your tailnet.
 3. **Pin the host name.** Set `FORAY_ALLOWED_HOSTS` to the names you use
-   (`foray.tail1234.ts.net,foray`). Requests for any other name are refused
+   (`<server>.<tailnet>.ts.net,<server>`). Requests for any other name are refused
    with 421, which closes DNS rebinding independently of the cookie.
 4. **Keep the token out of the environment where you can.** The file is
    simplest; if you set `FORAY_TOKEN`, know that anything that can read

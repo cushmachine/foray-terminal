@@ -12,7 +12,7 @@ const BUILD_ID = `${describeCheckout()}.${Date.now().toString(36)}`
 
 function buildMeta(): Plugin {
   return {
-    name: 'nest-build-meta',
+    name: 'foray-build-meta',
     transformIndexHtml() {
       return [{ tag: 'meta', attrs: { name: BUILD_META_NAME, content: BUILD_ID }, injectTo: 'head' }]
     },
