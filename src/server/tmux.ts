@@ -240,7 +240,7 @@ export async function createWindow(
   while (attempt <= 20) {
     const actualName = attempt === 0 ? sessionName : `${sessionName}-${attempt}`
     // Always pass a start directory. Without -c, tmux uses the cwd of the
-    // process that ran the command, i.e. the Nest server itself (the nest
+    // process that ran the command, i.e. the Foray server itself (the Foray
     // repo under PM2), which is never where a new session should start.
     const args = [
       'new-session', '-d',

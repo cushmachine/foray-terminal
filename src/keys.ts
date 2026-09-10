@@ -40,9 +40,21 @@ const ESC = '\x1b'
 /** Fixed at the far left of the bar, only while the scrollback holds a prompt line. */
 export const PROMPT_KEY: KeyDef = { id: 'prompt', label: '↑❯', kind: 'prompt', title: 'Back to your last prompt' }
 
-/** Always visible. Ordered for Claude Code: Esc, Tab/Shift-Tab, arrows, Ctrl-C, Enter. */
+/**
+ * Fixed at the far left too, always. Esc is how you stop a model
+ * mid-response, so it must never scroll out of reach.
+ */
+export const ESC_KEY: KeyDef = { id: 'esc', label: 'esc', kind: 'key', data: ESC, title: 'Escape' }
+
+/**
+ * The scrolling row, after the pinned keys. The two that act on the screen
+ * rather than sending a keystroke lead — select and the photo upload, what
+ * a phone reaches for most. The rest follow in terminal order:
+ * Tab/Shift-Tab, arrows, Ctrl-C, Enter.
+ */
 export const PRIMARY_KEYS: KeyDef[] = [
-  { id: 'esc', label: 'esc', kind: 'key', data: ESC, title: 'Escape' },
+  { id: 'select', label: 'select', kind: 'select', title: 'Select text' },
+  { id: 'photo', label: '📷', kind: 'photo', title: 'Upload a photo' },
   { id: 'tab', label: 'tab', kind: 'key', data: '\t', title: 'Tab' },
   { id: 'shift-tab', label: '⇧tab', kind: 'key', data: `${ESC}[Z`, title: 'Shift-Tab' },
   { id: 'ctrl', label: 'ctrl', kind: 'ctrl', title: 'Control (sticky)' },
@@ -52,9 +64,7 @@ export const PRIMARY_KEYS: KeyDef[] = [
   { id: 'right', label: '→', kind: 'key', data: `${ESC}[C`, repeat: true, title: 'Right' },
   { id: 'ctrl-c', label: '^C', kind: 'key', data: '\x03', title: 'Control-C' },
   { id: 'enter', label: '⏎', kind: 'key', data: '\r', title: 'Enter' },
-  { id: 'select', label: 'select', kind: 'select', title: 'Select text' },
   { id: 'paste', label: 'paste', kind: 'paste', title: 'Paste from clipboard' },
-  { id: 'photo', label: '📷', kind: 'photo', title: 'Upload a photo' },
   { id: 'more', label: '⋯', kind: 'more', title: 'More keys' },
 ]
 
@@ -78,6 +88,9 @@ export const SECONDARY_KEYS: KeyDef[] = [
   { id: 'backslash', label: '\\', kind: 'key', data: '\\' },
   { id: 'underscore', label: '_', kind: 'key', data: '_' },
 ]
+
+/** Ids in the ⋯ tray, so the toolbar can give that row its own look. */
+export const SECONDARY_IDS: ReadonlySet<string> = new Set(SECONDARY_KEYS.map(k => k.id))
 
 export interface Modifiers {
   ctrl: boolean
@@ -137,10 +150,20 @@ export function repeatDelay(n: number): number {
 export const TAP_SLOP_PX = 10
 
 // ---------------------------------------------------------------------------
-// Keyboard shortcuts for the chrome: toggle the sidebar and the file panel
+// Keyboard shortcuts for the chrome: panels, session cycling, and the
+// leader key
 // ---------------------------------------------------------------------------
 
-export type ShortcutAction = 'toggle-sidebar' | 'toggle-files'
+export type ShortcutAction =
+  | 'toggle-sidebar'
+  | 'toggle-files'
+  | 'next-session'
+  | 'prev-session'
+  /** Arm the leader key; the keystroke after it picks a LeaderAction. */
+  | 'arm-leader'
+
+/** What the key pressed after the leader does. */
+export type LeaderAction = 'new-session' | 'close-session' | 'rename-session' | 'insert-file'
 
 /** The parts of a KeyboardEvent the shortcut table looks at. */
 export interface ShortcutKey {
@@ -152,20 +175,111 @@ export interface ShortcutKey {
 }
 
 /**
+ * Shifted punctuation back to the key that was actually struck. Browsers
+ * report the character shift produces (Shift+. is ">"), but the bindings
+ * below are written as a physical key plus a shift flag.
+ */
+const UNSHIFTED: Record<string, string> = {
+  '"': "'",
+  '|': '\\',
+  '>': '.',
+  '<': ',',
+}
+
+function baseKey(key: string): string {
+  const lower = key.toLowerCase()
+  return UNSHIFTED[lower] ?? lower
+}
+
+/**
+ * Chords with a Command key, which is what a Mac browser leaves to the
+ * page. Chrome keeps Cmd+N/T/W for itself and Cmd+, opens its settings, so
+ * none of those can appear here. Shift reverses the cycle direction, the
+ * way Shift+Tab does.
+ */
+function metaAction(key: string, shift: boolean): ShortcutAction | null {
+  if (key === "'" && !shift) return 'toggle-sidebar'
+  if (key === '\\' && !shift) return 'toggle-files'
+  if (key === '.') return shift ? 'prev-session' : 'next-session'
+  if (key === 'k' && !shift) return 'arm-leader'
+  return null
+}
+
+/**
+ * The same actions for keyboards without a Command key. Shift is spent
+ * marking the chord itself, so the two cycle directions need two keys.
+ * Plain Ctrl is not available: Ctrl+\ is SIGQUIT and Ctrl+K is kill-line,
+ * and the terminal wants both.
+ */
+function ctrlShiftAction(key: string): ShortcutAction | null {
+  if (key === "'") return 'toggle-sidebar'
+  if (key === '\\') return 'toggle-files'
+  if (key === '.') return 'next-session'
+  if (key === ',') return 'prev-session'
+  if (key === 'k') return 'arm-leader'
+  return null
+}
+
+/**
  * Which app-level action a key chord triggers, or null when the key belongs
- * to the terminal. Meta+B / Meta+\ follow VS Code; Ctrl+Shift+B / Ctrl+Shift+\
- * cover keyboards without a Command key. Plain Ctrl+B is the tmux prefix and
- * Alt chords are terminal input, so neither is claimed.
+ * to the terminal. Alt chords are terminal input (the ESC prefix) and plain
+ * Ctrl+B is the tmux prefix, so neither is claimed.
  */
 export function shortcutAction(e: ShortcutKey): ShortcutAction | null {
   if (e.altKey) return null
-  const chord = e.metaKey ? !e.ctrlKey : e.ctrlKey && e.shiftKey
-  if (!chord) return null
-  const key = e.key.toLowerCase()
-  if (key === 'b') return 'toggle-sidebar'
-  // Shift+\ types | on most layouts, so accept both spellings.
-  if (key === '\\' || key === '|') return 'toggle-files'
+  const key = baseKey(e.key)
+  if (e.metaKey) return e.ctrlKey ? null : metaAction(key, e.shiftKey)
+  if (e.ctrlKey && e.shiftKey) return ctrlShiftAction(key)
   return null
+}
+
+/**
+ * The action for the key pressed after the leader, or null when that key is
+ * not bound. Either way the leader swallows it, the way tmux's prefix does,
+ * so a mistyped chord never lands in the terminal as stray input.
+ */
+export function leaderAction(key: string): LeaderAction | null {
+  switch (key.toLowerCase()) {
+    case 'n': return 'new-session'
+    case 'x': return 'close-session'
+    case 'r': return 'rename-session'
+    case 'i': return 'insert-file'
+    default: return null
+  }
+}
+
+/**
+ * What the leader is waiting for: nothing, the action key, or a second
+ * press of "x" to go through with a kill.
+ */
+export type LeaderMode = null | 'armed' | 'confirm-close'
+
+/** A key that is only a modifier must not spend the armed leader. */
+export function isModifierKey(key: string): boolean {
+  return key === 'Shift' || key === 'Control' || key === 'Alt' || key === 'Meta'
+}
+
+/** How long the leader stays armed waiting for a second key. */
+export const LEADER_TIMEOUT_MS = 2000
+
+/**
+ * How long to wait before showing the hint. Anyone who already knows the
+ * key has pressed it by then and never sees the strip.
+ */
+export const LEADER_HINT_DELAY_MS = 400
+
+/**
+ * How long the kill confirmation stays armed. Longer than the leader's own
+ * window: this one has to be read before it is answered.
+ */
+export const LEADER_CONFIRM_MS = 3000
+
+/** The hint strip, in the order the keys are listed. */
+export const LEADER_HINT = 'n new · x close · r rename · i insert'
+
+/** The kill confirmation. Killing a session cannot be undone. */
+export function confirmCloseHint(name: string): string {
+  return `kill ${name}? x again to confirm · esc to cancel`
 }
 
 // ---------------------------------------------------------------------------

@@ -123,27 +123,90 @@ test.describe('text fields on a phone', () => {
   })
 })
 
+test.describe('settings', () => {
+  test.use({ viewport: DESKTOP })
+
+  test('the sidebar gear opens settings, the stepper changes the terminal text size', async ({ page }) => {
+    await page.goto('/')
+    await page.getByTestId('settings-open').click()
+    await expect(page.getByTestId('settings')).toBeVisible()
+    const value = page.getByTestId('font-size-value')
+    const before = Number(await value.innerText())
+    await page.getByTestId('font-size-up').click()
+    await expect(value).toHaveText(String(before + 1))
+    await page.keyboard.press('Escape')
+    await expect(page.getByTestId('settings')).toBeHidden()
+  })
+
+  test('the backdrop closes settings too', async ({ page }) => {
+    await page.goto('/')
+    await page.getByTestId('settings-open').click()
+    await expect(page.getByTestId('settings')).toBeVisible()
+    await page.getByTestId('settings-backdrop').click({ position: { x: 5, y: 5 } })
+    await expect(page.getByTestId('settings')).toBeHidden()
+  })
+})
+
 test.describe('keyboard shortcuts', () => {
   test.use({ viewport: DESKTOP })
 
-  test('#9 Meta+B toggles the sidebar and Meta+\\ toggles the file panel, even with the terminal focused', async ({ page }) => {
+  test("#9 Meta+' toggles the sidebar and Meta+\\ toggles the file panel, even with the terminal focused", async ({ page }) => {
     await page.goto('/')
     await expect(page.getByTestId('sidebar')).toBeVisible()
     // Focus the terminal area so the shortcut has to win over xterm.
     await page.getByTestId('terminal-area').click()
-    await page.keyboard.press('Meta+b')
+    await page.keyboard.press("Meta+'")
     await expect(page.getByTestId('sidebar')).toBeHidden()
-    await page.keyboard.press('Meta+b')
+    await page.keyboard.press("Meta+'")
     await expect(page.getByTestId('sidebar')).toBeVisible()
     await page.keyboard.press('Meta+\\')
     await expect(page.getByTestId('file-panel')).toBeVisible()
     await page.keyboard.press('Meta+\\')
     await expect(page.getByTestId('file-panel')).toBeHidden()
-    // Ctrl+Shift+B for keyboards without a Command key. Plain Ctrl+B is the
-    // tmux prefix and must keep reaching the terminal.
-    await page.keyboard.press('Control+Shift+b')
+    // Ctrl+Shift+' for keyboards without a Command key. Plain Ctrl chords
+    // are terminal input and must keep reaching it.
+    await page.keyboard.press("Control+Shift+'")
     await expect(page.getByTestId('sidebar')).toBeHidden()
-    await page.keyboard.press('Control+Shift+b')
+    await page.keyboard.press("Control+Shift+'")
     await expect(page.getByTestId('sidebar')).toBeVisible()
+  })
+
+  test('#9 Meta+K shows the leader hint, and Escape spends it without acting', async ({ page }) => {
+    await page.goto('/')
+    await page.getByTestId('terminal-area').click()
+    await page.keyboard.press('Meta+k')
+    // The hint waits a beat so anyone who knows the key never sees it.
+    await expect(page.getByTestId('toast')).toContainText('n new')
+    await expect(page.getByTestId('toast')).toHaveAttribute('data-tone', 'hint')
+    await page.keyboard.press('Escape')
+    await expect(page.getByTestId('toast')).toBeHidden()
+  })
+
+  test('#9 Meta+K r opens the inline rename on the active session', async ({ page }) => {
+    await page.goto('/')
+    await expect(page.getByTestId('session-row').first()).toBeVisible()
+    // From the terminal, so the chord has to win over xterm and the
+    // sidebar has to take the request as it renders.
+    await page.getByTestId('terminal-area').click()
+    await page.keyboard.press('Meta+k')
+    await page.keyboard.press('r')
+    await expect(page.getByTestId('session-name-input')).toBeVisible()
+    // Escape in the field cancels the rename rather than closing anything.
+    await page.keyboard.press('Escape')
+    await expect(page.getByTestId('session-name-input')).toBeHidden()
+  })
+
+  test('#9 Meta+K x asks before killing, and Escape backs out', async ({ page }) => {
+    await page.goto('/')
+    await expect(page.getByTestId('sidebar')).toBeVisible()
+    const sessions = await page.getByTestId('session-row').count()
+    await page.getByTestId('terminal-area').click()
+    await page.keyboard.press('Meta+k')
+    await page.keyboard.press('x')
+    // The confirmation skips the hint's delay: it is up straight away.
+    await expect(page.getByTestId('toast')).toContainText('x again to confirm')
+    await page.keyboard.press('Escape')
+    await expect(page.getByTestId('toast')).toBeHidden()
+    await expect(page.getByTestId('session-row')).toHaveCount(sessions)
   })
 })

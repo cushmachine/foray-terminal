@@ -97,7 +97,7 @@ test('listWindows asks tmux for id, name, cwd, title, command and the named flag
   ])
 })
 
-test('listWindows filters out non-nest sessions', async () => {
+test('listWindows filters out non-Foray sessions', async () => {
   const mockExec = execReturning(
     [line(0, 'nest_shell', '/root'), line(1, 'other_session', '/tmp'), line(2, 'nest_dev', '/root/project')].join('\n'),
   )

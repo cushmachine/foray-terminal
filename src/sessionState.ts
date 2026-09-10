@@ -52,6 +52,24 @@ export function sortSessions(sessions: readonly Session[]): Session[] {
 }
 
 /**
+ * The session `delta` steps away from the active one in creation order,
+ * wrapping at both ends so the cycle keys never dead-end. Returns null when
+ * there is no session to move to.
+ */
+export function cycleSession(
+  sessions: readonly Session[],
+  active: number | null,
+  delta: 1 | -1,
+): number | null {
+  const ordered = sortSessions(sessions)
+  if (ordered.length === 0) return null
+  const index = ordered.findIndex((s) => s.id === active)
+  // Nothing active (or it just went away): start at the oldest.
+  if (index === -1) return ordered[0].id
+  return ordered[(index + delta + ordered.length) % ordered.length].id
+}
+
+/**
  * Sessions whose terminal has been mounted. Terminals are created the first
  * time a session is viewed rather than for every session on load: an xterm
  * instance plus a server pty per session is heavy on a phone, and each

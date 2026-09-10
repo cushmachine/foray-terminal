@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { displayName, sortSessions, type Session } from './sessionState'
 import { isEditableTarget, useEscape } from './hooks/useEscape'
-import { MAX_FONT_SIZE, MIN_FONT_SIZE } from './mobile'
 import { relativeTime, showsAgent, visiblePast } from './pastSessionsView'
 import { PAST_SESSIONS_KEY, storageGet, storageSet } from './storage'
 import type { PastSession } from './shared/protocol'
@@ -24,8 +23,12 @@ interface SidebarProps {
   isMobile: boolean
   /** windowId -> number of attached clients, from session:ownership. */
   ownership?: Record<number, number>
-  fontSize: number
-  onFontSizeChange: (size: number) => void
+  /** Session the leader key asked to rename, or null. See onRenameRequestHandled. */
+  renameRequest?: number | null
+  /** Called once the inline editor is open, so App can drop the request. */
+  onRenameRequestHandled?: () => void
+  /** Open the settings modal; the gear sits in the footer. */
+  onOpenSettings: () => void
 }
 
 /** How long the "kill?" confirmation stays armed before reverting. */
@@ -51,8 +54,9 @@ export function Sidebar({
   isOpen,
   isMobile,
   ownership = {},
-  fontSize,
-  onFontSizeChange,
+  renameRequest = null,
+  onRenameRequestHandled,
+  onOpenSettings,
 }: SidebarProps) {
   // Inline rename replaces window.prompt, which is ugly in a Home Screen
   // app and blocked outright in some Android webviews.
@@ -105,12 +109,24 @@ export function Sidebar({
     }
   }, [drawerOpen])
 
-  if (!isMobile && !isOpen) return null
-
   const startRename = (session: Session) => {
     setRenamingId(session.id)
     setDraft(displayName(session))
   }
+
+  // A rename asked for from outside (the leader key's "r"). App opens the
+  // sidebar in the same step, so on desktop this fires as the drawer
+  // mounts; clearing the request keeps a later open from re-triggering it.
+  useEffect(() => {
+    if (renameRequest === null) return
+    const session = sessions.find(s => s.id === renameRequest)
+    if (session) startRename(session)
+    onRenameRequestHandled?.()
+    // startRename only sets state, so it does not belong in the deps.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [renameRequest, sessions, onRenameRequestHandled])
+
+  if (!isMobile && !isOpen) return null
 
   const commitRename = () => {
     if (renamingId === null) return
@@ -392,17 +408,19 @@ export function Sidebar({
         maxHeight: '45%',
         minHeight: 0,
       }}>
+        <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
         <button
           className="btn-ghost"
           data-testid="past-sessions-toggle"
           aria-expanded={pastOpen}
           onClick={togglePast}
           style={{
+            flex: 1,
+            minWidth: 0,
             justifyContent: 'space-between',
             padding: '8px 16px',
             minHeight: hit,
             borderRadius: 0,
-            flexShrink: 0,
           }}
         >
           <span style={{
@@ -416,6 +434,17 @@ export function Sidebar({
           </span>
           <span aria-hidden style={{ fontSize: 11, color: 'var(--text-faint)' }}>{pastOpen ? '▾' : '▸'}</span>
         </button>
+        <button
+          className="btn-ghost"
+          data-testid="settings-open"
+          onClick={onOpenSettings}
+          aria-label="Settings"
+          title="Settings"
+          style={{ ...iconButton(14), borderRadius: 0 }}
+        >
+          ⚙
+        </button>
+        </div>
         {pastOpen && (
           <div data-testid="past-session-list" style={{ overflowY: 'auto', minHeight: 0, padding: '0 8px 8px', overscrollBehavior: 'contain' }}>
             {pastSessions === null || pastSessions.length === 0 ? (
@@ -430,7 +459,7 @@ export function Sidebar({
                   // when it lives in one of our sessions the row jumps there.
                   const disabled = row.live && !liveWindow
                   const hint = row.live
-                    ? liveWindow ? `Running in "${displayName(liveWindow)}" — open it` : 'Running outside nest'
+                    ? liveWindow ? `Running in "${displayName(liveWindow)}" — open it` : 'Running outside Foray'
                     : `Resume: ${row.lastPrompt || row.title}`
                   return (
                     <button
@@ -539,38 +568,6 @@ export function Sidebar({
         </button>
       </div>
 
-      {/* Terminal text size */}
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 4,
-        padding: '4px 8px 8px',
-        fontSize: 11,
-        color: 'var(--text-faint)',
-      }}>
-        <span style={{ flex: 1, paddingLeft: 8 }}>text size</span>
-        <button
-          className="btn-outline"
-          onClick={() => onFontSizeChange(fontSize - 1)}
-          disabled={fontSize <= MIN_FONT_SIZE}
-          aria-label="Smaller text"
-          title="Smaller text"
-          style={iconButton(15)}
-        >
-          −
-        </button>
-        <span style={{ minWidth: 24, textAlign: 'center', color: 'var(--text-dim)' }}>{fontSize}</span>
-        <button
-          className="btn-outline"
-          onClick={() => onFontSizeChange(fontSize + 1)}
-          disabled={fontSize >= MAX_FONT_SIZE}
-          aria-label="Larger text"
-          title="Larger text"
-          style={iconButton(15)}
-        >
-          +
-        </button>
-      </div>
     </div>
   )
 }

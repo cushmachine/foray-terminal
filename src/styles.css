@@ -18,6 +18,7 @@
   --accent-text: #5cd4c4;
   --danger: #d4634f;
   --danger-dim: rgba(212, 99, 79, 0.15);
+  --warning-dim: rgba(224, 154, 60, 0.15);
   --warning: #e09a3c;
   --key-bg: var(--surface-hover);
   --key-border: #2a2a35;
@@ -57,6 +58,7 @@
      backdrop; the toast. Siblings on one layer stack in DOM order. */
   --z-overlay: 10;
   --z-drawer: 100;
+  --z-modal: 150;
   --z-banner: 200;
   --sidebar-width: 240px;
 }
@@ -231,6 +233,25 @@ button, input, textarea {
   border-color: var(--accent);
 }
 .btn-key[aria-pressed="true"],
+/* The jump-to-prompt key: tinted so it reads as different from the keys
+   that send input, but lighter than [data-active], which is the pressed
+   look and would make it seem stuck on. */
+.btn-key.tone-accent:not([data-active="true"]) {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+/* Esc is how you stop a model mid-response, so it is marked like a brake
+   rather than an ordinary key. */
+.btn-key.key-stop:not([data-active="true"]) {
+  background: var(--warning-dim);
+  color: var(--warning);
+}
+/* The ⋯ tray. Its keys sit darker than the row below, on a raised ground,
+   so a glance never reads the stack as a second copy of the main row. */
+.btn-key.key-secondary:not([data-active="true"]) {
+  background: var(--surface);
+  border-color: var(--border);
+}
 .btn-key[data-active="true"] {
   background: var(--accent-dim);
   border-color: var(--key-active);

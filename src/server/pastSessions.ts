@@ -1,10 +1,10 @@
 // Past sessions across every configured agent, and how one is revived.
 //
-// Revival is a nest session (tmux new-session in the transcript's cwd)
+// Revival is a Foray session (tmux new-session in the transcript's cwd)
 // plus the agent's resume command typed into the shell that starts there
 // (tmux send-keys). Typing it, rather than making it the session's
 // command, means the user's shell rc is loaded (PATH from nvm, their own
-// env) and the shell, and so the nest session, survives when the agent
+// env) and the shell, and so the Foray session, survives when the agent
 // exits. Only an id the provider vouches for is ever typed, and every
 // argv element is quoted, so nothing the client sent reaches the shell
 // as syntax.
@@ -27,7 +27,7 @@ interface LiveAt {
   window?: string
 }
 
-/** What a revive needs: where to start the nest session, what to call it, what to type. */
+/** What a revive needs: where to start the Foray session, what to call it, what to type. */
 export interface Revival {
   name: string
   cwd: string

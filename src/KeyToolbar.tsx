@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { ChangeEvent, PointerEvent as ReactPointerEvent } from 'react'
 import {
+  ESC_KEY,
   PRIMARY_KEYS,
   PROMPT_KEY,
+  SECONDARY_IDS,
   SECONDARY_KEYS,
   TAP_SLOP_PX,
   overflowHint,
@@ -40,6 +42,17 @@ interface PressState {
 }
 
 /** The keys act on the active terminal through the registry; the sticky modifiers are App state. */
+/**
+ * The colour a key carries beyond the default. The prompt key navigates the
+ * scrollback, Esc stops a model mid-response, and the ⋯ tray needs to not
+ * look like a second copy of the main row — the rest just send input.
+ */
+function keyTone(key: KeyDef): string {
+  if (key.kind === 'prompt') return ' tone-accent'
+  if (key.id === 'esc') return ' key-stop'
+  return SECONDARY_IDS.has(key.id) ? ' key-secondary' : ''
+}
+
 export function KeyToolbar({ modifiers, onToggleModifier, isMobile }: KeyToolbarProps) {
   const [pressed, setPressed] = useState<string | null>(null)
   const [showMore, setShowMore] = useState(false)
@@ -198,7 +211,7 @@ export function KeyToolbar({ modifiers, onToggleModifier, isMobile }: KeyToolbar
     return (
       <button
         key={key.id}
-        className="btn-key"
+        className={`btn-key${keyTone(key)}`}
         title={key.title ?? key.label}
         aria-label={key.title ?? key.label}
         aria-pressed={key.kind === 'ctrl' || key.kind === 'alt' || key.kind === 'more' ? active : undefined}
@@ -257,17 +270,27 @@ export function KeyToolbar({ modifiers, onToggleModifier, isMobile }: KeyToolbar
       flexShrink: 0,
     }}>
       {showMore && (
-        <div style={{ ...rowStyle, paddingBottom: 0 }}>
+        <div
+          data-testid="key-toolbar-more-row"
+          style={{
+            ...rowStyle,
+            background: 'var(--surface-raised)',
+            borderBottom: '1px solid var(--border)',
+          }}
+        >
           {SECONDARY_KEYS.map(renderKey)}
         </div>
       )}
       <div style={{ display: 'flex', alignItems: 'center' }}>
-        {/* Outside the scrolling row, so it stays put at the far left. */}
-        {canJump && (
-          <div data-testid="jump-to-prompt" style={{ flexShrink: 0, padding: '6px 0 6px 8px' }}>
-            {renderKey(PROMPT_KEY)}
-          </div>
-        )}
+        {/* Outside the scrolling row, so these stay put at the far left. */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, padding: '6px 0 6px 8px' }}>
+          {canJump && (
+            <div data-testid="jump-to-prompt" style={{ display: 'flex' }}>
+              {renderKey(PROMPT_KEY)}
+            </div>
+          )}
+          {renderKey(ESC_KEY)}
+        </div>
         <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
           <div ref={row} data-testid="key-toolbar-row" style={rowStyle}>
             {PRIMARY_KEYS.map(renderKey)}

@@ -184,7 +184,7 @@ test('shellQuote single-quotes every element', () => {
   assert.equal(shellQuote(['$(rm -rf /)', '; ls']), `'$(rm -rf /)' '; ls'`)
 })
 
-test('PastSessions merges agents newest first and marks live rows with their nest session', async () => {
+test('PastSessions merges agents newest first and marks live rows with their Foray session', async () => {
   const tmux = fakeTmux()
   // The session the agent recorded as nest_work has since been renamed;
   // its window id (@0, the fake's first session) still finds it.

@@ -21,27 +21,37 @@ export function failureText(msg: ErrorMessage): string {
 interface ToastProps {
   message: string | null
   onDismiss: () => void
+  /**
+   * A hint is transient and timed by whoever raised it (the leader key),
+   * so it carries no dismiss button and does not dismiss itself.
+   */
+  tone?: 'error' | 'hint'
 }
 
 /** How long a toast stays before dismissing itself. */
 export const TOAST_MS = 6000
 
 /**
- * A short-lived strip at the bottom of the page for failures nothing else
- * shows (a session op the server rejected). Same look as VersionBanner.
+ * A short-lived strip at the bottom of the page: failures nothing else
+ * shows (a session op the server rejected), or the leader key's hint. One
+ * strip serves both so the two can never overlap; a hint showing while an
+ * error is up wins for its couple of seconds, then the error is back.
+ * Same look as VersionBanner.
  */
-export function Toast({ message, onDismiss }: ToastProps) {
+export function Toast({ message, onDismiss, tone = 'error' }: ToastProps) {
+  const hint = tone === 'hint'
   useEffect(() => {
-    if (message === null) return
+    if (message === null || hint) return
     const timer = setTimeout(onDismiss, TOAST_MS)
     return () => clearTimeout(timer)
-  }, [message, onDismiss])
+  }, [message, onDismiss, hint])
 
   if (message === null) return null
   return (
     <div
       data-testid="toast"
-      role="alert"
+      data-tone={tone}
+      role={hint ? 'status' : 'alert'}
       style={{
         position: 'fixed',
         bottom: 'calc(12px + env(safe-area-inset-bottom))',
@@ -54,7 +64,7 @@ export function Toast({ message, onDismiss }: ToastProps) {
         gap: 10,
         padding: '6px 12px',
         background: 'var(--surface)',
-        border: '1px solid var(--danger)',
+        border: `1px solid ${hint ? 'var(--accent)' : 'var(--danger)'}`,
         borderRadius: 'var(--radius-md)',
         color: 'var(--text)',
         fontSize: 12,
@@ -62,7 +72,9 @@ export function Toast({ message, onDismiss }: ToastProps) {
       }}
     >
       <span style={{ overflowWrap: 'anywhere' }}>{message}</span>
-      <button className="btn-outline tone-accent" onClick={onDismiss} aria-label="Dismiss" title="Dismiss">×</button>
+      {!hint && (
+        <button className="btn-outline tone-accent" onClick={onDismiss} aria-label="Dismiss" title="Dismiss">×</button>
+      )}
     </div>
   )
 }

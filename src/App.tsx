@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useReducer, useRef } from 'react'
 import type { TouchEvent as ReactTouchEvent } from 'react'
+import { Settings } from './Settings'
 import { Sidebar } from './Sidebar'
 import { Terminal } from './Terminal'
 import { KeyToolbar } from './KeyToolbar'
@@ -8,8 +9,22 @@ import { FilePanel } from './files/FilePanel'
 import { useSocket } from './hooks/useSocket'
 import { SocketProvider } from './SocketContext'
 import { useAppHeight } from './hooks/useAppHeight'
-import { NO_SESSIONS, openedWith, reduceSessions } from './sessionState'
-import { NO_MODIFIERS, shortcutAction, type Modifiers } from './keys'
+import { NO_SESSIONS, cycleSession, displayName, openedWith, reduceSessions } from './sessionState'
+import {
+  LEADER_CONFIRM_MS,
+  LEADER_HINT,
+  LEADER_HINT_DELAY_MS,
+  LEADER_TIMEOUT_MS,
+  NO_MODIFIERS,
+  confirmCloseHint,
+  isModifierKey,
+  leaderAction,
+  shortcutAction,
+  type LeaderAction,
+  type LeaderMode,
+  type Modifiers,
+  type ShortcutAction,
+} from './keys'
 import {
   FILE_PANEL_DEFAULT_WIDTH,
   IS_TOUCH,
@@ -82,12 +97,29 @@ export function App() {
   const dismissToast = useCallback(() => setToast(null), [])
   // Past agent sessions from disk; null until the first reply arrives.
   const [pastSessions, setPastSessions] = useState<PastSession[] | null>(null)
+  // The leader key: Cmd+K arms it, the next keystroke spends it.
+  const [leaderMode, setLeaderMode] = useState<LeaderMode>(null)
+  const [leaderHint, setLeaderHint] = useState<string | null>(null)
+  // The session the leader's "r" wants renamed; the Sidebar clears it.
+  const [renameRequest, setRenameRequest] = useState<number | null>(null)
+  const clearRenameRequest = useCallback(() => setRenameRequest(null), [])
+  // The leader's "i" opens this; upload runs through the active terminal.
+  const insertInput = useRef<HTMLInputElement>(null)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const openSettings = useCallback(() => setSettingsOpen(true), [])
+  const closeSettings = useCallback(() => setSettingsOpen(false), [])
 
   const isMobile = useIsMobile()
   // Listeners installed once (the socket handler, the keyboard shortcuts)
   // read the current layout through this ref instead of re-subscribing.
   const isMobileRef = useRef(isMobile)
   isMobileRef.current = isMobile
+  // Same reason: the shortcut handler needs the current session list
+  // without being torn down and rebuilt on every poll.
+  const sessionsRef = useRef(sessions)
+  sessionsRef.current = sessions
+  const activeSessionRef = useRef(activeSession)
+  activeSessionRef.current = activeSession
   const [fontSize, setFontSize] = useFontSize(isMobile)
   useAppHeight()
 
@@ -106,20 +138,6 @@ export function App() {
   const applyPanelAction = useCallback((action: PanelAction) => {
     setPanels(prev => resolvePanels(prev, action, window.innerWidth, isMobileRef.current))
   }, [])
-
-  // Keyboard shortcuts for the chrome (sidebar, file panel). Captured on window so they
-  // win over xterm, which otherwise swallows every key while focused.
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      const action = shortcutAction(e)
-      if (!action) return
-      e.preventDefault()
-      e.stopPropagation()
-      applyPanelAction(action)
-    }
-    window.addEventListener('keydown', onKeyDown, true)
-    return () => window.removeEventListener('keydown', onKeyDown, true)
-  }, [applyPanelAction])
 
   // Mount a terminal for whichever session becomes active.
   useEffect(() => {
@@ -229,6 +247,113 @@ export function App() {
     send({ type: 'session:rename', windowId: id, name })
   }, [send])
 
+  const runShortcut = useCallback((action: ShortcutAction) => {
+    switch (action) {
+      case 'toggle-sidebar':
+      case 'toggle-files':
+        applyPanelAction(action)
+        break
+      case 'next-session':
+      case 'prev-session': {
+        const id = cycleSession(
+          sessionsRef.current,
+          activeSessionRef.current,
+          action === 'next-session' ? 1 : -1,
+        )
+        if (id !== null) selectSession(id)
+        break
+      }
+      case 'arm-leader':
+        setLeaderMode('armed')
+        break
+    }
+  }, [applyPanelAction, selectSession])
+
+  const runLeaderAction = useCallback((action: LeaderAction | null) => {
+    const active = activeSessionRef.current
+    switch (action) {
+      case 'new-session':
+        createSession()
+        break
+      case 'close-session':
+        // Not reached: the key listener arms a confirmation instead.
+        break
+      case 'rename-session':
+        // The rename editor lives in the sidebar, so bring it into view.
+        if (active === null) break
+        applyPanelAction('open-sidebar')
+        setRenameRequest(active)
+        break
+      case 'insert-file':
+        // Must run inside the keystroke: browsers refuse a file dialog
+        // that is not opened from a user gesture.
+        insertInput.current?.click()
+        break
+      default:
+        // An unbound key. The leader still ate it; nothing else to do.
+        break
+    }
+  }, [applyPanelAction, createSession])
+
+  // Keyboard shortcuts for the chrome. Captured on window so they win over
+  // xterm, which otherwise swallows every key while focused.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (leaderMode !== null) {
+        // Holding a modifier is not yet a choice; wait for the real key.
+        if (isModifierKey(e.key)) return
+        e.preventDefault()
+        e.stopPropagation()
+        const action = leaderAction(e.key)
+        if (leaderMode === 'confirm-close') {
+          setLeaderMode(null)
+          // Only "x" again goes through; every other key is a cancel.
+          const active = activeSessionRef.current
+          if (action === 'close-session' && active !== null) killSession(active)
+          return
+        }
+        // A kill cannot be undone, so it costs a second press.
+        if (action === 'close-session' && activeSessionRef.current !== null) {
+          setLeaderMode('confirm-close')
+          return
+        }
+        setLeaderMode(null)
+        runLeaderAction(action)
+        return
+      }
+      const action = shortcutAction(e)
+      if (!action) return
+      e.preventDefault()
+      e.stopPropagation()
+      runShortcut(action)
+    }
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => window.removeEventListener('keydown', onKeyDown, true)
+  }, [leaderMode, killSession, runLeaderAction, runShortcut])
+
+  // While the leader is armed: show the hint after a beat, and give up
+  // after the timeout so a stray Cmd+K does not stay live. The kill
+  // confirmation skips the delay — a destructive prompt has to be on
+  // screen the instant it is armed — and gets longer to be answered.
+  useEffect(() => {
+    if (leaderMode === null) {
+      setLeaderHint(null)
+      return
+    }
+    if (leaderMode === 'confirm-close') {
+      const session = sessionsRef.current.find(s => s.id === activeSessionRef.current)
+      setLeaderHint(confirmCloseHint(session ? displayName(session) : 'this session'))
+      const disarm = setTimeout(() => setLeaderMode(null), LEADER_CONFIRM_MS)
+      return () => clearTimeout(disarm)
+    }
+    const show = setTimeout(() => setLeaderHint(LEADER_HINT), LEADER_HINT_DELAY_MS)
+    const disarm = setTimeout(() => setLeaderMode(null), LEADER_TIMEOUT_MS)
+    return () => {
+      clearTimeout(show)
+      clearTimeout(disarm)
+    }
+  }, [leaderMode])
+
   const handleOpenFile = useCallback((path: string) => {
     setOpenFile(path)
     applyPanelAction('open-file')
@@ -262,7 +387,29 @@ export function App() {
         onTouchStart={isMobile ? handleTouchStart : undefined}
         onTouchEnd={isMobile ? handleTouchEnd : undefined}
       >
-        <Toast message={toast} onDismiss={dismissToast} />
+        <Toast
+          message={leaderHint ?? toast}
+          onDismiss={dismissToast}
+          tone={leaderHint === null ? 'error' : 'hint'}
+        />
+
+        {/* The leader's "i" picker. Upload goes through the active
+            terminal, the same path the toolbar's photo key uses. */}
+        <input
+          ref={insertInput}
+          type="file"
+          accept="image/png,image/jpeg,image/gif,image/webp"
+          multiple
+          onChange={e => {
+            const files = Array.from(e.target.files ?? [])
+            // Reset so picking the same file twice still fires change.
+            e.target.value = ''
+            if (files.length > 0) terminalRegistry.active()?.upload(files)
+          }}
+          style={{ display: 'none' }}
+          aria-hidden="true"
+          tabIndex={-1}
+        />
 
         {/* Sidebar overlay on mobile */}
         {sidebarOpen && isMobile && (
@@ -298,6 +445,15 @@ export function App() {
           isOpen={sidebarOpen}
           isMobile={isMobile}
           ownership={ownership}
+          renameRequest={renameRequest}
+          onRenameRequestHandled={clearRenameRequest}
+          onOpenSettings={openSettings}
+        />
+
+        <Settings
+          open={settingsOpen}
+          onClose={closeSettings}
+          isMobile={isMobile}
           fontSize={fontSize}
           onFontSizeChange={setFontSize}
         />

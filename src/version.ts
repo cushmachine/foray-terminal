@@ -46,7 +46,7 @@ export function versionNotice(
   if (hello.serverBuild !== 'unknown' && pageCommit !== 'unknown' && hello.serverBuild !== pageCommit) {
     return {
       kind: 'server-drift',
-      text: `Server started from ${hello.serverBuild}, this page was built from ${pageCommit}. Rebuild and restart nest to sync.`,
+      text: `Server started from ${hello.serverBuild}, this page was built from ${pageCommit}. Rebuild and restart Foray to sync.`,
     }
   }
   return null

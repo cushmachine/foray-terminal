@@ -21,9 +21,12 @@ import { appHeight } from '../hooks/useAppHeight.ts'
 import { openedWith } from '../sessionState.ts'
 import {
   NO_MODIFIERS,
+  ESC_KEY,
   PRIMARY_KEYS,
+  PROMPT_KEY,
   REPEAT_INITIAL_MS,
   REPEAT_INTERVAL_MS,
+  SECONDARY_IDS,
   SECONDARY_KEYS,
   applyModifiers,
   repeatDelay,
@@ -171,7 +174,9 @@ test('readFontSize: parses stored values and falls back on garbage', () => {
 // M3: key toolbar vocabulary and sticky modifiers
 // ---------------------------------------------------------------------------
 
-const allKeys = [...PRIMARY_KEYS, ...SECONDARY_KEYS]
+// The pinned pair renders alongside the rows, so it is held to the same
+// rules: unique ids, and data only on the keys that send bytes.
+const allKeys = [PROMPT_KEY, ESC_KEY, ...PRIMARY_KEYS, ...SECONDARY_KEYS]
 const byId = (id: string) => {
   const key = allKeys.find(k => k.id === id)
   assert.ok(key, `missing key ${id}`)
@@ -218,6 +223,18 @@ test('keys: cursor and paging sequences', () => {
 test('keys: only arrows and backspace repeat on hold', () => {
   const repeating = allKeys.filter(k => k.repeat).map(k => k.id).sort()
   assert.deepEqual(repeating, ['backspace', 'down', 'left', 'right', 'up'])
+})
+
+test('keys: the pinned pair is not also in a row, so neither renders twice', () => {
+  const rowIds = [...PRIMARY_KEYS, ...SECONDARY_KEYS].map(k => k.id)
+  assert.ok(!rowIds.includes(ESC_KEY.id))
+  assert.ok(!rowIds.includes(PROMPT_KEY.id))
+})
+
+test('keys: SECONDARY_IDS matches the ⋯ tray exactly, which is what tints it', () => {
+  assert.deepEqual([...SECONDARY_IDS].sort(), SECONDARY_KEYS.map(k => k.id).sort())
+  for (const key of PRIMARY_KEYS) assert.ok(!SECONDARY_IDS.has(key.id), key.id)
+  assert.ok(!SECONDARY_IDS.has(ESC_KEY.id))
 })
 
 test('keys: the primary row has the modifier, paste, photo and more actions', () => {

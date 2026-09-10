@@ -23,6 +23,7 @@ import {
   NO_SESSIONS,
   activeAfterList,
   applySessionMessage,
+  cycleSession,
   displayName,
   nextActiveAfterKill,
   pendingCreateAfter,
@@ -201,6 +202,24 @@ const WIN_A: TmuxWindow = {
 const WIN_B: TmuxWindow = {
   id: 1, name: 'claude', cwd: '/home/user/project', title: '', command: 'claude', named: false,
 }
+
+const WIN_C: TmuxWindow = {
+  id: 2, name: 'logs', cwd: '/home/user', title: '', command: 'bash', named: false,
+}
+
+test('cycleSession: steps through creation order and wraps at both ends', () => {
+  const all = [WIN_C, WIN_A, WIN_B]
+  assert.equal(cycleSession(all, 0, 1), 1)
+  assert.equal(cycleSession(all, 2, 1), 0)
+  assert.equal(cycleSession(all, 1, -1), 0)
+  assert.equal(cycleSession(all, 0, -1), 2)
+})
+
+test('cycleSession: no sessions gives null, an unknown active one starts at the oldest', () => {
+  assert.equal(cycleSession([], null, 1), null)
+  assert.equal(cycleSession([WIN_B, WIN_A], null, 1), 0)
+  assert.equal(cycleSession([WIN_A], 0, 1), 0)
+})
 
 test('applySessionMessage: session:list replaces the session list', () => {
   const result = applySessionMessage([], { type: 'session:list', windows: [WIN_A, WIN_B] })

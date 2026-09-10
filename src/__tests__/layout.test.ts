@@ -4,7 +4,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { overflowHint, shortcutAction } from '../keys.ts'
+import { confirmCloseHint, leaderAction, isModifierKey, overflowHint, shortcutAction } from '../keys.ts'
 import { TABLET_MAX_WIDTH, readToolbarVisible, resolvePanels, type PanelState } from '../mobile.ts'
 import { KEY_TOOLBAR_KEY } from '../storage.ts'
 
@@ -16,22 +16,78 @@ function desktop(sidebarOpen: boolean, filePanelOpen: boolean): PanelState {
   return { sidebarOpen, filePanelOpen, mobileView: 'terminal' }
 }
 
-test('#9 shortcutAction: Meta+B and Ctrl+Shift+B toggle the sidebar', () => {
-  assert.equal(shortcutAction({ key: 'b', metaKey: true, ctrlKey: false, shiftKey: false, altKey: false }), 'toggle-sidebar')
-  assert.equal(shortcutAction({ key: 'B', metaKey: false, ctrlKey: true, shiftKey: true, altKey: false }), 'toggle-sidebar')
+/** A Mac chord: Command, optionally with Shift. */
+const meta = (key: string, shiftKey = false) =>
+  shortcutAction({ key, metaKey: true, ctrlKey: false, shiftKey, altKey: false })
+
+/** The same action on a keyboard with no Command key. */
+const ctrlShift = (key: string) =>
+  shortcutAction({ key, metaKey: false, ctrlKey: true, shiftKey: true, altKey: false })
+
+test("#9 shortcutAction: Meta+' and Meta+\\ toggle the sidebar and the file panel", () => {
+  assert.equal(meta("'"), 'toggle-sidebar')
+  assert.equal(meta('\\'), 'toggle-files')
 })
 
-test('#9 shortcutAction: Meta+\\ and Ctrl+Shift+\\ (which types |) toggle the file panel', () => {
-  assert.equal(shortcutAction({ key: '\\', metaKey: true, ctrlKey: false, shiftKey: false, altKey: false }), 'toggle-files')
-  assert.equal(shortcutAction({ key: '|', metaKey: false, ctrlKey: true, shiftKey: true, altKey: false }), 'toggle-files')
-  assert.equal(shortcutAction({ key: '\\', metaKey: false, ctrlKey: true, shiftKey: true, altKey: false }), 'toggle-files')
+test('#9 shortcutAction: Meta+. cycles forward, Shift reverses it', () => {
+  assert.equal(meta('.'), 'next-session')
+  // Shift+. types > on most layouts, which is what the browser reports.
+  assert.equal(meta('>', true), 'prev-session')
+  assert.equal(meta('.', true), 'prev-session')
+})
+
+test('#9 shortcutAction: Meta+K arms the leader', () => {
+  assert.equal(meta('k'), 'arm-leader')
+  assert.equal(meta('K'), 'arm-leader')
+})
+
+test('#9 shortcutAction: Ctrl+Shift chords cover keyboards with no Command key', () => {
+  // Shift is spent marking the chord, so it reports the shifted character
+  // and the two cycle directions need two keys.
+  assert.equal(ctrlShift('"'), 'toggle-sidebar')
+  assert.equal(ctrlShift('|'), 'toggle-files')
+  assert.equal(ctrlShift('\\'), 'toggle-files')
+  assert.equal(ctrlShift('>'), 'next-session')
+  assert.equal(ctrlShift('<'), 'prev-session')
+  assert.equal(ctrlShift(','), 'prev-session')
+  assert.equal(ctrlShift('k'), 'arm-leader')
 })
 
 test('#9 shortcutAction leaves terminal keys alone: plain keys, Ctrl+B (tmux prefix), Alt chords', () => {
   assert.equal(shortcutAction({ key: 'b', metaKey: false, ctrlKey: false, shiftKey: false, altKey: false }), null)
-  assert.equal(shortcutAction({ key: 'b', metaKey: false, ctrlKey: true, shiftKey: false, altKey: false }), null)
-  assert.equal(shortcutAction({ key: 'b', metaKey: false, ctrlKey: false, shiftKey: false, altKey: true }), null)
-  assert.equal(shortcutAction({ key: 'x', metaKey: true, ctrlKey: false, shiftKey: false, altKey: false }), null)
+  assert.equal(shortcutAction({ key: 'k', metaKey: false, ctrlKey: true, shiftKey: false, altKey: false }), null)
+  assert.equal(shortcutAction({ key: 'k', metaKey: false, ctrlKey: false, shiftKey: false, altKey: true }), null)
+  // The old sidebar chord is gone, and Chrome keeps Cmd+, for its settings.
+  assert.equal(meta('b'), null)
+  assert.equal(meta(','), null)
+  // Cmd+Shift+' types a quote and is not bound to anything.
+  assert.equal(meta('"', true), null)
+  // Both modifiers at once is neither chord; Ctrl+Cmd chords are the OS's.
+  assert.equal(shortcutAction({ key: 'k', metaKey: true, ctrlKey: true, shiftKey: false, altKey: false }), null)
+  // Alt wins over everything: those are terminal input.
+  assert.equal(shortcutAction({ key: '.', metaKey: true, ctrlKey: false, shiftKey: false, altKey: true }), null)
+})
+
+test('#9 leaderAction maps the four keys and swallows the rest', () => {
+  assert.equal(leaderAction('n'), 'new-session')
+  assert.equal(leaderAction('X'), 'close-session')
+  assert.equal(leaderAction('r'), 'rename-session')
+  assert.equal(leaderAction('i'), 'insert-file')
+  assert.equal(leaderAction('q'), null)
+  assert.equal(leaderAction('Escape'), null)
+})
+
+test('#9 confirmCloseHint names the session and both ways out', () => {
+  const hint = confirmCloseHint('claude')
+  assert.match(hint, /claude/)
+  assert.match(hint, /x again/)
+  assert.match(hint, /esc/)
+})
+
+test('#9 isModifierKey: holding a modifier does not spend the leader', () => {
+  assert.equal(isModifierKey('Shift'), true)
+  assert.equal(isModifierKey('Meta'), true)
+  assert.equal(isModifierKey('n'), false)
 })
 
 test('#5 overflowHint says which edges have more content', () => {
