@@ -46,7 +46,7 @@ import type { FileNode, ServerMessage } from '../shared/protocol.ts'
 
 test('server handles files:tree and returns the real directory structure', async () => {
   const { url, close } = await startTestServer()
-  const dir = await tmpDir('nest-file-panel-')
+  const dir = await tmpDir('foray-file-panel-')
   try {
     await fs.writeFile(path.join(dir, 'a.txt'), 'a')
     await fs.mkdir(path.join(dir, 'sub'))
@@ -82,7 +82,7 @@ test('server handles files:tree and returns the real directory structure', async
 
 test('server handles files:read using the cwd from a prior files:tree request', async () => {
   const { url, close } = await startTestServer()
-  const dir = await tmpDir('nest-file-panel-')
+  const dir = await tmpDir('foray-file-panel-')
   try {
     await fs.writeFile(path.join(dir, 'notes.md'), '# Hello\n\nWorld')
 
@@ -114,7 +114,7 @@ test('server handles files:read using the cwd from a prior files:tree request', 
 
 test('server handles files:write, then files:read reflects the new content', async () => {
   const { url, close } = await startTestServer()
-  const dir = await tmpDir('nest-file-panel-')
+  const dir = await tmpDir('foray-file-panel-')
   try {
     const { ws } = await connect(url)
     try {
@@ -151,7 +151,7 @@ test('server handles files:write, then files:read reflects the new content', asy
 
 test('server rejects files:read path traversal with an error message', async () => {
   const { url, close } = await startTestServer()
-  const dir = await tmpDir('nest-file-panel-')
+  const dir = await tmpDir('foray-file-panel-')
   try {
     const { ws } = await connect(url)
     try {
@@ -184,7 +184,7 @@ test('server rejects files:read path traversal with an error message', async () 
 
 test('server handles files:watch and pushes files:changed on external file changes', async () => {
   const { url, close } = await startTestServer()
-  const dir = await tmpDir('nest-file-panel-')
+  const dir = await tmpDir('foray-file-panel-')
   try {
     const file = path.join(dir, 'live.txt')
     await fs.writeFile(file, 'initial')

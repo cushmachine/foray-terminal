@@ -1,31 +1,27 @@
 // Runs once before the visual suite: gives the browser a session of the
 // suite's own to open on.
 //
-// A fresh browser profile has no nest:lastSession, so the first page load
+// A fresh browser profile has no foray:lastSession, so the first page load
 // attaches to the first session tmux lists, which on this machine is
 // someone's live shell; since only the active terminal holds a pty, that
-// attach takes over their real tab. So one nest_visual-* session is created
+// attach takes over their real tab. So one foray_visual-* session is created
 // here (global-teardown removes it with the rest) and a storage state that
-// points nest:lastSession at it is written for playwright.config.ts to load
+// points foray:lastSession at it is written for playwright.config.ts to load
 // into every browser context. The seed's cwd is a small fixture directory
 // with one markdown file, so the file-panel specs have something to open
 // and the editor spec works on a short, known document rather than
 // whatever a real checkout holds.
 
-import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import type { FullConfig } from '@playwright/test'
 import { LAST_SESSION_KEY } from '../storage.ts'
 import { Auth, SESSION_COOKIE } from '../server/auth.ts'
 import { VISUAL_TOKEN } from '../../playwright.config.ts'
-import { SESSION_PREFIX } from './helpers.ts'
+import { SESSION_PREFIX, tmux } from './helpers.ts'
 
 /** tmux session name of the seed; the prefix is what global-teardown keys on. */
-const SEED_SESSION = `nest_${SESSION_PREFIX}seed`
-
-const tmux = (args: string[]): string =>
-  execFileSync('tmux', args, { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim()
+const SEED_SESSION = `foray_${SESSION_PREFIX}seed`
 
 export default function globalSetup(config: FullConfig): void {
   const { baseURL, storageState } = config.projects[0].use

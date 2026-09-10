@@ -4,7 +4,9 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import fs from 'node:fs/promises'
 import os from 'node:os'
+import path from 'node:path'
 
 import {
   listWindows,
@@ -13,8 +15,9 @@ import {
   renameWindow,
   paneHistoryState,
   captureHistoryLines,
-  enableExtendedKeys,
+  applyTmuxServerOptions,
   sessionNameFor,
+  tmuxSocketArgs,
   SEP,
   type TmuxExecutor,
 } from '../tmux.ts'
@@ -54,15 +57,16 @@ function execReturning(stdout: string): TmuxExecutor {
 }
 
 // ---------------------------------------------------------------------------
-// Test 1: tmux.listWindows (lists sessions with nest_ prefix)
+// Test 1: tmux.listWindows (lists sessions with the foray_ prefix; the
+// nest_ compat fallback is covered by rename-migration.test.ts)
 // ---------------------------------------------------------------------------
 
 test('listWindows parses tmux session output into TmuxWindow[]', async () => {
   const mockExec = execReturning(
     [
-      line(0, 'nest_shell', '/home/user'),
-      line(1, 'nest_claude', '/home/user/project'),
-      line(2, 'nest_build', '/home/user/project'),
+      line(0, 'foray_shell', '/home/user'),
+      line(1, 'foray_claude', '/home/user/project'),
+      line(2, 'foray_build', '/home/user/project'),
     ].join('\n') + '\n',
   )
 
@@ -93,13 +97,14 @@ test('listWindows asks tmux for id, name, cwd, title, command and the named flag
     '#{pane_current_path}',
     '#{pane_title}',
     '#{pane_current_command}',
-    '#{@nest_named}',
+    // Prefers the current named-stamp option, falling back to the legacy one.
+    '#{?#{@foray_named},#{@foray_named},#{@nest_named}}',
   ])
 })
 
 test('listWindows filters out non-Foray sessions', async () => {
   const mockExec = execReturning(
-    [line(0, 'nest_shell', '/root'), line(1, 'other_session', '/tmp'), line(2, 'nest_dev', '/root/project')].join('\n'),
+    [line(0, 'foray_shell', '/root'), line(1, 'other_session', '/tmp'), line(2, 'foray_dev', '/root/project')].join('\n'),
   )
 
   const windows = await listWindows(mockExec, HOST)
@@ -123,7 +128,7 @@ test('listWindows returns [] when tmux errors (no server running)', async () => 
 
 test('listWindows handles paths and titles with spaces', async () => {
   const mockExec = execReturning(
-    line(5, 'nest_dev', '/home/user/my project/src', { title: 'my long title', command: 'vim' }),
+    line(5, 'foray_dev', '/home/user/my project/src', { title: 'my long title', command: 'vim' }),
   )
 
   const windows = await listWindows(mockExec, HOST)
@@ -137,7 +142,7 @@ test('listWindows handles paths and titles with spaces', async () => {
 
 test('listWindows surfaces a title set by a running program', async () => {
   const mockExec = execReturning(
-    line(1, 'nest_bash', '/root/GitHub', { title: '✳ Test session', command: 'claude' }),
+    line(1, 'foray_bash', '/root/GitHub', { title: '✳ Test session', command: 'claude' }),
   )
   const [win] = await listWindows(mockExec, HOST)
   assert.equal(win.title, '✳ Test session')
@@ -146,21 +151,21 @@ test('listWindows surfaces a title set by a running program', async () => {
 })
 
 test('listWindows blanks the title when it is just the hostname (tmux default)', async () => {
-  const mockExec = execReturning(line(1, 'nest_bash', '/root', { title: HOST, command: 'claude' }))
+  const mockExec = execReturning(line(1, 'foray_bash', '/root', { title: HOST, command: 'claude' }))
   const [win] = await listWindows(mockExec, HOST)
   assert.equal(win.title, '')
 })
 
 test('listWindows blanks a stale title once a bare shell is in the foreground', async () => {
   // Claude set a title, then exited. tmux keeps the old title; we should not.
-  const mockExec = execReturning(line(1, 'nest_bash', '/root', { title: '✳ old', command: 'bash' }))
+  const mockExec = execReturning(line(1, 'foray_bash', '/root', { title: '✳ old', command: 'bash' }))
   const [win] = await listWindows(mockExec, HOST)
   assert.equal(win.title, '')
 })
 
-test('listWindows reads the @nest_named flag', async () => {
+test('listWindows reads the @foray_named flag', async () => {
   const mockExec = execReturning(
-    line(1, 'nest_work', '/root', { title: '✳ something', command: 'claude', named: true }),
+    line(1, 'foray_work', '/root', { title: '✳ something', command: 'claude', named: true }),
   )
   const [win] = await listWindows(mockExec, HOST)
   assert.equal(win.named, true)
@@ -177,7 +182,7 @@ test('createWindow creates a new tmux session and returns it', async () => {
   const mockExec: TmuxExecutor = async (cmd, args) => {
     calls.push({ cmd, args })
     if (args[0] === 'new-session') {
-      return { stdout: line(3, 'nest_mywindow', '/home/user') + '\n', stderr: '' }
+      return { stdout: line(3, 'foray_mywindow', '/home/user') + '\n', stderr: '' }
     }
     return { stdout: '', stderr: '' }
   }
@@ -189,14 +194,14 @@ test('createWindow creates a new tmux session and returns it', async () => {
 
   assert.equal(calls[0].args[0], 'new-session')
   assert.ok(calls[0].args.includes('-s'))
-  assert.ok(calls[0].args.includes('nest_mywindow'))
+  assert.ok(calls[0].args.includes('foray_mywindow'))
   assert.ok(calls[0].args.includes('-c'))
   assert.ok(calls[0].args.includes('/home/user'))
 
   // An explicit name is stamped onto the session so it survives restarts.
-  const stamp = calls.find((c) => c.args[0] === 'set' && c.args.includes('@nest_named'))
-  assert.ok(stamp, 'should set @nest_named on the new session')
-  assert.deepEqual(stamp!.args, ['set', '-t', 'nest_mywindow', '@nest_named', '1'])
+  const stamp = calls.find((c) => c.args[0] === 'set' && c.args.includes('@foray_named'))
+  assert.ok(stamp, 'should set @foray_named on the new session')
+  assert.deepEqual(stamp!.args, ['set', '-t', 'foray_mywindow', '@foray_named', '1'])
 })
 
 test('createWindow defaults name to bash when not provided and leaves it unnamed', async () => {
@@ -205,7 +210,7 @@ test('createWindow defaults name to bash when not provided and leaves it unnamed
   const mockExec: TmuxExecutor = async (_cmd, args) => {
     calls.push({ args })
     if (args[0] === 'new-session') {
-      return { stdout: line(1, 'nest_bash', '/tmp') + '\n', stderr: '' }
+      return { stdout: line(1, 'foray_bash', '/tmp') + '\n', stderr: '' }
     }
     return { stdout: '', stderr: '' }
   }
@@ -214,7 +219,7 @@ test('createWindow defaults name to bash when not provided and leaves it unnamed
   assert.equal(win.id, 1)
   assert.equal(win.name, 'bash')
   assert.equal(win.named, false)
-  assert.ok(calls[0].args.includes('nest_bash'))
+  assert.ok(calls[0].args.includes('foray_bash'))
   const cwdIdx = calls[0].args.indexOf('-c')
   assert.equal(
     calls[0].args[cwdIdx + 1],
@@ -222,7 +227,7 @@ test('createWindow defaults name to bash when not provided and leaves it unnamed
     'an unspecified cwd must fall back to the home directory, not the server cwd',
   )
   assert.ok(
-    !calls.some((c) => c.args.includes('@nest_named')),
+    !calls.some((c) => c.args.includes('@foray_named')),
     'an auto-named session must not be stamped as named',
   )
 })
@@ -238,23 +243,54 @@ test('createWindow applies the extended-keys options: a session proves the serve
 })
 
 // ---------------------------------------------------------------------------
-// Test 2a: tmux.enableExtendedKeys
+// Test 2a: tmux.applyTmuxServerOptions
 // ---------------------------------------------------------------------------
 
-test('enableExtendedKeys sets both server options and reports whether tmux took them', async () => {
+test('applyTmuxServerOptions sets extended keys and reports whether tmux took them; mouse/history-limit already match', async () => {
   const tmux = fakeTmux()
-  assert.equal(await enableExtendedKeys(tmux.exec), true)
+  assert.equal(await applyTmuxServerOptions(tmux.exec), true)
   assert.deepEqual(tmux.calls, [
     ['set', '-s', 'extended-keys', 'always'],
     ['set', '-s', 'extended-keys-format', 'csi-u'],
+    ['show', '-g', '-v', 'mouse'],
+    ['show', '-g', '-v', 'history-limit'],
   ])
   // Any failure means the options are not on, whatever the reason.
   for (const message of ['no server running on /tmp/tmux-0/default', 'lost server', 'invalid option: extended-keys']) {
     const failing: TmuxExecutor = async () => {
       throw new Error(message)
     }
-    assert.equal(await enableExtendedKeys(failing), false, message)
+    assert.equal(await applyTmuxServerOptions(failing), false, message)
   }
+})
+
+test('applyTmuxServerOptions re-asserts mouse and history-limit when a lost race left them off', async () => {
+  const tmux = fakeTmux()
+  tmux.serverOptions.set('mouse', 'on')
+  tmux.serverOptions.set('history-limit', '2000')
+  assert.equal(await applyTmuxServerOptions(tmux.exec), true)
+  assert.deepEqual(tmux.calls.filter((args) => args[0] === 'set' && args[1] === '-g'), [
+    ['set', '-g', 'mouse', 'off'],
+    ['set', '-g', 'history-limit', '10000'],
+  ])
+  assert.equal(tmux.serverOptions.get('mouse'), 'off')
+  assert.equal(tmux.serverOptions.get('history-limit'), '10000')
+})
+
+// scripts/foray.tmux.conf (S4) ships the same extended-keys values this
+// function re-asserts, so the two copies cannot drift silently. Skipped,
+// not invented, until that file exists.
+test('foray.tmux.conf keeps the same extended-keys values applyTmuxServerOptions re-asserts', async (t) => {
+  const confPath = path.join(import.meta.dirname, '..', '..', '..', 'scripts', 'foray.tmux.conf')
+  let conf: string
+  try {
+    conf = await fs.readFile(confPath, 'utf-8')
+  } catch {
+    t.skip('scripts/foray.tmux.conf does not exist yet (S4)')
+    return
+  }
+  assert.match(conf, /^set -s extended-keys always$/m)
+  assert.match(conf, /^set -s extended-keys-format csi-u$/m)
 })
 
 test('the server sets extended keys once tmux is listed, and again after tmux restarts', async () => {
@@ -369,8 +405,8 @@ test('renameWindow renames the session and marks it as explicitly named', async 
 
   await renameWindow(4, 'new-name', mockExec)
   assert.deepEqual(calls, [
-    ['rename-session', '-t', '$4', 'nest_new-name'],
-    ['set', '-t', '$4', '@nest_named', '1'],
+    ['rename-session', '-t', '$4', 'foray_new-name'],
+    ['set', '-t', '$4', '@foray_named', '1'],
   ])
 })
 
@@ -393,7 +429,7 @@ test('attachToPane spawns tmux with correct attach command', () => {
 
   assert.ok(spawn.calledWith, 'spawn should have been called')
   assert.equal(spawn.calledWith.file, 'tmux')
-  assert.deepEqual(spawn.calledWith.args, ['attach-session', '-t', '$5'])
+  assert.deepEqual(spawn.calledWith.args, [...tmuxSocketArgs(), 'attach-session', '-t', '$5'])
   assert.equal(spawn.calledWith.options.name, 'xterm-256color')
   assert.equal(spawn.calledWith.options.cols, 80)
   assert.equal(spawn.calledWith.options.rows, 24)
@@ -554,8 +590,8 @@ test('listWindows throws for tmux failures other than a missing server', async (
 })
 
 test('sessionNameFor trims the name and refuses one with nothing in it', () => {
-  assert.equal(sessionNameFor(' deploy '), 'nest_deploy')
-  assert.equal(sessionNameFor('a.b:c'), 'nest_a-b-c')
+  assert.equal(sessionNameFor(' deploy '), 'foray_deploy')
+  assert.equal(sessionNameFor('a.b:c'), 'foray_a-b-c')
   for (const name of ['', '   ', '\t\n']) {
     assert.throws(() => sessionNameFor(name), ClientError, JSON.stringify(name))
   }

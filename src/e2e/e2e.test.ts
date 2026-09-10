@@ -2,7 +2,7 @@
 //
 // Run with: npm run test:e2e   (requires tmux; not part of `npm test`)
 //
-// Each test creates its own nest_e2e-* session and kills it afterwards;
+// Each test creates its own foray_e2e-* session and kills it afterwards;
 // nothing here touches a session it did not create. Everything that can
 // be covered with a fake tmux lives in the unit suites instead.
 //
@@ -13,8 +13,6 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { execFileSync, execFile as _execFile } from 'node:child_process'
-import { promisify } from 'node:util'
 import { startServer } from '../server/index.ts'
 import {
   TEST_TOKEN,
@@ -24,11 +22,10 @@ import {
   waitForType,
   waitForTypeOrError,
 } from '../server/__tests__/helpers.ts'
-
-const execFileAsync = promisify(_execFile)
+import { tmuxAsync, tmuxSync } from './helpers.ts'
 
 /** Sessions the tests create are named with this prefix, so cleanup can find strays. */
-const SESSION_PREFIX = 'nest_e2e-'
+const SESSION_PREFIX = 'foray_e2e-'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -36,7 +33,7 @@ const SESSION_PREFIX = 'nest_e2e-'
 
 function hasTmux(): boolean {
   try {
-    execFileSync('tmux', ['-V'], { stdio: 'pipe' })
+    tmuxSync(['-V'])
     return true
   } catch {
     return false
@@ -57,15 +54,14 @@ function closeWs(ws: WebSocket): void {
  */
 function killTmuxSession(sessionId: number): void {
   try {
-    execFileSync('tmux', ['kill-session', '-t', `$${sessionId}`], { stdio: 'pipe' })
+    tmuxSync(['kill-session', '-t', `$${sessionId}`])
   } catch {}
 }
 
-/** Names of every tmux session on the default server. */
+/** Names of every tmux session on Foray's socket. */
 function tmuxSessionNames(): string[] {
   try {
-    return execFileSync('tmux', ['list-sessions', '-F', '#{session_name}'], { stdio: 'pipe' })
-      .toString()
+    return tmuxSync(['list-sessions', '-F', '#{session_name}'])
       .split('\n')
       .filter(Boolean)
   } catch {
@@ -100,15 +96,15 @@ tmuxIt('e2e: terminal I/O round-trip', async () => {
       windowId = created.window.id as number
 
       // Start accumulating output BEFORE attaching so nothing is missed.
-      const outputPromise = waitForOutput(ws, windowId, 'hello-nest-e2e', 10000)
+      const outputPromise = waitForOutput(ws, windowId, 'hello-foray-e2e', 10000)
       ws.send(JSON.stringify({ type: 'terminal:attach', windowId }))
 
       // Give the pty a moment to start up, then send the echo command
       await new Promise((r) => setTimeout(r, 1000))
-      ws.send(JSON.stringify({ type: 'terminal:input', windowId, data: 'echo hello-nest-e2e\r' }))
+      ws.send(JSON.stringify({ type: 'terminal:input', windowId, data: 'echo hello-foray-e2e\r' }))
 
       const output = await outputPromise
-      assert.ok(output.includes('hello-nest-e2e'), 'terminal output should contain the echoed string')
+      assert.ok(output.includes('hello-foray-e2e'), 'terminal output should contain the echoed string')
     } finally {
       closeWs(ws)
     }
@@ -178,7 +174,7 @@ tmuxIt('e2e: poller broadcasts session:list when tmux changes outside Foray', as
           m.type === 'session:list' &&
           m.windows.some((w: any) => w.id === windowId && w.name === 'e2e-poll-moved'),
       )
-      await execFileAsync('tmux', ['rename-session', '-t', `$${windowId}`, `${SESSION_PREFIX}poll-moved`])
+      await tmuxAsync(['rename-session', '-t', `$${windowId}`, `${SESSION_PREFIX}poll-moved`])
       await renamedList
 
       // Put a non-shell command in the foreground and retitle the pane, as
@@ -192,8 +188,8 @@ tmuxIt('e2e: poller broadcasts session:list when tmux changes outside Foray', as
             (w: any) => w.id === windowId && w.title === 'e2e title' && w.command === 'sleep',
           ),
       )
-      await execFileAsync('tmux', ['send-keys', '-t', `$${windowId}`, 'sleep 30', 'Enter'])
-      await execFileAsync('tmux', ['select-pane', '-t', `$${windowId}`, '-T', 'e2e title'])
+      await tmuxAsync(['send-keys', '-t', `$${windowId}`, 'sleep 30', 'Enter'])
+      await tmuxAsync(['select-pane', '-t', `$${windowId}`, '-T', 'e2e title'])
       const titled = await titledList
       const win = titled.windows.find((w: any) => w.id === windowId)
       assert.equal(win.named, true, 'out-of-band rename keeps the named stamp')
@@ -207,14 +203,14 @@ tmuxIt('e2e: poller broadcasts session:list when tmux changes outside Foray', as
 })
 
 // ---------------------------------------------------------------------------
-// Final cleanup: remove any nest_e2e-* session a failed test left behind
+// Final cleanup: remove any foray_e2e-* session a failed test left behind
 // ---------------------------------------------------------------------------
 
 tmuxIt('e2e: cleanup sessions created by tests', () => {
   for (const name of tmuxSessionNames()) {
     if (!name.startsWith(SESSION_PREFIX)) continue
     try {
-      execFileSync('tmux', ['kill-session', '-t', `=${name}`], { stdio: 'pipe' })
+      tmuxSync(['kill-session', '-t', `=${name}`])
       console.log(`[e2e] cleaned up stray session ${name}`)
     } catch {
       // Already gone.

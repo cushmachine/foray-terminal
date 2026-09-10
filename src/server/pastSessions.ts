@@ -14,7 +14,7 @@ import os from 'node:os'
 import type { PastSession } from '../shared/protocol.ts'
 import type { AgentProvider } from './agents/types.ts'
 import { ClientError } from './errors.ts'
-import { listWindowSessions, nestNameOf, slugName, type TmuxExecutor } from './tmux.ts'
+import { listWindowSessions, forayNameOf, slugName, type TmuxExecutor } from './tmux.ts'
 
 /** A POSIX shell command line from argv: every element single-quoted. */
 export function shellQuote(argv: string[]): string {
@@ -68,7 +68,7 @@ export class PastSessions {
       // The agent recorded its tmux session by name as of its start; the
       // window id is what still holds after the session was renamed.
       const session = at === undefined ? undefined : windows.get(at.window ?? '') ?? at.session
-      const liveIn = session === undefined ? undefined : nestNameOf(session)
+      const liveIn = session === undefined ? undefined : forayNameOf(session)
       return liveIn === undefined ? row : { ...row, liveIn }
     })
     return rows.sort((a, b) => b.lastActive - a.lastActive)

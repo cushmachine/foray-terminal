@@ -67,7 +67,7 @@ test('SESSION_ID_RE accepts a uuid and nothing else', () => {
 
 /** A Claude data dir with three project folders' worth of transcripts. */
 async function claudeDir(): Promise<string> {
-  const dir = await tmpDir('nest-claude-')
+  const dir = await tmpDir('foray-claude-')
   const proj = path.join(dir, 'projects', '-work-proj')
   const other = path.join(dir, 'projects', '-work-other')
   await fs.mkdir(proj, { recursive: true })
@@ -127,7 +127,7 @@ test('the Claude provider re-parses a transcript only when it changed', async ()
 })
 
 test('the Claude provider counts a session live only while its pid is', async () => {
-  const dir = await tmpDir('nest-claude-')
+  const dir = await tmpDir('foray-claude-')
   try {
     const sessions = path.join(dir, 'sessions')
     await fs.mkdir(sessions, { recursive: true })
@@ -214,7 +214,7 @@ test('PastSessions still lists when tmux is unavailable', async () => {
 })
 
 test('PastSessions.resolve vets the agent, the id, existence and liveness', async () => {
-  const dir = await tmpDir('nest-cwd-')
+  const dir = await tmpDir('foray-cwd-')
   try {
     const agent = fakeAgent(
       [fakeSession('ok', { title: 'Fix: the bug!', cwd: dir }), fakeSession('gone', { cwd: '/nowhere/x' }), fakeSession('running')],
@@ -252,7 +252,7 @@ test('runInWindow types the command and Enter into the session', async () => {
 // ---------------------------------------------------------------------------
 
 test('session:revive creates a session in the transcript cwd, types the resume command and broadcasts it', async () => {
-  const dir = await tmpDir('nest-cwd-')
+  const dir = await tmpDir('foray-cwd-')
   const { url, close, tmux } = await startTestServer({
     agents: [fakeAgent([fakeSession('old', { title: 'Old Work', cwd: dir })])],
   })

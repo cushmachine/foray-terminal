@@ -42,7 +42,7 @@ test('client:hello with a non-string build is rejected as an invalid message', a
 test('describeCheckout reports a short sha (optionally -dirty) in a repo, unknown outside one', async () => {
   const here = describeCheckout()
   assert.match(here, /^[0-9a-f]{7,}(-dirty)?$/)
-  const empty = await tmpDir('nest-nogit-')
+  const empty = await tmpDir('foray-nogit-')
   try {
     assert.equal(describeCheckout(empty), 'unknown')
   } finally {
@@ -51,10 +51,10 @@ test('describeCheckout reports a short sha (optionally -dirty) in a repo, unknow
 })
 
 test('readServedClientBuild reads the stamped id from dist/index.html, null when absent', async () => {
-  const root = await tmpDir('nest-dist-')
+  const root = await tmpDir('foray-dist-')
   try {
     assert.equal(await readServedClientBuild(root), null)
-    await fs.writeFile(path.join(root, 'index.html'), '<html><head><meta name="nest-build" content="abc1234.k1"></head></html>')
+    await fs.writeFile(path.join(root, 'index.html'), '<html><head><meta name="foray-build" content="abc1234.k1"></head></html>')
     assert.equal(await readServedClientBuild(root), 'abc1234.k1')
   } finally {
     await fs.rm(root, { recursive: true, force: true })

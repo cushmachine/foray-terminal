@@ -10,15 +10,15 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
 import { startServer } from '../server/index.ts'
 import { TEST_TOKEN, connect, waitForMessage, waitForOutput, waitForTypeOrError } from '../server/__tests__/helpers.ts'
+import { tmuxSync } from './helpers.ts'
 
 const SHIFT_ENTER_CSI_U = '\x1b[13;2u'
 
 function hasTmux(): boolean {
   try {
-    execFileSync('tmux', ['-V'], { stdio: 'pipe' })
+    tmuxSync(['-V'])
     return true
   } catch {
     return false

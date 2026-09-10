@@ -14,6 +14,7 @@ import assert from 'node:assert/strict'
 import type { ClientMessage } from '../../shared/protocol.ts'
 import { ClientError, safeErrorMessage } from '../errors.ts'
 import { validateMessage, MAX_INPUT_CHARS, MAX_WRITE_CHARS, MAX_ATTACHMENTS } from '../ws-handler.ts'
+import { tmuxSocketArgs } from '../tmux.ts'
 import { fakeTmux, handleTestConnection, until, type HandledConnection, type Msg } from './helpers.ts'
 
 // ---------------------------------------------------------------------------
@@ -237,7 +238,7 @@ test('dispatch: terminal:attach claims the window, sends the history, then spawn
   await attached(conn, 0)
   assert.deepEqual(conn.claimed, [0])
   assert.deepEqual(sentOf(conn, 'terminal:history'), [{ type: 'terminal:history', windowId: 0, lines: ['one', 'two'], reset: true }])
-  assert.deepEqual(conn.ptys[0].args, ['attach-session', '-t', '$0'])
+  assert.deepEqual(conn.ptys[0].args, [...tmuxSocketArgs(), 'attach-session', '-t', '$0'])
   conn.socket.emit('close')
 })
 
@@ -377,7 +378,7 @@ test('session:rename broadcasts the new name and marks the session named', async
   conn.tmux.add('shell')
   await handled(conn, { type: 'session:rename', windowId: 0, name: 'deploy' })
   assert.deepEqual(conn.broadcasts, [{ type: 'session:renamed', windowId: 0, name: 'deploy' }])
-  assert.equal(conn.tmux.sessions.get(0)?.name, 'nest_deploy')
+  assert.equal(conn.tmux.sessions.get(0)?.name, 'foray_deploy')
   assert.equal(conn.tmux.sessions.get(0)?.named, true)
   conn.socket.emit('close')
 })

@@ -6,6 +6,7 @@
 
 import * as pty from 'node-pty'
 import { sessionEnv } from './env.ts'
+import { tmuxSocketArgs } from './tmux.ts'
 
 /** Handle returned to callers for I/O and lifecycle management. */
 export interface PtyHandle {
@@ -60,7 +61,7 @@ export function attachToPane(
 ): PtyHandle {
   const proc = spawn(
     'tmux',
-    ['attach-session', '-t', `$${windowId}`],
+    [...tmuxSocketArgs(), 'attach-session', '-t', `$${windowId}`],
     {
       name: 'xterm-256color',
       cols: opts?.cols ?? 80,

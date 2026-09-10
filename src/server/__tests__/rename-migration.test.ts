@@ -1,32 +1,12 @@
-// Red tests for the nest -> foray rename and socket migration contracts.
+// Rename and socket migration contracts: the nest_/foray_ session prefix,
+// the named-session option, the tmux socket, and the localStorage key move.
 //
-// This file is deliberately named *.pending.ts and lives in src/server/,
-// one directory up from src/server/__tests__/, so it sits outside the unit
-// suite glob (src/__tests__/*.test.ts and src/server/__tests__/*.test.ts —
-// see package.json's "test" script) until the behaviour it describes
-// exists. S3 moves it to src/server/__tests__/rename-migration.test.ts once
-// every test here passes.
-//
-// Run by hand with: npx tsx --test src/server/rename-migration.pending.ts
-//
-// Contract 3 (tmuxSocketArgs) references an export tmux.ts does not have
-// yet. A plain `import { tmuxSocketArgs } from '../tmux.ts'` would fail at
-// module-link time under Node's ESM loader (it validates named imports
-// against the target module's static exports before any test runs), which
-// would take every test in this file down together and hide the other
-// three contracts' own failures. Importing the module as a namespace
-// sidesteps that: the missing member simply reads as `undefined`, and the
-// failure happens inside that one test, for that one reason, when it is
-// called.
+// Run with: npx tsx --test src/server/__tests__/rename-migration.test.ts
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createWindow, listWindows, SEP, type TmuxExecutor } from './tmux.ts'
-import * as tmuxModule from './tmux.ts'
-import { fakeTmux } from './__tests__/helpers.ts'
-import { LAST_SESSION_KEY, draftKeyFor, storageGet } from '../storage.ts'
-
-/** Pure socket-argv function tmux.ts is expected to export (contract 3). Not there yet. */
-const tmuxSocketArgs = (): string[] => (tmuxModule as unknown as { tmuxSocketArgs?: () => string[] }).tmuxSocketArgs!()
+import { createWindow, listWindows, SEP, tmuxSocketArgs, type TmuxExecutor } from '../tmux.ts'
+import { fakeTmux } from './helpers.ts'
+import { LAST_SESSION_KEY, draftKeyFor, storageGet } from '../../storage.ts'
 
 /** One FORMAT line: id, name, cwd, then empty title/named so only the fields under test matter. */
 function line(id: number, name: string, cwd: string): string {

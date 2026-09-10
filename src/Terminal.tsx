@@ -45,15 +45,15 @@ interface Selection {
 
 /**
  * Test hook: the active terminal's xterm instance and actions as
- * window.__nest, so the visual suite can read the screen buffer (the WebGL
+ * window.__foray, so the visual suite can read the screen buffer (the WebGL
  * renderer paints to a canvas, so the text is not in the DOM) and type
  * into the terminal. Returns the matching unpublish.
  */
 function publishTerm(term: XTerm, actions: TerminalActions): () => void {
-  const w = window as unknown as { __nest?: { term: XTerm; actions: TerminalActions } }
-  w.__nest = { term, actions }
+  const w = window as unknown as { __foray?: { term: XTerm; actions: TerminalActions } }
+  w.__foray = { term, actions }
   return () => {
-    if (w.__nest?.term === term) delete w.__nest
+    if (w.__foray?.term === term) delete w.__foray
   }
 }
 

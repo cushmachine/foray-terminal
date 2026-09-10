@@ -56,7 +56,7 @@ test('#17 selecting text in the terminal puts it on the clipboard', async ({ pag
     await expect.poll(outputRow, { timeout: 10_000 }).toBeGreaterThan(-1)
     const row = await outputRow()
     await page.evaluate(({ row, len }) => {
-      const term = (window as unknown as { __nest: { term: { select(c: number, r: number, l: number): void } } }).__nest.term
+      const term = (window as unknown as { __foray: { term: { select(c: number, r: number, l: number): void } } }).__foray.term
       term.select(0, row, len)
     }, { row, len: marker.length })
     await expect

@@ -2,7 +2,9 @@
 //
 // Each Foray "session" is its own tmux session (not a window within one
 // session). This avoids shared views and size-mismatch artifacts when
-// multiple terminals are open. Sessions are named with a "nest_" prefix.
+// multiple terminals are open. Sessions are named with a "foray_" prefix;
+// a session named "nest_" by a pre-rename Foray is still read as one of
+// ours, for one release (PREFIX_RE).
 
 import { execFile as _execFile } from 'node:child_process'
 import os from 'node:os'
@@ -20,18 +22,45 @@ export type TmuxExecutor = (
   args: string[],
 ) => Promise<{ stdout: string; stderr: string }>
 
-// Scrubbed env: the first tmux call starts the tmux server, whose
-// environment every session inherits (env.ts).
-const defaultExec: TmuxExecutor = (cmd, args) => promisedExecFile(cmd, args, { env: sessionEnv(process.env) })
+/** Env var naming Foray's own tmux socket; unset means the dedicated socket below, '' means the machine's default one. */
+const DEFAULT_SOCKET = 'foray'
 
-const PREFIX = 'nest_'
+/**
+ * The `-L` argv prefix every tmux invocation needs to land on Foray's own
+ * socket instead of adopting a stranger's tmux server: unset
+ * FORAY_TMUX_SOCKET means the dedicated "foray" socket, '' means the
+ * machine's default socket (what the owner's box ships with, until every
+ * live session has moved over). Exported so the contract itself is
+ * testable directly, not only through defaultExec's use of it. Read fresh
+ * on every call, not cached, so a test that flips the env var takes effect
+ * immediately.
+ */
+export function tmuxSocketArgs(): string[] {
+  const socket = process.env.FORAY_TMUX_SOCKET ?? DEFAULT_SOCKET
+  return socket === '' ? [] : ['-L', socket]
+}
+
+// Scrubbed env: the first tmux call starts the tmux server, whose
+// environment every session inherits (env.ts). The socket flag goes first;
+// tmux only recognises -L before the subcommand.
+const defaultExec: TmuxExecutor = (cmd, args) =>
+  promisedExecFile(cmd, [...tmuxSocketArgs(), ...args], { env: sessionEnv(process.env) })
+
+/** Session names Foray writes today. */
+const PREFIX = 'foray_'
+
+/** Matches either prefix; used to recognise a session as ours when reading. */
+const PREFIX_RE = /^(?:nest|foray)_/
 
 /**
  * Session user option stamped once the user has explicitly named a session
  * (at create or rename). Lets the UI prefer that name over whatever title
  * the running program sets. Lives in tmux, so it survives Foray restarts.
+ * Only ever written as NAMED_OPTION; LEGACY_NAMED_OPTION is read as a
+ * fallback for one release, for a stamp a pre-rename Foray wrote.
  */
-const NAMED_OPTION = '@nest_named'
+const NAMED_OPTION = '@foray_named'
+const LEGACY_NAMED_OPTION = '@nest_named'
 
 /**
  * Field separator for `-F` formats. Pane titles and paths can contain
@@ -46,7 +75,8 @@ const FORMAT = [
   '#{pane_current_path}',
   '#{pane_title}',
   '#{pane_current_command}',
-  `#{${NAMED_OPTION}}`,
+  // Prefer the current stamp; fall back to the one a pre-rename Foray wrote.
+  `#{?#{${NAMED_OPTION}},#{${NAMED_OPTION}},#{${LEGACY_NAMED_OPTION}}}`,
 ].join(SEP)
 
 /**
@@ -69,9 +99,10 @@ export function sessionNameFor(name: string): string {
   return `${PREFIX}${safe}`
 }
 
-/** The user-facing name of a Foray session from its tmux session name; undefined when it is not one. */
-export function nestNameOf(tmuxSession: string): string | undefined {
-  return tmuxSession.startsWith(PREFIX) ? tmuxSession.slice(PREFIX.length) : undefined
+/** The user-facing name of a Foray session from its tmux session name (either prefix); undefined when it is not one. */
+export function forayNameOf(tmuxSession: string): string | undefined {
+  const match = PREFIX_RE.exec(tmuxSession)
+  return match ? tmuxSession.slice(match[0].length) : undefined
 }
 
 /** Longest session name made from a title. */
@@ -179,8 +210,9 @@ const isMissingTarget = (err: unknown): boolean => failureMentions(err, "can't f
 const isDuplicate = (err: unknown): boolean => failureMentions(err, 'duplicate session')
 
 /**
- * Parse one FORMAT line, e.g. `$5<SEP>nest_shell<SEP>/root<SEP>nest<SEP>bash<SEP>`.
- * Only returns sessions with the "nest_" prefix.
+ * Parse one FORMAT line, e.g. `$5<SEP>foray_shell<SEP>/root<SEP>foray<SEP>bash<SEP>`.
+ * Returns sessions with either the current "foray_" prefix or the legacy
+ * "nest_" one, so a session from before the rename stays visible.
  *
  * `hostname` is what tmux initialises every pane title to; such a title is
  * reported as empty so the UI falls back to the session name.
@@ -189,12 +221,13 @@ function parseLine(line: string, hostname: string): TmuxWindow | null {
   const [rawId, rawName, cwd, rawTitle = '', command = '', named = ''] = line.split(SEP)
   const idMatch = rawId?.match(/^\$(\d+)$/)
   if (!idMatch || !rawName || cwd === undefined) return null
-  if (!rawName.startsWith(PREFIX)) return null
+  const name = forayNameOf(rawName)
+  if (name === undefined) return null
 
   const titleIsMeaningful = rawTitle !== '' && rawTitle !== hostname && !SHELLS.has(command)
   return {
     id: parseInt(idMatch[1], 10),
-    name: rawName.slice(PREFIX.length),
+    name,
     cwd,
     title: titleIsMeaningful ? rawTitle : '',
     command,
@@ -203,7 +236,7 @@ function parseLine(line: string, hostname: string): TmuxWindow | null {
 }
 
 /**
- * List all Foray sessions (tmux sessions with the "nest_" prefix).
+ * List all Foray sessions (tmux sessions with a "foray_" or legacy "nest_" prefix).
  * Returns [] when no Foray sessions exist or the tmux server is not
  * running; any other tmux failure is thrown, so a caller can tell "no
  * sessions" from "tmux is broken" and keep its last good list.
@@ -262,7 +295,7 @@ export async function createWindow(
       }
       // The server is up now, whether or not a listing has shown it yet; a
       // server that started with this session has none of the options.
-      await enableExtendedKeys(exec)
+      await applyTmuxServerOptions(exec)
 
       const parsed = parseLine(stdout.trim(), hostname)
       if (!parsed) throw new Error(`Failed to parse new session output: ${stdout}`)
@@ -279,19 +312,50 @@ export async function createWindow(
   throw new ClientError(`Could not create session: too many name collisions for ${sessionName}`)
 }
 
+/** mouse/history-limit values scripts/foray.tmux.conf ships; re-asserted here as the belt (see the doc below). */
+const MOUSE = 'off'
+const HISTORY_LIMIT = '10000'
+
+/** The value of a global tmux option, or undefined when it can't be read (no server, an old tmux, ...). */
+async function serverOption(exec: TmuxExecutor, option: string): Promise<string | undefined> {
+  try {
+    const { stdout } = await exec('tmux', ['show', '-g', '-v', option])
+    return stdout.trim()
+  } catch {
+    return undefined
+  }
+}
+
 /**
- * Let modified keys reach the pane as CSI u. Foray's client sends Shift+Enter
- * as ESC[13;2u; with tmux's default `extended-keys off` the server parses
- * that as Shift+Enter and hands the pane a bare carriage return, so Claude
- * Code inside submits instead of inserting a newline. These are server
- * options (global to the tmux server) and idempotent. Returns false when
- * tmux did not take them, most often because its server was not running:
- * the caller tries again once it is.
+ * Let modified keys reach the pane as CSI u, and make sure mouse reporting
+ * and the scrollback length are what Foray needs. Foray's client sends
+ * Shift+Enter as ESC[13;2u; with tmux's default `extended-keys off` the
+ * server parses that as Shift+Enter and hands the pane a bare carriage
+ * return, so Claude Code inside submits instead of inserting a newline.
+ *
+ * `mouse` and `history-limit` normally come from scripts/foray.tmux.conf,
+ * but tmux only reads `-f` when it *starts* a server; on macOS, where
+ * nothing else starts one, a lost race with the first `new-session` can
+ * leave a server running without them, with nothing to notice: short
+ * scrollback, mouse reporting left on. So those two are read back and only
+ * written when they differ, rather than fighting a session that toggled
+ * mouse on for a copy-paste.
+ *
+ * These are server options (global to the tmux server) and idempotent.
+ * Returns false when tmux did not take the extended-keys settings, most
+ * often because its server was not running: the caller tries again once
+ * it is.
  */
-export async function enableExtendedKeys(exec: TmuxExecutor = defaultExec): Promise<boolean> {
+export async function applyTmuxServerOptions(exec: TmuxExecutor = defaultExec): Promise<boolean> {
   try {
     await exec('tmux', ['set', '-s', 'extended-keys', 'always'])
     await exec('tmux', ['set', '-s', 'extended-keys-format', 'csi-u'])
+    if ((await serverOption(exec, 'mouse')) !== MOUSE) {
+      await exec('tmux', ['set', '-g', 'mouse', MOUSE])
+    }
+    if ((await serverOption(exec, 'history-limit')) !== HISTORY_LIMIT) {
+      await exec('tmux', ['set', '-g', 'history-limit', HISTORY_LIMIT])
+    }
     return true
   } catch {
     return false

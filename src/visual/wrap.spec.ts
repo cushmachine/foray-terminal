@@ -23,7 +23,7 @@ import {
   sendKeys as typeKeys,
 } from './helpers.ts'
 
-type NestWindow = Window & { __nest?: { term?: { cols: number } } }
+type ForayWindow = Window & { __foray?: { term?: { cols: number } } }
 
 /** A 196-character line with no spaces: wrap001wrap002...wrap028. */
 const MARKER = 'wrap001'
@@ -54,7 +54,7 @@ async function sendKeys(page: Page, data: string): Promise<void> {
 }
 
 async function termCols(page: Page): Promise<number> {
-  return page.evaluate(() => (window as unknown as NestWindow).__nest?.term?.cols ?? 0)
+  return page.evaluate(() => (window as unknown as ForayWindow).__foray?.term?.cols ?? 0)
 }
 
 /**

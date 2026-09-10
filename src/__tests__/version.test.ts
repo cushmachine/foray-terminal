@@ -10,13 +10,13 @@ import { readPageBuild, versionNotice } from '../version.ts'
 const HELLO_SAME = { serverBuild: 'abc1234', clientBuild: 'abc1234.kx9q2' }
 
 test('readBuildIdFromHtml finds the meta tag vite injects', () => {
-  const html = '<!doctype html><html><head><meta charset="UTF-8" />\n    <meta name="nest-build" content="abc1234-dirty.kx9q2"></head></html>'
+  const html = '<!doctype html><html><head><meta charset="UTF-8" />\n    <meta name="foray-build" content="abc1234-dirty.kx9q2"></head></html>'
   assert.equal(readBuildIdFromHtml(html), 'abc1234-dirty.kx9q2')
 })
 
 test('readBuildIdFromHtml is null for a page without one, or an empty one', () => {
   assert.equal(readBuildIdFromHtml('<html><head><title>Foray</title></head></html>'), null)
-  assert.equal(readBuildIdFromHtml('<meta name="nest-build" content="">'), null)
+  assert.equal(readBuildIdFromHtml('<meta name="foray-build" content="">'), null)
 })
 
 test('commitOf strips the per-build timestamp', () => {
@@ -28,7 +28,7 @@ test('commitOf strips the per-build timestamp', () => {
 test('readPageBuild reads the meta tag from a document, null without one', () => {
   const doc = {
     querySelector: (selector: string) =>
-      selector === 'meta[name="nest-build"]'
+      selector === 'meta[name="foray-build"]'
         ? { getAttribute: (name: string) => (name === 'content' ? 'abc1234.kx9q2' : null) }
         : null,
   } as unknown as Pick<Document, 'querySelector'>

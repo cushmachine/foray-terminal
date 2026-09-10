@@ -118,4 +118,4 @@ self.addEventListener('fetch', (event) => {
 })
 
 // Exposed for tests, which run this file in a stub worker scope.
-self.__nest = { shouldCache, CACHE, SHELL }
+self.__foray = { shouldCache, CACHE, SHELL }

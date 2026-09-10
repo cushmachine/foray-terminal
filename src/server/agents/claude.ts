@@ -262,7 +262,7 @@ export function claudeProvider(options: ClaudeProviderOptions): AgentProvider {
         if (typeof marker.pid !== 'number' || typeof marker.sessionId !== 'string') continue
         if (!pidAlive(marker.pid)) continue
         const entry: LiveSession = { id: marker.sessionId }
-        // "nest_bash:@0.%0" is session:window.pane, as of when the process
+        // "foray_bash:@0.%0" is session:window.pane, as of when the process
         // started; the session may have been renamed since, the window id not.
         if (typeof marker.tmux === 'string' && marker.tmux) {
           const [session, rest = ''] = marker.tmux.split(':')

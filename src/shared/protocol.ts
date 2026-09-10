@@ -53,7 +53,7 @@ export interface PastSession {
   lastActive: number
   /** Running right now; cannot be revived without forking it. */
   live: boolean
-  /** The Foray session (tmux name without the nest_ prefix) it runs in, when known. */
+  /** The Foray session (tmux name without the foray_/nest_ prefix) it runs in, when known. */
   liveIn?: string
 }
 

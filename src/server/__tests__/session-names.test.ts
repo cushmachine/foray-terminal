@@ -24,16 +24,22 @@ test('mirrorTitles renames unnamed titled sessions and leaves the rest alone', a
   tmux.add('bash', { title: '✳ Voice input mode for mobile', command: 'claude' })
   tmux.add('explore', { title: '✳ Mega refactor', command: 'claude', named: true })
   tmux.add('bash-1', { title: '', command: 'bash' })
-  tmux.add('voice-input-mode-for', { title: 'Voice input mode for mobile', command: 'claude' })
+  // add() always uses the legacy prefix, but a same-prefix collision is the
+  // case that matters here (two sessions created after the rename can land
+  // on the same slug; a legacy one never collides with a current-prefix
+  // rename, since their full tmux names differ) — set it directly, as the
+  // rename-migration contract tests do for the same reason.
+  const already = tmux.add('voice-input-mode-for', { title: 'Voice input mode for mobile', command: 'claude' })
+  already.name = 'foray_voice-input-mode-for'
   const before = await listWindows(tmux.exec, 'host')
   const after = await mirrorTitles(before, tmux.exec)
   assert.deepEqual(after.map((w) => w.name), ['voice-input-mode-for-1', 'explore', 'bash-1', 'voice-input-mode-for'])
   // The first wanted "voice-input-mode-for", which the last already holds.
   assert.deepEqual(tmux.calls.filter((c) => c[0] === 'rename-session').map((c) => c.at(-1)), [
-    'nest_voice-input-mode-for',
-    'nest_voice-input-mode-for-1',
+    'foray_voice-input-mode-for',
+    'foray_voice-input-mode-for-1',
   ])
-  assert.equal(tmux.sessions.get(0)?.name, 'nest_voice-input-mode-for-1')
+  assert.equal(tmux.sessions.get(0)?.name, 'foray_voice-input-mode-for-1')
   // Already mirrored: a second pass changes nothing.
   const calls = tmux.calls.length
   assert.deepEqual(await mirrorTitles(await listWindows(tmux.exec, 'host'), tmux.exec), after)
@@ -44,11 +50,11 @@ test('mirrorTitles keeps the last name when the title goes away', async () => {
   const tmux = fakeTmux()
   const s = tmux.add('bash', { title: 'Fix the tests', command: 'claude' })
   await mirrorTitles(await listWindows(tmux.exec, 'host'), tmux.exec)
-  assert.equal(s.name, 'nest_fix-the-tests')
+  assert.equal(s.name, 'foray_fix-the-tests')
   // Claude exited; a bare shell's title means nothing.
   s.command = 'bash'
   await mirrorTitles(await listWindows(tmux.exec, 'host'), tmux.exec)
-  assert.equal(s.name, 'nest_fix-the-tests')
+  assert.equal(s.name, 'foray_fix-the-tests')
 })
 
 test('mirrorTitles leaves a session alone when tmux refuses the rename', async () => {
@@ -78,5 +84,5 @@ test('unmarkNamed clears the named stamp', async () => {
   const s = tmux.add('x', { named: true })
   await unmarkNamed(s.id, tmux.exec)
   assert.equal(s.named, false)
-  assert.deepEqual(tmux.calls.at(-1), ['set', '-u', '-t', '$0', '@nest_named'])
+  assert.deepEqual(tmux.calls.at(-1), ['set', '-u', '-t', '$0', '@foray_named'])
 })

@@ -7,7 +7,6 @@
 //
 // Every test that sends input creates its own tmux session first; the
 // session active on load may be someone's live shell.
-import { execFileSync } from 'node:child_process'
 import { test, expect, type Page } from '@playwright/test'
 import { PROMPT_JUMP_MARGIN_PX } from '../promptJump.ts'
 import {
@@ -20,13 +19,14 @@ import {
   expectTerminalText,
   sendKeys,
   submitText,
+  tmux,
 } from './helpers.ts'
 
-type NestWindow = Window & { __nest?: { term?: { rows: number } } }
+type ForayWindow = Window & { __foray?: { term?: { rows: number } } }
 
 /** Rows of the active terminal, via the test hook Terminal.tsx exposes. */
 async function termRows(page: Page): Promise<number> {
-  return page.evaluate(() => (window as unknown as NestWindow).__nest?.term?.rows ?? 0)
+  return page.evaluate(() => (window as unknown as ForayWindow).__foray?.term?.rows ?? 0)
 }
 
 // Every opened session keeps its terminal mounted (hidden); only the active
@@ -47,7 +47,7 @@ async function scrollGap(page: Page): Promise<number> {
 /** Pixel height of one terminal row. */
 async function cellHeight(page: Page): Promise<number> {
   return page.evaluate(() => {
-    const rows = (window as unknown as NestWindow).__nest?.term?.rows ?? 0
+    const rows = (window as unknown as ForayWindow).__foray?.term?.rows ?? 0
     const screen = document.querySelector<HTMLElement>('[data-testid="terminal"] .xterm-screen')
     return rows > 0 && screen ? screen.clientHeight / rows : 0
   })
@@ -267,9 +267,9 @@ test.describe('keyboard behavior on mobile', () => {
 
       // Lose the socket, and add lines to the pane while it is down.
       await page.evaluate(() => {
-        (window as unknown as { __nestSocket: { drop: (ms: number) => void } }).__nestSocket.drop(3000)
+        (window as unknown as { __foraySocket: { drop: (ms: number) => void } }).__foraySocket.drop(3000)
       })
-      execFileSync('tmux', ['send-keys', '-t', `nest_${name}`, 'seq 1 400; echo AFTER-DROP', 'Enter'])
+      tmux(['send-keys', '-t', `foray_${name}`, 'seq 1 400; echo AFTER-DROP', 'Enter'])
 
       // Reconnected: the scrollback was replaced and its top trimmed…
       await expectTerminalText(page, 'AFTER-DROP', 20_000)

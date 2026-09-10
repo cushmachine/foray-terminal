@@ -20,6 +20,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { WebSocket as WsClient } from 'ws'
 import { connect, startTestServer, tmpDir, waitForType, wsUrl , TEST_TOKEN } from './helpers.ts'
+import { tmuxSocketArgs } from '../tmux.ts'
 
 // ---------------------------------------------------------------------------
 // Test 1: second attach detaches the first client
@@ -35,7 +36,7 @@ test('terminal:attach: a second client taking a window detaches the first', asyn
     const ws1Owns = waitForType(ws1, 'session:ownership')
     ws1.send(JSON.stringify({ type: 'terminal:attach', windowId: 0 }))
     await ws1Owns
-    assert.deepEqual(ptys.map((p) => p.args), [['attach-session', '-t', '$0']])
+    assert.deepEqual(ptys.map((p) => p.args), [[...tmuxSocketArgs(), 'attach-session', '-t', '$0']])
 
     // ws2 attaches to the SAME window: ws1 is told it was taken over.
     const detached = waitForType(ws1, 'terminal:detached')
@@ -94,11 +95,11 @@ test('session:ownership broadcasts to all clients on attach and on disconnect', 
 // ---------------------------------------------------------------------------
 
 const INDEX_HTML =
-  '<!doctype html><html><head><meta name="nest-build" content="abc1234.k1"></head>' +
+  '<!doctype html><html><head><meta name="foray-build" content="abc1234.k1"></head>' +
   '<body><div id="root"></div></body></html>'
 
 test('the server serves a built client from its dist dir, with the SPA fallback', async () => {
-  const root = await tmpDir('nest-dist-')
+  const root = await tmpDir('foray-dist-')
   const dist = path.join(root, 'dist')
   await fs.mkdir(path.join(dist, 'assets'), { recursive: true })
   await fs.writeFile(path.join(dist, 'index.html'), INDEX_HTML)

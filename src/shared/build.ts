@@ -7,7 +7,7 @@
 // drift (src/version.ts). Pure string helpers only: this file is bundled
 // into the client.
 
-export const BUILD_META_NAME = 'nest-build'
+export const BUILD_META_NAME = 'foray-build'
 
 /** The build id stamped into a built index.html, or null if it has none. */
 export function readBuildIdFromHtml(html: string): string | null {

@@ -8,7 +8,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import crypto from 'node:crypto'
 import net from 'node:net'
-import type { TmuxExecutor } from '../tmux.ts'
+import { tmuxSocketArgs, type TmuxExecutor } from '../tmux.ts'
 import {
   connect, fakeTmux, handleTestConnection, settled, startTestServer, until, waitForMessage, waitForType,
   TEST_TOKEN,
@@ -210,7 +210,7 @@ test('switching sessions on one connection leaves exactly one live pty', async (
     assert.deepEqual((await ownership).ownership, [{ windowId: 1, clients: 1 }], 'only the new session is owned')
 
     const live = ptys.filter((p) => !p.killed)
-    assert.deepEqual(live.map((p) => p.args), [['attach-session', '-t', '$1']], 'one live pty, for the session in view')
+    assert.deepEqual(live.map((p) => p.args), [[...tmuxSocketArgs(), 'attach-session', '-t', '$1']], 'one live pty, for the session in view')
     assert.equal(ptys[0].killed, true, 'the session switched away from lost its pty')
     ws.close()
   } finally {

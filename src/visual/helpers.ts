@@ -9,21 +9,32 @@
 //   key-toolbar, key-toolbar-row, keytoolbar-fade-right, keytoolbar-toggle,
 //   terminal (the active session's xterm container), version-banner.
 // Test hook: the active Terminal publishes its xterm instance as
-// window.__nest.term so tests can read the screen buffer, which the WebGL
+// window.__foray.term so tests can read the screen buffer, which the WebGL
 // renderer does not expose in the DOM, and its actions as
-// window.__nest.actions (terminalRegistry.ts) so tests can type into it.
+// window.__foray.actions (terminalRegistry.ts) so tests can type into it.
 //
 // Every page load lands on a session of the suite's own: global-setup.ts
-// creates nest_visual-seed and seeds nest:lastSession with its id through
+// creates foray_visual-seed and seeds foray:lastSession with its id through
 // the storageState in playwright.config.ts. Without that a fresh profile
 // opens the first session tmux lists, which is someone's live shell, and
 // attaching takes over their tab. Tests still create their own sessions
 // for anything they type or assert on.
+//
+// Every real tmux call the suite makes directly (rather than through the
+// UI) goes through tmux() below, so the socket is spelled once, not once
+// per call site.
 
+import { execFileSync } from 'node:child_process'
 import { expect, type Page } from '@playwright/test'
+import { tmuxSocketArgs } from '../server/tmux.ts'
 
 /** Every session a test creates is renamed to start with this. */
 export const SESSION_PREFIX = 'visual-'
+
+/** Run a real tmux command on Foray's own socket (FORAY_TMUX_SOCKET); stdout, trimmed. */
+export function tmux(args: string[]): string {
+  return execFileSync('tmux', [...tmuxSocketArgs(), ...args], { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim()
+}
 
 export const DESKTOP = { width: 1440, height: 900 }
 export const TABLET = { width: 768, height: 1024 }
@@ -91,27 +102,27 @@ export async function openDrawer(page: Page): Promise<void> {
   await drawer.evaluate((el) => Promise.allSettled(el.getAnimations().map((a) => a.finished)))
 }
 
-type NestActions = { sendKeys(data: string): void; submit(text: string): void }
-type NestHook = { __nest?: { actions?: NestActions } }
+type ForayActions = { sendKeys(data: string): void; submit(text: string): void }
+type ForayHook = { __foray?: { actions?: ForayActions } }
 
 /** Send raw input to the active terminal, as a toolbar key would. */
 export async function sendKeys(page: Page, data: string): Promise<void> {
   await page.evaluate((d) => {
-    (window as unknown as NestHook).__nest?.actions?.sendKeys(d)
+    (window as unknown as ForayHook).__foray?.actions?.sendKeys(d)
   }, data)
 }
 
 /** Paste text and press Enter in the active terminal, as the Composer would. */
 export async function submitText(page: Page, text: string): Promise<void> {
   await page.evaluate((t) => {
-    (window as unknown as NestHook).__nest?.actions?.submit(t)
+    (window as unknown as ForayHook).__foray?.actions?.submit(t)
   }, text)
 }
 
 /** Text of a line in the active terminal's screen buffer, via the test hook Terminal.tsx exposes. */
 export async function terminalLine(page: Page, row: number): Promise<string> {
   return page.evaluate((r) => {
-    const term = (window as unknown as { __nest?: { term?: { buffer: { active: { getLine(n: number): { translateToString(trim?: boolean): string } | undefined } } } } }).__nest?.term
+    const term = (window as unknown as { __foray?: { term?: { buffer: { active: { getLine(n: number): { translateToString(trim?: boolean): string } | undefined } } } } }).__foray?.term
     return term?.buffer.active.getLine(r)?.translateToString(true) ?? ''
   }, row)
 }
@@ -119,7 +130,7 @@ export async function terminalLine(page: Page, row: number): Promise<string> {
 /** Whole visible screen of the active terminal, one string per row. */
 export async function terminalScreen(page: Page): Promise<string[]> {
   return page.evaluate(() => {
-    const term = (window as unknown as { __nest?: { term?: { rows: number; buffer: { active: { getLine(n: number): { translateToString(trim?: boolean): string } | undefined } } } } }).__nest?.term
+    const term = (window as unknown as { __foray?: { term?: { rows: number; buffer: { active: { getLine(n: number): { translateToString(trim?: boolean): string } | undefined } } } } }).__foray?.term
     if (!term) return []
     const out: string[] = []
     for (let r = 0; r < term.rows; r++) out.push(term.buffer.active.getLine(r)?.translateToString(true) ?? '')

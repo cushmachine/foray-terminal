@@ -26,7 +26,7 @@ export const TEST_TOKEN = 'test-token-0123456789abcdef'
 export type Msg = { type: string } & Record<string, any>
 
 /** A fresh temp directory; the caller removes it. */
-export function tmpDir(prefix = 'nest-test-'): Promise<string> {
+export function tmpDir(prefix = 'foray-test-'): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix))
 }
 
@@ -68,31 +68,40 @@ export interface FakeTmux {
   sessions: Map<number, FakeSession>
   /** Every argv handed to tmux, oldest first. */
   calls: string[][]
+  /** Global tmux options (`set -g`/`show -g`), seeded with the values Foray wants. */
+  serverOptions: Map<string, string>
   /** Add a Foray session as `tmux new-session` would; ids count up from 0. */
   add(name: string, overrides?: Partial<Omit<FakeSession, 'id' | 'name'>>): FakeSession
 }
 
-const NAMED_OPTION = '@nest_named'
+// Only ever written by tmux.ts's own stamps; a legacy '@nest_named' session
+// is a read-only fallback contract covered separately (rename-migration.test.ts).
+const NAMED_OPTION = '@foray_named'
 
 /** An in-memory tmux that understands the subset of commands tmux.ts issues. */
 export function fakeTmux(): FakeTmux {
   const sessions = new Map<number, FakeSession>()
   const calls: string[][] = []
+  // Matches applyTmuxServerOptions' desired values, so a plain fakeTmux()
+  // starts already correct and tests only see a `set -g` when they mean to.
+  const serverOptions = new Map<string, string>([['mouse', 'off'], ['history-limit', '10000']])
   let nextId = 0
 
+  const makeSession = (name: string, overrides: Partial<Omit<FakeSession, 'id' | 'name'>> = {}): FakeSession => ({
+    id: nextId++,
+    name,
+    cwd: os.homedir(),
+    title: '',
+    command: 'bash',
+    named: false,
+    history: [],
+    wrapped: [],
+    alternate: false,
+    ...overrides,
+  })
+
   const add: FakeTmux['add'] = (name, overrides = {}) => {
-    const session: FakeSession = {
-      id: nextId++,
-      name: `nest_${name}`,
-      cwd: os.homedir(),
-      title: '',
-      command: 'bash',
-      named: false,
-      history: [],
-      wrapped: [],
-      alternate: false,
-      ...overrides,
-    }
+    const session = makeSession(`nest_${name}`, overrides)
     sessions.set(session.id, session)
     return session
   }
@@ -123,9 +132,12 @@ export function fakeTmux(): FakeTmux {
       case 'list-sessions':
         return ok([...sessions.values()].map((s) => `${line(s)}\n`).join(''))
       case 'new-session': {
+        // The full name (whatever prefix the caller used) is already what
+        // tmux.ts wants stored; unlike add(), this does not prepend one.
         const name = arg(args, '-s') ?? ''
         if ([...sessions.values()].some((s) => s.name === name)) fail(`duplicate session: ${name}`)
-        const session = add(name.replace(/^nest_/, ''), { cwd: arg(args, '-c') ?? os.homedir() })
+        const session = makeSession(name, { cwd: arg(args, '-c') ?? os.homedir() })
+        sessions.set(session.id, session)
         return ok(`${line(session)}\n`)
       }
       case 'kill-session':
@@ -147,9 +159,16 @@ export function fakeTmux(): FakeTmux {
         target(args)
         return ok()
       case 'set':
-        // Server options (-s) and `status off` change nothing observable here.
+        // Server options (-s) and `status off` change nothing observable
+        // here, except the global (-g) ones applyTmuxServerOptions reads back.
         if (args.includes(NAMED_OPTION)) target(args).named = !args.includes('-u')
+        else if (args[1] === '-g') serverOptions.set(args[2], args[3])
         return ok()
+      case 'show': {
+        // show -g -v <option>: the value of a global tmux option.
+        const option = args[args.length - 1]
+        return ok(`${serverOptions.get(option) ?? ''}\n`)
+      }
       case 'display-message': {
         const s = target(args)
         return ok(`${s.history.length} 2000 ${s.alternate ? 1 : 0}\n`)
@@ -174,7 +193,7 @@ export function fakeTmux(): FakeTmux {
     }
   }
 
-  return { exec, sessions, calls, add }
+  return { exec, sessions, calls, serverOptions, add }
 }
 
 // ---------------------------------------------------------------------------

@@ -13,7 +13,7 @@ import { existsSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import { WebSocketServer, type WebSocket } from 'ws'
 import type { ServerMessage, TmuxWindow } from '../shared/protocol.ts'
-import { enableExtendedKeys, listWindows, mirrorTitles, type TmuxExecutor } from './tmux.ts'
+import { applyTmuxServerOptions, listWindows, mirrorTitles, type TmuxExecutor } from './tmux.ts'
 import type { PtySpawner } from './pty-bridge.ts'
 import { handleConnection, type Connection } from './ws-handler.ts'
 import { PastSessions } from './pastSessions.ts'
@@ -461,7 +461,7 @@ export function startServer(
   let extendedKeysSet = false
   const ensureExtendedKeys = async (): Promise<void> => {
     if (extendedKeysSet) return
-    extendedKeysSet = await enableExtendedKeys(tmuxExec)
+    extendedKeysSet = await applyTmuxServerOptions(tmuxExec)
   }
   void ensureExtendedKeys()
 

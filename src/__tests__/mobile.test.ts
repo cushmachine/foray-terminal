@@ -333,7 +333,7 @@ async function loadServiceWorker(): Promise<{
   }
   const context = vm.createContext({ self, URL, Response, caches: {}, fetch: () => Promise.reject(new Error('offline')) })
   vm.runInContext(source, context, { filename: 'sw.js' })
-  const exposed = self.__nest as { shouldCache: never; CACHE: string; SHELL: string[] }
+  const exposed = self.__foray as { shouldCache: never; CACHE: string; SHELL: string[] }
   return { ...exposed, listeners }
 }
 

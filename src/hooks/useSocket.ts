@@ -432,8 +432,8 @@ export function useSocket(): UseSocketReturn {
     }
     manager.open()
     // Test hook (see SocketManager.dropForTest).
-    const w = window as unknown as { __nestSocket?: { drop: (holdMs?: number) => void } }
-    w.__nestSocket = { drop: (holdMs) => manager.dropForTest(holdMs) }
+    const w = window as unknown as { __foraySocket?: { drop: (holdMs?: number) => void } }
+    w.__foraySocket = { drop: (holdMs) => manager.dropForTest(holdMs) }
     setStatus(manager.status)
     const unsubscribe = manager.onStatusChange(setStatus)
 
@@ -457,7 +457,7 @@ export function useSocket(): UseSocketReturn {
       window.removeEventListener('pageshow', wake)
       unsubscribe()
       manager.close()
-      delete w.__nestSocket
+      delete w.__foraySocket
     }
   }, [manager])
 
