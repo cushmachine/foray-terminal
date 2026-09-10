@@ -85,11 +85,12 @@ export async function saveUpload(
   if (!type) {
     throw new UnsupportedImageError('file is not a PNG, JPEG, GIF, or WEBP image')
   }
-  await fs.mkdir(dir, { recursive: true })
+  // Screenshots can hold anything; keep the folder to the owner.
+  await fs.mkdir(dir, { recursive: true, mode: 0o700 })
   for (let suffix = 0; suffix < MAX_COLLISION_SUFFIX; suffix++) {
     const target = path.resolve(dir, uploadFilename(type, now, suffix))
     try {
-      await fs.writeFile(target, bytes, { flag: 'wx' })
+      await fs.writeFile(target, bytes, { flag: 'wx', mode: 0o600 })
       return target
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err
@@ -113,11 +114,15 @@ export const UPLOAD_SWEEP_INITIAL_DELAY_MS = 60 * 1000
 
 export const DAY_MS = 24 * 60 * 60 * 1000
 
+/** The names saveUpload writes; the sweep touches nothing else. */
+const UPLOAD_NAME_RE = /^upload-\d{4}-\d{2}-\d{2}-\d{6}(-\d+)?\.(png|jpg|gif|webp)$/
+
 /**
- * Delete every regular file in `dir` last modified `maxAgeMs` or more ago and
- * resolve with the paths removed. The upload dir is temp-only by convention,
- * so no file is spared by name; subdirectories are left alone. A missing dir
- * just means nothing has been uploaded yet.
+ * Delete every upload in `dir` last modified `maxAgeMs` or more ago and
+ * resolve with the paths removed. Only files named as saveUpload names
+ * them are candidates: ~/uploads is a folder a user may already have, and
+ * whatever else they keep there is theirs. A missing dir just means
+ * nothing has been uploaded yet.
  */
 export async function purgeOldUploads(dir: string, maxAgeMs: number, now: Date = new Date()): Promise<string[]> {
   const entries = await fs.readdir(dir, { withFileTypes: true }).catch((err: NodeJS.ErrnoException) => {
@@ -127,7 +132,7 @@ export async function purgeOldUploads(dir: string, maxAgeMs: number, now: Date =
   const cutoff = now.getTime() - maxAgeMs
   const deleted: string[] = []
   for (const entry of entries) {
-    if (!entry.isFile()) continue
+    if (!entry.isFile() || !UPLOAD_NAME_RE.test(entry.name)) continue
     const file = path.join(dir, entry.name)
     try {
       const { mtimeMs } = await fs.stat(file)

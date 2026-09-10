@@ -17,6 +17,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { FullConfig } from '@playwright/test'
 import { LAST_SESSION_KEY } from '../storage.ts'
+import { Auth, SESSION_COOKIE } from '../server/auth.ts'
+import { VISUAL_TOKEN } from '../../playwright.config.ts'
 import { SESSION_PREFIX } from './helpers.ts'
 
 /** tmux session name of the seed; the prefix is what global-teardown keys on. */
@@ -44,8 +46,21 @@ export default function globalSetup(config: FullConfig): void {
   // `$12` from tmux; the app stores the bare number.
   const id = tmux(['display-message', '-p', '-t', SEED_SESSION, '#{session_id}']).replace(/^\$/, '')
   fs.mkdirSync(path.dirname(storageState), { recursive: true })
+  // Logged in from the first page load: the cookie the server would set
+  // for VISUAL_TOKEN, minted here with the same derivation.
+  const { hostname } = new URL(baseURL)
+  const cookie = {
+    name: SESSION_COOKIE,
+    value: new Auth(VISUAL_TOKEN).issueSession(),
+    domain: hostname,
+    path: '/',
+    expires: -1,
+    httpOnly: true,
+    secure: false,
+    sameSite: 'Strict' as const,
+  }
   fs.writeFileSync(storageState, JSON.stringify({
-    cookies: [],
+    cookies: [cookie],
     origins: [{ origin: baseURL, localStorage: [{ name: LAST_SESSION_KEY, value: id }] }],
   }))
 }

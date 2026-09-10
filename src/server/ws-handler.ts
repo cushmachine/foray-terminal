@@ -63,6 +63,19 @@ const BACKPRESSURE_POLL_MS = 50
 const MAX_COLS = 500
 const MAX_ROWS = 200
 
+/**
+ * Windows one connection may hold ptys for at once. A page shows one
+ * terminal per session and attaches to the one in front, so this is
+ * headroom, not a working figure; each attach is a tmux client and a pty.
+ */
+export const MAX_ATTACHMENTS = 16
+
+/** Longest terminal:input; a paste, not a file. */
+export const MAX_INPUT_CHARS = 256 * 1024
+
+/** Longest files:write content, the same as the panel will read back. */
+export const MAX_WRITE_CHARS = 1024 * 1024
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -144,11 +157,18 @@ export interface Connection {
 
 const isString = (value: unknown): boolean => typeof value === 'string'
 const isNumber = (value: unknown): boolean => typeof value === 'number' && Number.isFinite(value)
+/** A tmux id: what `$${id}` must be for tmux to read it as one target. */
+const isId = (value: unknown): boolean =>
+  typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+const isText = (max: number) => (value: unknown): boolean => isString(value) && (value as string).length <= max
 
 /** How each field type is checked, and how a rejection describes it. */
 const FIELD_TYPES = {
   string: { ok: isString, expected: 'a string' },
   number: { ok: isNumber, expected: 'a number' },
+  id: { ok: isId, expected: 'a non-negative integer' },
+  input: { ok: isText(MAX_INPUT_CHARS), expected: `a string of at most ${MAX_INPUT_CHARS} characters` },
+  content: { ok: isText(MAX_WRITE_CHARS), expected: `a string of at most ${MAX_WRITE_CHARS} characters` },
   'string?': { ok: (value: unknown) => value === undefined || isString(value), expected: 'a string when given' },
   'number?': { ok: (value: unknown) => value === undefined || isNumber(value), expected: 'a number when given' },
   'string|null': { ok: (value: unknown) => value === null || isString(value), expected: 'a string or null' },
@@ -168,19 +188,19 @@ type Shapes = {
 }
 
 const SHAPES: Shapes = {
-  'terminal:input': { windowId: 'number', data: 'string' },
-  'terminal:resize': { windowId: 'number', cols: 'number', rows: 'number' },
-  'terminal:attach': { windowId: 'number', cols: 'number?', rows: 'number?' },
-  'terminal:detach': { windowId: 'number' },
+  'terminal:input': { windowId: 'id', data: 'input' },
+  'terminal:resize': { windowId: 'id', cols: 'number', rows: 'number' },
+  'terminal:attach': { windowId: 'id', cols: 'number?', rows: 'number?' },
+  'terminal:detach': { windowId: 'id' },
   'session:list': {},
   'session:create': { name: 'string?', cwd: 'string?' },
-  'session:kill': { windowId: 'number' },
-  'session:rename': { windowId: 'number', name: 'string' },
+  'session:kill': { windowId: 'id' },
+  'session:rename': { windowId: 'id', name: 'string' },
   'sessions:past': {},
   'session:revive': { agent: 'string', sessionId: 'string' },
   'files:tree': { cwd: 'string' },
   'files:read': { path: 'string' },
-  'files:write': { path: 'string', content: 'string' },
+  'files:write': { path: 'string', content: 'content' },
   'files:watch': { cwd: 'string' },
   'files:unwatch': {},
   ping: {},
@@ -374,6 +394,9 @@ export function handleConnection(ws: WebSocket, deps: ConnectionDeps): Connectio
 
   const attach = async (msg: MessageOf<'terminal:attach'>): Promise<void> => {
     const { windowId } = msg
+    if (!attachments.has(windowId) && attachments.size >= MAX_ATTACHMENTS) {
+      throw new ClientError(`Too many terminals attached on one connection (max ${MAX_ATTACHMENTS})`)
+    }
     dropAttachment(windowId)
     const attachment: Attachment = {
       windowId,

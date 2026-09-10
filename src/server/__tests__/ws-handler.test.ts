@@ -13,7 +13,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { ClientMessage } from '../../shared/protocol.ts'
 import { ClientError, safeErrorMessage } from '../errors.ts'
-import { validateMessage } from '../ws-handler.ts'
+import { validateMessage, MAX_INPUT_CHARS, MAX_WRITE_CHARS, MAX_ATTACHMENTS } from '../ws-handler.ts'
 import { fakeTmux, handleTestConnection, until, type HandledConnection, type Msg } from './helpers.ts'
 
 // ---------------------------------------------------------------------------
@@ -39,6 +39,8 @@ const VALIDATION: Record<ClientMessage['type'], ValidationCase> = {
       { payload: { windowId: '0', data: 'x' }, field: 'windowId' },
       { payload: { windowId: 0, data: 42 }, field: 'data' },
       { payload: { data: 'x' }, field: 'windowId' },
+      { payload: { windowId: 0, data: 'x'.repeat(MAX_INPUT_CHARS + 1) }, field: 'data' },
+      { payload: { windowId: 1e21, data: 'x' }, field: 'windowId' },
     ],
   },
   'terminal:resize': {
@@ -54,6 +56,8 @@ const VALIDATION: Record<ClientMessage['type'], ValidationCase> = {
     good: { windowId: 0 },
     bad: [
       { payload: { windowId: '0' }, field: 'windowId' },
+      { payload: { windowId: 1.5 }, field: 'windowId' },
+      { payload: { windowId: -1 }, field: 'windowId' },
       { payload: { windowId: 0, cols: '80' }, field: 'cols' },
       { payload: { windowId: 0, rows: '24' }, field: 'rows' },
     ],
@@ -96,6 +100,7 @@ const VALIDATION: Record<ClientMessage['type'], ValidationCase> = {
     good: { path: 'a', content: '' },
     bad: [
       { payload: { path: 'a' }, field: 'content' },
+      { payload: { path: 'a', content: 'x'.repeat(MAX_WRITE_CHARS + 1) }, field: 'content' },
       { payload: { path: 1, content: '' }, field: 'path' },
     ],
   },
@@ -535,5 +540,20 @@ test('errors: one failing message does not stall the ones behind it', async () =
   await handled(conn, { type: 'session:list' })
   assert.deepEqual(sentOf(conn, 'error').map((e) => e.request), ['session:kill', 'files:read'])
   assert.equal(sentOf(conn, 'session:list').length, 1)
+  conn.socket.emit('close')
+})
+
+test('one connection cannot hold more than MAX_ATTACHMENTS terminals', async () => {
+  const conn = handleTestConnection()
+  for (let i = 0; i <= MAX_ATTACHMENTS; i++) conn.tmux.add(`s${i}`)
+  for (let i = 0; i < MAX_ATTACHMENTS; i++) conn.socket.receive({ type: 'terminal:attach', windowId: i })
+  await until(() => conn.ptys.length === MAX_ATTACHMENTS, 'every attach under the cap to spawn a pty')
+  conn.socket.receive({ type: 'terminal:attach', windowId: MAX_ATTACHMENTS })
+  await until(() => conn.sent.some((m) => m.type === 'error' && m.windowId === MAX_ATTACHMENTS), 'the refusal')
+  assert.equal(conn.ptys.length, MAX_ATTACHMENTS, 'no pty for the one over the cap')
+  assert.match(String(conn.sent.find((m) => m.type === 'error')?.message), /Too many terminals/)
+  // Re-attaching a window already held is not a new one.
+  conn.socket.receive({ type: 'terminal:attach', windowId: 0 })
+  await until(() => conn.ptys.length === MAX_ATTACHMENTS + 1, 'the re-attach to spawn')
   conn.socket.emit('close')
 })

@@ -23,7 +23,10 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { startTestServer, tmpDir } from '../server/__tests__/helpers.ts'
+import { startTestServer, tmpDir, TEST_TOKEN } from '../server/__tests__/helpers.ts'
+
+/** The credential a browser presents as a cookie; these tests hold the token itself. */
+const AUTH = { authorization: `Bearer ${TEST_TOKEN}` }
 import {
   DEFAULT_MAX_UPLOAD_AGE_DAYS,
   UPLOAD_SWEEP_INITIAL_DELAY_MS,
@@ -62,7 +65,7 @@ async function postUpload(
 ): Promise<Response> {
   const form = new FormData()
   form.append(field, new Blob([bytes], { type }), 'shot.png')
-  return fetch(`${url}/api/upload`, { method: 'POST', body: form })
+  return fetch(`${url}/api/upload`, { method: 'POST', body: form, headers: AUTH })
 }
 
 // ---------------------------------------------------------------------------
@@ -145,7 +148,7 @@ test('POST /api/upload responds 400 when the file field is missing or misnamed',
   try {
     const textOnly = new FormData()
     textOnly.append('note', 'no file here')
-    const missing = await fetch(`${url}/api/upload`, { method: 'POST', body: textOnly })
+    const missing = await fetch(`${url}/api/upload`, { method: 'POST', body: textOnly, headers: AUTH })
     assert.equal(missing.status, 400)
     assert.match((await missing.json()).error, /no file uploaded/)
 
@@ -264,7 +267,7 @@ test('uploadImage: resolves with the saved path on success and throws the server
   try {
     // The browser calls fetch('/api/upload') relative to its origin; here we
     // point that at the test server.
-    const fetchImpl: typeof fetch = (input, init) => fetch(new URL(String(input), url), init)
+    const fetchImpl: typeof fetch = (input, init) => fetch(new URL(String(input), url), { ...init, headers: AUTH })
 
     const shot = new File([fakeImage(PNG_MAGIC)], 'screenshot.png', { type: 'image/png' })
     const saved = await uploadImage(shot, fetchImpl)
@@ -307,28 +310,31 @@ async function waitUntil(check: () => Promise<boolean>, timeoutMs = 5000): Promi
   throw new Error('timed out waiting for condition')
 }
 
-test('purgeOldUploads: deletes files past the cutoff regardless of name, keeps newer files and subdirs', async () => {
+test('purgeOldUploads: deletes old uploads by name, keeps newer files, other files and subdirs', async () => {
   const tmp = await tmpDir('nest-uploads-')
   try {
     const now = new Date()
     const old = path.join(tmp, 'upload-2026-08-01-120000.png')
-    const oldHandmade = path.join(tmp, 'anything-goes.txt') // temp-only: no name is spared
+    const oldSuffixed = path.join(tmp, 'upload-2026-08-01-120000-3.jpg')
+    const oldHandmade = path.join(tmp, 'anything-goes.txt') // not ours: a user may keep files in ~/uploads
     const fresh = path.join(tmp, 'upload-2026-09-03-094512.png')
     const sub = path.join(tmp, 'subdir')
     const nested = path.join(sub, 'nested.png')
-    for (const file of [old, oldHandmade, fresh]) await fs.writeFile(file, 'x')
+    for (const file of [old, oldSuffixed, oldHandmade, fresh]) await fs.writeFile(file, 'x')
     await fs.mkdir(sub)
     await fs.writeFile(nested, 'x')
     await ageFile(old, 8 * DAY, now)
+    await ageFile(oldSuffixed, 8 * DAY, now)
     await ageFile(oldHandmade, 30 * DAY, now)
     await ageFile(fresh, 6 * DAY, now)
     await ageFile(nested, 30 * DAY, now)
     await ageFile(sub, 30 * DAY, now)
 
     const deleted = await purgeOldUploads(tmp, 7 * DAY, now)
-    assert.deepEqual(deleted.sort(), [old, oldHandmade].sort())
+    assert.deepEqual(deleted.sort(), [old, oldSuffixed].sort())
     assert.equal(await exists(old), false)
-    assert.equal(await exists(oldHandmade), false)
+    assert.equal(await exists(oldSuffixed), false)
+    assert.equal(await exists(oldHandmade), true, 'a file Foray did not write is never deleted')
     assert.equal(await exists(fresh), true, 'a 6-day-old file survives a 7-day cutoff')
     assert.equal(await exists(nested), true, 'subdirectories are left alone')
 

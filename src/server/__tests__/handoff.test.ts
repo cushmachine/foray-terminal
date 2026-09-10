@@ -19,7 +19,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { WebSocket as WsClient } from 'ws'
-import { connect, startTestServer, tmpDir, waitForType, wsUrl } from './helpers.ts'
+import { connect, startTestServer, tmpDir, waitForType, wsUrl , TEST_TOKEN } from './helpers.ts'
 
 // ---------------------------------------------------------------------------
 // Test 1: second attach detaches the first client
@@ -166,7 +166,7 @@ test('a client that never answers protocol pings is terminated', async () => {
   try {
     // The `ws` client can be told not to auto-reply to pings; the browser
     // and Node's built-in WebSocket always do, which is why they stay alive.
-    const ws = new WsClient(wsUrl(url), { autoPong: false })
+    const ws = new WsClient(wsUrl(url), { autoPong: false, headers: { authorization: `Bearer ${TEST_TOKEN}` } })
     await new Promise<void>((resolve, reject) => {
       ws.once('message', () => resolve())
       ws.once('error', reject)
@@ -191,7 +191,7 @@ test('a client that answers protocol pings stays connected across several ticks'
     // The `ws` client surfaces the protocol pings it answers (the built-in
     // WebSocket answers them silently), so the test can count ticks
     // instead of guessing how long several of them take.
-    const ws = new WsClient(wsUrl(url))
+    const ws = new WsClient(wsUrl(url), { headers: { authorization: `Bearer ${TEST_TOKEN}` } })
     await new Promise<void>((resolve, reject) => {
       ws.once('message', () => resolve())
       ws.once('error', reject)

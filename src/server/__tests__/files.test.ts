@@ -301,6 +301,41 @@ test('getTree reports truncated: false for a small tree', async () => {
   }
 })
 
+test('writeFile: refuses to write through a symlink at the target, even one inside cwd', async () => {
+  const dir = await tmpDir()
+  const outside = await tmpDir()
+  try {
+    const victim = path.join(outside, 'victim.txt')
+    await fs.writeFile(victim, 'untouched')
+    // realpath containment would catch this one; the O_NOFOLLOW open is
+    // for a link dropped in after that check, which a test cannot time.
+    // So the link points inside cwd: containment passes, the open must not.
+    await fs.writeFile(path.join(dir, 'real.txt'), 'real')
+    await fs.symlink(path.join(dir, 'real.txt'), path.join(dir, 'link.txt'))
+    await assert.rejects(() => writeFile(dir, 'link.txt', 'through the link'), /symlink/)
+    assert.equal(await fs.readFile(path.join(dir, 'real.txt'), 'utf8'), 'real')
+    await fs.symlink(victim, path.join(dir, 'escape.txt'))
+    await assert.rejects(() => writeFile(dir, 'escape.txt', 'through the link'))
+    assert.equal(await fs.readFile(victim, 'utf8'), 'untouched')
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true })
+    await fs.rm(outside, { recursive: true, force: true })
+  }
+})
+
+test('files:tree and files:watch refuse the filesystem root and kernel directories', async () => {
+  const conn = handleTestConnection()
+  const roots = ['/', '/proc', '/sys/kernel', '/dev', '/run/../']
+  for (const cwd of roots) conn.socket.receive({ type: 'files:tree', cwd })
+  conn.socket.receive({ type: 'files:watch', cwd: '/proc/self' })
+  await until(() => conn.sent.length === roots.length + 1, 'every reply')
+  for (const msg of conn.sent) {
+    assert.equal(msg.type, 'error')
+    assert.match(String(msg.message), /filesystem root or kernel directories/)
+  }
+  conn.socket.emit('close')
+})
+
 test('files:tree and files:watch reject a relative cwd', async () => {
   const conn = handleTestConnection()
   conn.socket.receive({ type: 'files:tree', cwd: 'relative/dir' })

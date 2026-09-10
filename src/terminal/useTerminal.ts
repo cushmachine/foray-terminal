@@ -8,7 +8,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { RefObject } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
-import { ClipboardAddon } from '@xterm/addon-clipboard'
+import { ClipboardAddon, type IClipboardProvider } from '@xterm/addon-clipboard'
+import { clipboardWriteAllowed } from './clipboardGuard'
 import { WebglAddon } from '@xterm/addon-webgl'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
@@ -63,7 +64,26 @@ interface Live {
 
 /** Open a URL from the live screen in a new tab that cannot reach this one. */
 function openLink(_event: MouseEvent, uri: string): void {
-  window.open(cleanUrl(uri), '_blank', 'noopener')
+  window.open(cleanUrl(uri), '_blank', 'noopener,noreferrer')
+}
+
+/**
+ * The OSC 52 provider: programs may put text on the clipboard right after
+ * a keystroke, and never read it. A read would hand whatever the user last
+ * copied (a password, say) to the program and so to its transcript; the
+ * same terminal output that asks for it is what a hostile file would
+ * plant. Without the guard on writes, that file could put a command on the
+ * clipboard for the user to paste into a shell later.
+ */
+function guardedClipboard(lastInputAt: () => number): IClipboardProvider {
+  return {
+    readText: () => '',
+    writeText: async (_selection, text) => {
+      if (!clipboardWriteAllowed(lastInputAt(), Date.now(), text)) return
+      if (typeof navigator.clipboard?.writeText !== 'function') return
+      await navigator.clipboard.writeText(text).catch(() => {})
+    },
+  }
 }
 
 /** Focus the Composer on touch (typing goes there), the xterm otherwise. */
@@ -103,7 +123,9 @@ export function useTerminal({
   const onModifiersUsedRef = useRef(onModifiersUsed)
   onModifiersUsedRef.current = onModifiersUsed
 
+  const lastInputAtRef = useRef(0)
   const sendInput = useCallback((data: string) => {
+    lastInputAtRef.current = Date.now()
     const mods = modifiersRef.current
     let bytes = data
     if (mods.ctrl || mods.alt) {
@@ -134,10 +156,13 @@ export function useTerminal({
       scrollback: 0,
       allowTransparency: true,
       convertEol: true,
+      // OSC 8 hyperlinks (a link whose text need not be its target) open
+      // the same way as plain URLs, in a tab that cannot reach this one.
+      linkHandler: { activate: openLink },
     })
     const fitAddon = new FitAddon()
     term.loadAddon(fitAddon)
-    term.loadAddon(new ClipboardAddon())
+    term.loadAddon(new ClipboardAddon(undefined, guardedClipboard(() => lastInputAtRef.current)))
     // The fit addon sizes the pty from the host's width, so the host is
     // the container's inside: with padding on the host itself the addon
     // would read the padded width and the screen would run past it.

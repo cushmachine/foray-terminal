@@ -12,6 +12,17 @@ The tmux server that holds every session runs in its own systemd unit, `nest-tmu
 
 On macOS there is no unit: `start.sh` skips it, and the tmux server survives pm2 restarts on its own because macOS has no cgroups. Boot persistence there is a LaunchAgent written by `install.sh` (see DEPLOY.md).
 
+## Security
+
+Foray is a shell on the box: every socket and upload needs the access
+token (`src/server/auth.ts`; `~/.foray/token`, printed by `npm run token`),
+the browser holds a cookie, and cross-origin requests are refused on the
+upgrade. Tests get a token from `startTestServer` and present it through
+`connect()`; the Playwright suite starts logged in via a cookie in its
+storage state. Keep new routes behind `requireAuth`, new message fields
+under a size cap in `SHAPES`, and read SECURITY.md before changing any of
+it.
+
 ## Build & check
 
 - `npm run build` — typecheck (both client and server tsconfigs) then vite build

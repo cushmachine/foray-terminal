@@ -19,6 +19,9 @@ import { handleConnection, type ConnectionDeps } from '../ws-handler.ts'
 import type { Logger } from '../log.ts'
 import type { AgentProvider, AgentSession, LiveSession } from '../agents/types.ts'
 
+/** The token every startTestServer instance accepts; connect() presents it. */
+export const TEST_TOKEN = 'test-token-0123456789abcdef'
+
 /** A parsed protocol message; the fields beyond `type` are whatever it carries. */
 export type Msg = { type: string } & Record<string, any>
 
@@ -300,6 +303,8 @@ export async function startTestServer(options: ServerOptions = {}): Promise<Test
     quiet: true,
     // Never this machine's own transcripts; a suite injects its own provider.
     agents: [],
+    // Never this machine's token file; the suites log in with TEST_TOKEN.
+    auth: { token: TEST_TOKEN },
     ...options,
   })
   return { url: started.url, server: started.server, close: started.close, tmux, ptys }
@@ -478,8 +483,14 @@ export async function settled(ws: WebSocket): Promise<void> {
 }
 
 /** Connect to a server and resolve once its welcome (session:list) has arrived. */
-export async function connect(url: string, timeoutMs = 5000): Promise<{ ws: WebSocket; welcome: Msg }> {
-  const ws = new WebSocket(wsUrl(url))
+export async function connect(
+  url: string,
+  timeoutMs = 5000,
+  headers: Record<string, string> = { authorization: `Bearer ${TEST_TOKEN}` },
+): Promise<{ ws: WebSocket; welcome: Msg }> {
+  // Node's WebSocket takes extra request headers, which is how a script
+  // (this one) authenticates without logging in for a cookie.
+  const ws = new WebSocket(wsUrl(url), { headers } as unknown as string[])
   const welcome = waitForType(ws, 'session:list', timeoutMs)
   await new Promise<void>((resolve, reject) => {
     ws.addEventListener('open', () => resolve(), { once: true })

@@ -22,6 +22,9 @@ export const VISUAL_PORT = Number(process.env.VISUAL_PORT) || 3456
 const ROOT = `.playwright/root-${VISUAL_PORT}`
 // Written by global-setup; outside outputDir, which Playwright empties.
 const STORAGE_STATE = `.playwright/state-${VISUAL_PORT}.json`
+// The token the server under test accepts; global-setup turns it into the
+// session cookie every browser context starts with, so no spec logs in.
+export const VISUAL_TOKEN = 'visual-suite-token-0123456789'
 
 export default defineConfig({
   testDir: 'src/visual',
@@ -52,7 +55,7 @@ export default defineConfig({
     command: [
       `mkdir -p ${ROOT}`,
       `npx vite build --outDir ${ROOT}/dist --emptyOutDir`,
-      `cd ${ROOT} && NODE_ENV=production PORT=${VISUAL_PORT} ../../node_modules/.bin/tsx ../../src/server/index.ts`,
+      `cd ${ROOT} && NODE_ENV=production PORT=${VISUAL_PORT} FORAY_TOKEN=${VISUAL_TOKEN} ../../node_modules/.bin/tsx ../../src/server/index.ts`,
     ].join(' && '),
     port: VISUAL_PORT,
     reuseExistingServer: false,

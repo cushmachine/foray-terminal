@@ -42,7 +42,22 @@ export const MAX_TREE_NODES = 5000
  */
 export function resolveRoot(cwd: string): string {
   if (!path.isAbsolute(cwd)) throw new ClientError('Invalid path (cwd must be absolute)')
-  return path.normalize(cwd)
+  const root = path.normalize(cwd)
+  if (isUnwatchable(root)) throw new ClientError('The file panel does not open the filesystem root or kernel directories')
+  return root
+}
+
+/**
+ * Roots the panel refuses: the whole filesystem, and the kernel's
+ * pseudo-filesystems, which are enormous, endless, or both. Walking or
+ * watching them costs the box its memory and its inotify watches.
+ */
+const UNWATCHABLE_ROOTS = ['/proc', '/sys', '/dev', '/run']
+
+function isUnwatchable(root: string): boolean {
+  const resolved = path.resolve(root)
+  if (resolved === path.parse(resolved).root) return true
+  return UNWATCHABLE_ROOTS.some((bad) => resolved === bad || resolved.startsWith(`${bad}${path.sep}`))
 }
 
 /**
@@ -290,11 +305,28 @@ export async function readFile(cwd: string, relativePath: string): Promise<strin
   return fs.readFile(resolved, 'utf-8')
 }
 
-/** Write a file's contents as utf-8, creating parent directories as needed. Same safety checks as readFile. */
+/**
+ * Write a file's contents as utf-8, creating parent directories as needed.
+ * Same safety checks as readFile, and the final component is opened with
+ * O_NOFOLLOW so a symlink dropped there between the check and the write
+ * cannot redirect it outside cwd.
+ */
 export async function writeFile(cwd: string, relativePath: string, content: string): Promise<void> {
   const resolved = await resolveSafePath(cwd, relativePath)
   await fs.mkdir(path.dirname(resolved), { recursive: true })
-  await fs.writeFile(resolved, content, 'utf-8')
+  const { O_WRONLY, O_CREAT, O_TRUNC, O_NOFOLLOW } = fs.constants
+  let handle: fs.FileHandle
+  try {
+    handle = await fs.open(resolved, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0o644)
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ELOOP') throw new ClientError(`Invalid path (is a symlink): ${relativePath}`)
+    throw err
+  }
+  try {
+    await handle.writeFile(content, 'utf-8')
+  } finally {
+    await handle.close()
+  }
 }
 
 // ---------------------------------------------------------------------------

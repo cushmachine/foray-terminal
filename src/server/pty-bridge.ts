@@ -5,6 +5,7 @@
 // tmux session, and windowId is that session's tmux id.
 
 import * as pty from 'node-pty'
+import { sessionEnv } from './env.ts'
 
 /** Handle returned to callers for I/O and lifecycle management. */
 export interface PtyHandle {
@@ -37,6 +38,9 @@ export type PtySpawner = (
 const defaultSpawn: PtySpawner = (file, args, options) =>
   pty.spawn(file, args, options as pty.IPtyForkOptions)
 
+/** The environment a pane's tmux client gets; see env.ts. */
+export const ptyEnv = sessionEnv
+
 export interface PtyEvents {
   /** Output from the pane. */
   onData: (data: string) => void
@@ -61,7 +65,7 @@ export function attachToPane(
       name: 'xterm-256color',
       cols: opts?.cols ?? 80,
       rows: opts?.rows ?? 24,
-      env: process.env as Record<string, string | undefined>,
+      env: ptyEnv(process.env),
     },
   )
 

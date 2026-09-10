@@ -20,6 +20,9 @@ import { PastSessions } from './pastSessions.ts'
 import { providersFromEnv } from './agents/index.ts'
 import type { AgentProvider } from './agents/types.ts'
 import { describeCheckout, readServedClientBuild } from './build.ts'
+import {
+  Auth, clientAddress, loadToken, originAllowed, isSecureRequest, parseCookies, requestHosts, SESSION_COOKIE, type AuthOptions,
+} from './auth.ts'
 import { SILENT, scopedLog, type Logger } from './log.ts'
 import {
   DAY_MS,
@@ -52,6 +55,21 @@ export const DEFAULT_POLL_INTERVAL_MS = 2000
  * would linger until the OS gives up on the TCP connection.
  */
 export const DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000
+
+/**
+ * Largest WebSocket frame accepted from a client. The biggest legitimate
+ * message is a files:write of a file the panel could read (1 MiB), with
+ * JSON escaping on top. Anything larger closes the socket before it is
+ * buffered, which on a small box is the difference between a nuisance and
+ * an out-of-memory kill.
+ */
+export const MAX_WS_PAYLOAD_BYTES = 2 * 1024 * 1024
+
+/** Most WebSocket clients at once; each attach costs a tmux client and a pty. */
+export const DEFAULT_MAX_CONNECTIONS = 64
+
+/** Largest login body; the token is 43 characters. */
+const MAX_LOGIN_BODY = '4kb'
 
 export interface ServerOptions {
   /**
@@ -93,6 +111,167 @@ export interface ServerOptions {
   logger?: Logger
   /** Drop all log output (tests); shorthand for a no-op `logger`. */
   quiet?: boolean
+  /**
+   * How callers prove they may use the server (server/auth.ts). Default:
+   * the token from FORAY_TOKEN or ~/.foray/token. `false` turns
+   * authentication off, which the entry point allows only on a loopback
+   * address; tests use it where the connection is not the point.
+   */
+  auth?: AuthOptions | false
+  /**
+   * Host names (no port) requests may address the server by. Empty means
+   * any. With a value, a request whose Host header names anything else is
+   * refused, which stops DNS rebinding even before authentication does.
+   * From FORAY_ALLOWED_HOSTS (comma-separated) at the entry point.
+   */
+  allowedHosts?: string[]
+  /** Override the WebSocket client cap (DEFAULT_MAX_CONNECTIONS). */
+  maxConnections?: number
+}
+
+/** The Auth for `options`, or null when authentication is off. */
+function authFor(options: ServerOptions, logger: Logger): Auth | null {
+  if (options.auth === false) return null
+  const loaded = loadToken(options.auth ?? {})
+  const log = scopedLog(logger, 'auth')
+  if (loaded.source === 'file') {
+    log.log(`token ${loaded.created ? 'created at' : 'read from'} ${loaded.file} (npm run token prints it)`)
+  } else if (loaded.source === 'env') {
+    log.log('token from FORAY_TOKEN')
+  }
+  return new Auth(loaded.token, options.auth || {})
+}
+
+/** The host name of a Host header, without the port. */
+function hostNameOf(host: string | undefined): string {
+  if (!host) return ''
+  const bracket = host.lastIndexOf(']')
+  const colon = host.lastIndexOf(':')
+  return (colon > bracket ? host.slice(0, colon) : host).toLowerCase()
+}
+
+/** Whether a request's Host header is one of `allowedHosts` (or there is no list). */
+function hostAllowed(req: http.IncomingMessage, allowedHosts: string[] | undefined): boolean {
+  if (!allowedHosts || allowedHosts.length === 0) return true
+  const name = hostNameOf(req.headers.host)
+  return allowedHosts.some((allowed) => allowed.toLowerCase() === name)
+}
+
+/**
+ * The Content-Security-Policy for a request. The bundle and its styles
+ * are same-origin; React and the scrollback renderer set inline style
+ * attributes; the socket is spelled out per host because some browsers do
+ * not count WebSockets as 'self'. No frames, no plugins, no other origins.
+ */
+function contentSecurityPolicy(req: http.IncomingMessage): string {
+  const socket = requestHosts(req).map((host) => ` ws://${host} wss://${host}`).join('')
+  return [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob:",
+    "font-src 'self' data:",
+    `connect-src 'self'${socket}`,
+    "worker-src 'self'",
+    "frame-ancestors 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "object-src 'none'",
+  ].join('; ')
+}
+
+/** Headers every response carries. */
+function securityHeaders(allowedHosts: string[] | undefined): express.RequestHandler {
+  return (req, res, next) => {
+    if (!hostAllowed(req, allowedHosts)) {
+      res.status(421).type('text/plain').send('Unknown host')
+      return
+    }
+    res.setHeader('Content-Security-Policy', contentSecurityPolicy(req))
+    res.setHeader('X-Content-Type-Options', 'nosniff')
+    res.setHeader('X-Frame-Options', 'DENY')
+    res.setHeader('Referrer-Policy', 'no-referrer')
+    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')
+    if (isSecureRequest(req)) res.setHeader('Strict-Transport-Security', 'max-age=31536000')
+    if (req.path.startsWith('/api/')) res.setHeader('Cache-Control', 'no-store')
+    next()
+  }
+}
+
+/**
+ * The login, session and logout routes. A browser posts the token once
+ * and holds a cookie from then on; GET /api/session is how the client
+ * learns whether it is logged in (and slides the cookie's expiry).
+ */
+function installAuthRoutes(app: express.Express, auth: Auth | null, logger: Logger): void {
+  const log = scopedLog(logger, 'auth')
+
+  app.get('/api/session', (req, res) => {
+    if (!auth) {
+      res.json({ authenticated: true, required: false })
+      return
+    }
+    if (!auth.isAuthenticated(req)) {
+      res.status(401).json({ authenticated: false, required: true })
+      return
+    }
+    // A fresh cookie each check, so a device in daily use never expires.
+    if (parseCookies(req.headers.cookie).has(SESSION_COOKIE)) {
+      res.setHeader('Set-Cookie', auth.cookieHeader(auth.issueSession(), isSecureRequest(req)))
+    }
+    res.json({ authenticated: true, required: true })
+  })
+
+  app.post('/api/login', express.json({ limit: MAX_LOGIN_BODY }), (req, res) => {
+    if (!auth) {
+      res.json({ ok: true })
+      return
+    }
+    if (!originAllowed(req)) {
+      log.log(`refused cross-origin login: origin=${req.headers.origin} host=${req.headers.host}`)
+      res.status(403).json({ error: 'cross-origin login refused' })
+      return
+    }
+    const address = clientAddress(req)
+    const waitMs = auth.loginDelayMs(address)
+    if (waitMs > 0) {
+      const retryAfterS = Math.ceil(waitMs / 1000)
+      res.setHeader('Retry-After', String(retryAfterS))
+      res.status(429).json({ error: `too many attempts; try again in ${retryAfterS}s`, retryAfterS })
+      return
+    }
+    const token = (req.body as { token?: unknown } | undefined)?.token
+    if (!auth.verifyToken(token)) {
+      auth.recordLoginFailure(address)
+      log.log(`login failed from ${address}`)
+      res.status(401).json({ error: 'wrong token' })
+      return
+    }
+    auth.recordLoginSuccess(address)
+    log.log(`login from ${address}`)
+    res.setHeader('Set-Cookie', auth.cookieHeader(auth.issueSession(), isSecureRequest(req)))
+    res.json({ ok: true })
+  })
+
+  app.post('/api/logout', requireAuth(auth), (req, res) => {
+    if (auth) res.setHeader('Set-Cookie', auth.cookieHeader('', isSecureRequest(req)))
+    res.json({ ok: true })
+  })
+}
+
+/** Refuse a request that is cross-origin (403) or carries no valid credential (401). */
+function requireAuth(auth: Auth | null): express.RequestHandler {
+  return (req, res, next) => {
+    if (!originAllowed(req)) {
+      res.status(403).json({ error: 'cross-origin request refused' })
+      return
+    }
+    if (auth && !auth.isAuthenticated(req)) {
+      res.status(401).json({ error: 'not logged in' })
+      return
+    }
+    next()
+  }
 }
 
 /** Where the server's log lines go, per `ServerOptions.logger` and `quiet`. */
@@ -166,15 +345,26 @@ function createUploadHandler(uploadDir: string, logger: Logger): express.Request
   }
 }
 
-/** Build the Express app: health check, image upload, + (in production) static client. */
-export function createApp(options: ServerOptions = {}): express.Express {
+/**
+ * Build the Express app: health check, login, image upload, + (in
+ * production) static client. `auth` is the server's; it defaults to one
+ * built from `options` for callers that only want the app.
+ */
+export function createApp(
+  options: ServerOptions = {},
+  auth: Auth | null = authFor(options, loggerFor(options)),
+): express.Express {
   const app = express()
+  const logger = loggerFor(options)
+  app.disable('x-powered-by')
+  app.use(securityHeaders(options.allowedHosts))
 
   app.get('/health', (_req, res) => {
     res.json({ status: 'ok' })
   })
 
-  app.post('/api/upload', createUploadHandler(options.uploadDir ?? DEFAULT_UPLOAD_DIR, loggerFor(options)))
+  installAuthRoutes(app, auth, logger)
+  app.post('/api/upload', requireAuth(auth), createUploadHandler(options.uploadDir ?? DEFAULT_UPLOAD_DIR, logger))
 
   const clientDist = servedClientDist(options)
   if (clientDist && existsSync(clientDist)) {
@@ -227,13 +417,40 @@ export function startServer(
   port: number = DEFAULT_PORT,
   options: ServerOptions = {},
 ): Promise<StartedServer> {
-  const app = createApp(options)
   const logger = loggerFor(options)
   const log = scopedLog(logger, 'server')
+  const auth = authFor(options, logger)
+  if (!auth) log.log('authentication is OFF: anyone who can reach this port has a shell')
+  const app = createApp(options, auth)
   // Read once: tsx runs the source as of now, until the next restart.
   const serverBuild = describeCheckout()
   const server = http.createServer(app)
-  const wss = new WebSocketServer({ server, path: '/ws' })
+  const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_WS_PAYLOAD_BYTES })
+  const maxConnections = options.maxConnections ?? DEFAULT_MAX_CONNECTIONS
+
+  // The upgrade is where a browser page from anywhere on the network
+  // would get in: it is let through only when it names this server as
+  // its Origin (or is not a browser page), addresses an allowed host, and
+  // carries a credential. Refusals answer with a plain HTTP status so a
+  // client can tell "not logged in" from "not there".
+  const refuse = (socket: import('node:stream').Duplex, status: number, reason: string): void => {
+    socket.write(`HTTP/1.1 ${status} ${reason}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`)
+    socket.destroy()
+  }
+  server.on('upgrade', (req, socket, head) => {
+    const pathname = new URL(req.url ?? '/', 'http://localhost').pathname
+    if (pathname !== '/ws') return refuse(socket, 404, 'Not Found')
+    if (!hostAllowed(req, options.allowedHosts)) return refuse(socket, 421, 'Misdirected Request')
+    if (!originAllowed(req)) {
+      // Host and Origin in the log: behind a proxy that rewrites Host
+      // without X-Forwarded-Host, this is the line that explains the 403.
+      log.log(`refused cross-origin socket from ${clientAddress(req)}: origin=${req.headers.origin} host=${req.headers.host}`)
+      return refuse(socket, 403, 'Forbidden')
+    }
+    if (auth && !auth.isAuthenticated(req)) return refuse(socket, 401, 'Unauthorized')
+    if (wss.clients.size >= maxConnections) return refuse(socket, 503, 'Service Unavailable')
+    wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req))
+  })
 
   const tmuxExec = options.tmuxExec
 
@@ -480,8 +697,22 @@ const isMain = process.argv[1] !== undefined && import.meta.url === pathToFileUR
 if (isMain) {
   const envPort = process.env.PORT ? parseInt(process.env.PORT, 10) : NaN
   const port = Number.isFinite(envPort) ? envPort : DEFAULT_PORT
-  startServer(port, { host: process.env.HOST || undefined }).catch((err) => {
-    console.error('Failed to start server:', err)
+  const host = process.env.HOST || undefined
+  const authOff = process.env.FORAY_AUTH === 'off'
+  if (authOff && !isLoopback(host)) {
+    console.error('FORAY_AUTH=off is only allowed together with HOST=127.0.0.1 (or ::1): without a token, anyone who can reach the port has a shell')
+    process.exit(1)
+  }
+  const allowedHosts = (process.env.FORAY_ALLOWED_HOSTS ?? '').split(',').map((h) => h.trim()).filter(Boolean)
+  startServer(port, { host, auth: authOff ? false : undefined, allowedHosts }).catch((err) => {
+    console.error('Failed to start server:', err instanceof Error ? err.message : err)
     process.exit(1)
   })
+}
+
+/** Whether a listen address reaches only this machine. */
+export function isLoopback(host: string | undefined): boolean {
+  if (!host) return false
+  const h = host.toLowerCase()
+  return h === 'localhost' || h === '::1' || h.startsWith('127.')
 }

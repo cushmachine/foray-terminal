@@ -18,7 +18,7 @@ function anchor(href: string, label: string): HTMLAnchorElement {
   a.className = 'term-link'
   a.href = href
   a.target = '_blank'
-  a.rel = 'noopener'
+  a.rel = 'noopener noreferrer'
   a.textContent = label
   return a
 }

@@ -11,6 +11,7 @@ import net from 'node:net'
 import type { TmuxExecutor } from '../tmux.ts'
 import {
   connect, fakeTmux, handleTestConnection, settled, startTestServer, until, waitForMessage, waitForType,
+  TEST_TOKEN,
 } from './helpers.ts'
 
 // ---------------------------------------------------------------------------
@@ -390,7 +391,7 @@ function rawUpgrade(url: string): Promise<net.Socket> {
       const key = crypto.randomBytes(16).toString('base64')
       socket.write(
         `GET /ws HTTP/1.1\r\nHost: ${hostname}:${port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n` +
-        `Sec-WebSocket-Key: ${key}\r\nSec-WebSocket-Version: 13\r\n\r\n`,
+        `Authorization: Bearer ${TEST_TOKEN}\r\nSec-WebSocket-Key: ${key}\r\nSec-WebSocket-Version: 13\r\n\r\n`,
       )
     })
     socket.once('data', (data) => {

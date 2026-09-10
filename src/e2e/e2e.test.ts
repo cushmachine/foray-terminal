@@ -17,6 +17,7 @@ import { execFileSync, execFile as _execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { startServer } from '../server/index.ts'
 import {
+  TEST_TOKEN,
   connect,
   waitForMessage,
   waitForOutput,
@@ -88,7 +89,7 @@ if (!TMUX_AVAILABLE) {
 // ---------------------------------------------------------------------------
 
 tmuxIt('e2e: terminal I/O round-trip', async () => {
-  const { url, close } = await startServer(0, { quiet: true })
+  const { url, close } = await startServer(0, { quiet: true, auth: { token: TEST_TOKEN } })
   let windowId: number | null = null
   try {
     const { ws } = await connect(url)
@@ -122,7 +123,7 @@ tmuxIt('e2e: terminal I/O round-trip', async () => {
 // ---------------------------------------------------------------------------
 
 tmuxIt('e2e: terminal resize does not crash', async () => {
-  const { url, close } = await startServer(0, { quiet: true })
+  const { url, close } = await startServer(0, { quiet: true, auth: { token: TEST_TOKEN } })
   let windowId: number | null = null
   try {
     const { ws } = await connect(url)
@@ -157,7 +158,7 @@ tmuxIt('e2e: terminal resize does not crash', async () => {
 // ---------------------------------------------------------------------------
 
 tmuxIt('e2e: poller broadcasts session:list when tmux changes outside Foray', async () => {
-  const { url, close } = await startServer(0, { pollIntervalMs: 200, quiet: true })
+  const { url, close } = await startServer(0, { pollIntervalMs: 200, quiet: true, auth: { token: TEST_TOKEN } })
   let windowId: number | null = null
   try {
     const { ws } = await connect(url)

@@ -53,16 +53,33 @@ before starting the server, so a restart is a deploy; a broken client
 build keeps the previous `dist/` serving. Never run `pm2 restart` or
 `pm2 start` by hand.
 
-## Network
+## Network and access
 
-Foray listens on port 3000 on every interface (`ecosystem.config.cjs`) and
-has no authentication: it assumes a private network. Set `HOST` to bind
-one interface instead (`HOST=127.0.0.1` keeps it local; `PORT` picks the
-port). Expose it over Tailscale:
+Foray listens on port 3000 on every interface (`ecosystem.config.cjs`;
+set `HOST` to bind one, `PORT` to pick the port). Every socket and upload
+requires the access token, which the server writes to `~/.foray/token` on
+its first start. Print it with:
+
+```bash
+npm run token
+```
+
+The browser asks for it once per device and keeps a cookie for 30 days
+of use. To log every device out, replace the file and redeploy:
+
+```bash
+openssl rand -base64 32 > ~/.foray/token && npm run deploy
+```
+
+Expose it over Tailscale HTTPS, which gives it a real certificate and
+keeps it off the open internet:
 
 ```bash
 tailscale serve --bg 3000
 ```
 
-Then open `http://<server>:3000` or `https://<server>.tail<hash>.ts.net` from any
-device on the tailnet.
+Then open `https://<server>.tail<hash>.ts.net` from any device on the
+tailnet. Plain `http://<server>:3000` works too and is private over a
+tailnet (WireGuard encrypts it), but not over a LAN. SECURITY.md has the
+full picture and the recommended hardening: a dedicated user, `HOST` set
+to `127.0.0.1`, and `FORAY_ALLOWED_HOSTS` pinned to your host names.

@@ -12,7 +12,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { startServer } from '../server/index.ts'
-import { connect, waitForMessage, waitForOutput, waitForTypeOrError } from '../server/__tests__/helpers.ts'
+import { TEST_TOKEN, connect, waitForMessage, waitForOutput, waitForTypeOrError } from '../server/__tests__/helpers.ts'
 
 const SHIFT_ENTER_CSI_U = '\x1b[13;2u'
 
@@ -26,7 +26,7 @@ function hasTmux(): boolean {
 }
 
 test('Shift+Enter as CSI u reaches the pane unchanged', { skip: !hasTmux() && 'tmux not installed' }, async () => {
-  const { url, close } = await startServer(0, { quiet: true })
+  const { url, close } = await startServer(0, { quiet: true, auth: { token: TEST_TOKEN } })
   const { ws } = await connect(url)
   const created = waitForTypeOrError(ws, 'session:created')
   ws.send(JSON.stringify({ type: 'session:create', name: `e2e-keys-${Date.now().toString(36)}` }))

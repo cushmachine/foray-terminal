@@ -7,7 +7,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { describeCheckout, readServedClientBuild } from '../build.ts'
-import { connect, startTestServer, tmpDir, waitForType, wsUrl, type Msg } from './helpers.ts'
+import { connect, startTestServer, tmpDir, waitForType, wsUrl, type Msg, TEST_TOKEN } from './helpers.ts'
 
 test('client:hello is answered with server:hello carrying a server build', async () => {
   const { url, close } = await startTestServer()
@@ -67,7 +67,7 @@ test('readServedClientBuild reads the stamped id from dist/index.html, null when
 test('a message sent the instant the socket opens is still answered', async () => {
   const { url, close } = await startTestServer()
   try {
-    const ws = new WebSocket(wsUrl(url))
+    const ws = new WebSocket(wsUrl(url), { headers: { authorization: `Bearer ${TEST_TOKEN}` } } as unknown as string[])
     const types: string[] = []
     const hello = new Promise<Msg>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error(`no server:hello; got ${types.join(',') || 'nothing'}`)), 5000)

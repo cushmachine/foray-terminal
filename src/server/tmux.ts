@@ -9,6 +9,7 @@ import os from 'node:os'
 import { promisify } from 'node:util'
 import type { TmuxWindow } from '../shared/protocol.ts'
 import { ClientError } from './errors.ts'
+import { sessionEnv } from './env.ts'
 import type { PaneHistoryState } from './history.ts'
 
 const promisedExecFile = promisify(_execFile)
@@ -19,7 +20,9 @@ export type TmuxExecutor = (
   args: string[],
 ) => Promise<{ stdout: string; stderr: string }>
 
-const defaultExec: TmuxExecutor = (cmd, args) => promisedExecFile(cmd, args)
+// Scrubbed env: the first tmux call starts the tmux server, whose
+// environment every session inherits (env.ts).
+const defaultExec: TmuxExecutor = (cmd, args) => promisedExecFile(cmd, args, { env: sessionEnv(process.env) })
 
 const PREFIX = 'nest_'
 

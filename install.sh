@@ -54,6 +54,10 @@ if [ "$OS" = Darwin ]; then
 elif [ "$(id -u)" -ne 0 ]; then
   warn "Not running as root. Some steps may need sudo."
   SUDO="sudo"
+else
+  warn "Running as root: every Foray session will be a root shell. A dedicated"
+  warn "user is safer (see SECURITY.md); continuing in 5 seconds."
+  sleep 5
 fi
 
 # ---------- system deps ----------
@@ -229,11 +233,33 @@ PLIST
   fi
 fi
 
+# ---------- access token ----------
+
+# The server writes ~/.foray/token on its first start; give it a moment.
+TOKEN=""
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  TOKEN="$(bash scripts/token.sh 2>/dev/null || true)"
+  [ -n "$TOKEN" ] && break
+  sleep 1
+done
+
 # ---------- done ----------
 
 echo ""
 info "Done! Next steps:"
 echo ""
+if [ -n "$TOKEN" ] && [ -t 1 ]; then
+  echo "  Your access token (the browser asks for it once per device):"
+  echo ""
+  echo "       $TOKEN"
+  echo ""
+  echo "     Print it again any time with: npm run token"
+  echo ""
+else
+  echo "  The access token is written to ~/.foray/token on the server's first"
+  echo "  start; print it with: npm run token"
+  echo ""
+fi
 if [ "$OS" = Darwin ]; then
   MAC_NAME="$(scutil --get LocalHostName 2>/dev/null | tr 'A-Z' 'a-z' || hostname)"
   echo "  1. Install Tailscale from the App Store or https://tailscale.com/download"
@@ -259,11 +285,11 @@ else
   echo "  1. Install Tailscale (if not already):"
   echo "       curl -fsSL https://tailscale.com/install.sh | sh && tailscale up"
   echo ""
-  echo "  2. Open Foray from any device on your tailnet:"
-  echo "       http://$(hostname):${NEST_PORT}"
-  echo ""
-  echo "  3. Or expose via Tailscale HTTPS:"
+  echo "  2. Expose Foray over Tailscale HTTPS (recommended; see SECURITY.md):"
   echo "       tailscale serve --bg ${NEST_PORT}"
   echo "       Then open https://$(hostname).<your-tailnet>.ts.net"
+  echo ""
+  echo "  3. Or open it over plain http from any device on your tailnet:"
+  echo "       http://$(hostname):${NEST_PORT}"
   echo ""
 fi
