@@ -22,15 +22,15 @@
 #   cd ~/foray && bash install.sh
 #
 # Environment variables:
-#   NEST_DIR   — where to install (default: ~/foray)
-#   NEST_SKIP_SERVICE — set to 1 to skip pm2 and the boot service (for Docker)
+#   FORAY_DIR   — where to install (default: ~/foray)
+#   FORAY_SKIP_SERVICE — set to 1 to skip pm2 and the boot service (for Docker)
 #
 # The port is 3000, set in ecosystem.config.cjs.
 
 set -euo pipefail
 
-NEST_DIR="${NEST_DIR:-$HOME/foray}"
-NEST_PORT=3000
+FORAY_DIR="${FORAY_DIR:-$HOME/foray}"
+FORAY_PORT=3000
 NODE_MAJOR="24"
 
 info()  { printf '\033[1;32m→\033[0m %s\n' "$*"; }
@@ -104,18 +104,18 @@ fi
 
 # ---------- clone or detect repo ----------
 
-if [ -f "$NEST_DIR/package.json" ]; then
-  info "Using existing checkout at $NEST_DIR."
+if [ -f "$FORAY_DIR/package.json" ]; then
+  info "Using existing checkout at $FORAY_DIR."
 else
-  info "Cloning Foray into $NEST_DIR..."
-  if ! git clone https://github.com/cushmachine/foray-terminal.git "$NEST_DIR" 2>/dev/null; then
+  info "Cloning Foray into $FORAY_DIR..."
+  if ! git clone https://github.com/cushmachine/foray-terminal.git "$FORAY_DIR" 2>/dev/null; then
     die "Clone failed. If the repo is private, clone it manually first:" \
-        "  git clone https://github.com/cushmachine/foray-terminal.git $NEST_DIR" \
-        "  cd $NEST_DIR && bash install.sh"
+        "  git clone https://github.com/cushmachine/foray-terminal.git $FORAY_DIR" \
+        "  cd $FORAY_DIR && bash install.sh"
   fi
 fi
 
-cd "$NEST_DIR"
+cd "$FORAY_DIR"
 
 # ---------- npm install ----------
 
@@ -166,8 +166,8 @@ fi
 
 # ---------- pm2 + boot service ----------
 
-if [ "${NEST_SKIP_SERVICE:-0}" = "1" ]; then
-  info "Skipping pm2 and the boot service (NEST_SKIP_SERVICE=1)."
+if [ "${FORAY_SKIP_SERVICE:-0}" = "1" ]; then
+  info "Skipping pm2 and the boot service (FORAY_SKIP_SERVICE=1)."
   info "Start Foray yourself with: npm run deploy"
 else
   if ! command -v pm2 >/dev/null 2>&1; then
@@ -227,7 +227,7 @@ PLIST
   pm2 save >/dev/null
 
   if pm2 pid nest 2>/dev/null | grep -q '[1-9]'; then
-    info "Foray is running on port $NEST_PORT."
+    info "Foray is running on port $FORAY_PORT."
   else
     warn "Foray did not start. Check: pm2 logs nest"
   fi
@@ -267,11 +267,11 @@ if [ "$OS" = Darwin ]; then
   echo "       alias tailscale=/Applications/Tailscale.app/Contents/MacOS/Tailscale"
   echo ""
   echo "  2. Open Foray from any device on your tailnet:"
-  echo "       http://${MAC_NAME}:${NEST_PORT}"
+  echo "       http://${MAC_NAME}:${FORAY_PORT}"
   echo ""
   echo "  3. Or expose via Tailscale HTTPS (needed to install Foray as a"
   echo "     home-screen app on iPhone):"
-  echo "       tailscale serve --bg ${NEST_PORT}"
+  echo "       tailscale serve --bg ${FORAY_PORT}"
   echo "       Then open https://${MAC_NAME}.<your-tailnet>.ts.net"
   echo ""
   echo "  4. Keep the Mac awake and logged in, or sessions vanish with it:"
@@ -286,10 +286,10 @@ else
   echo "       curl -fsSL https://tailscale.com/install.sh | sh && tailscale up"
   echo ""
   echo "  2. Expose Foray over Tailscale HTTPS (recommended; see SECURITY.md):"
-  echo "       tailscale serve --bg ${NEST_PORT}"
+  echo "       tailscale serve --bg ${FORAY_PORT}"
   echo "       Then open https://$(hostname).<your-tailnet>.ts.net"
   echo ""
   echo "  3. Or open it over plain http from any device on your tailnet:"
-  echo "       http://$(hostname):${NEST_PORT}"
+  echo "       http://$(hostname):${FORAY_PORT}"
   echo ""
 fi

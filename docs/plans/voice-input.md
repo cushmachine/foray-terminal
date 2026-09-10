@@ -58,7 +58,7 @@ Written 2026-09-09. No code yet. Supersedes the earlier draft in this file.
 ## Server
 
 ### Config file — `src/server/config.ts` (new)
-- Path: `$NEST_CONFIG_DIR/config.json`, default `~/.nest/config.json`.
+- Path: `$FORAY_CONFIG_DIR/config.json`, default `~/.nest/config.json`.
   Written atomically (tmp + rename), mode 0600, dir 0700.
   Coordinate the location with the Mac-install session (nest-f2) before
   committing to it; DEPLOY.md should name it once.

@@ -164,12 +164,12 @@ test('a missing data dir scans and lives as empty', async () => {
 // Registry
 // ---------------------------------------------------------------------------
 
-test('providersFromEnv offers the agents whose data dir exists, or exactly NEST_AGENTS', () => {
+test('providersFromEnv offers the agents whose data dir exists, or exactly FORAY_AGENTS', () => {
   assert.deepEqual(providersFromEnv({}, '/home/u', () => false).map((p) => p.id), [])
   assert.deepEqual(providersFromEnv({}, '/home/u', (d) => d === '/home/u/.claude').map((p) => p.id), ['claude'])
-  assert.deepEqual(providersFromEnv({ NEST_AGENTS: 'claude' }, '/home/u', () => false).map((p) => p.id), ['claude'])
-  assert.throws(() => providersFromEnv({ NEST_AGENTS: 'claude,mystery' }, '/home/u', () => false), /unknown agent "mystery"/)
-  assert.deepEqual(argsFromEnv({ NEST_CLAUDE_ARGS: '  --model  x ' }, 'claude'), ['--model', 'x'])
+  assert.deepEqual(providersFromEnv({ FORAY_AGENTS: 'claude' }, '/home/u', () => false).map((p) => p.id), ['claude'])
+  assert.throws(() => providersFromEnv({ FORAY_AGENTS: 'claude,mystery' }, '/home/u', () => false), /unknown agent "mystery"/)
+  assert.deepEqual(argsFromEnv({ FORAY_CLAUDE_ARGS: '  --model  x ' }, 'claude'), ['--model', 'x'])
   assert.deepEqual(argsFromEnv({}, 'claude'), [])
 })
 

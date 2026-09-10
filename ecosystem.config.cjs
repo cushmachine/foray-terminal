@@ -18,9 +18,9 @@ module.exports = {
       // HOST: '127.0.0.1',
       // Extra args for the agent's resume command when reviving a past
       // session from the sidebar (src/server/agents), e.g. '--model x'.
-      // One variable per agent: NEST_<AGENT ID, uppercased>_ARGS. pm2 does
+      // One variable per agent: FORAY_<AGENT ID, uppercased>_ARGS. pm2 does
       // not load your shell profile, so set them here, not in ~/.bashrc.
-      NEST_CLAUDE_ARGS: '',
+      FORAY_CLAUDE_ARGS: '',
     },
     watch: false,
     max_memory_restart: '200M',

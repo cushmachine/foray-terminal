@@ -1,9 +1,9 @@
 // Which agents this Foray knows about, from the environment.
 //
-// By default every agent whose data directory exists is offered. NEST_AGENTS
+// By default every agent whose data directory exists is offered. FORAY_AGENTS
 // (comma-separated provider ids) narrows or forces the list; an unknown id
 // there is a configuration error and fails loudly at startup. Each provider
-// takes extra launch arguments from NEST_<ID>_ARGS, split on whitespace, so
+// takes extra launch arguments from FORAY_<ID>_ARGS, split on whitespace, so
 // nothing here or in a provider hardcodes a model or a flag.
 
 import fs from 'node:fs'
@@ -27,14 +27,14 @@ const REGISTRY: Registration[] = [
   },
 ]
 
-/** Extra launch arguments for a provider, from NEST_<ID>_ARGS. */
+/** Extra launch arguments for a provider, from FORAY_<ID>_ARGS. */
 export function argsFromEnv(env: NodeJS.ProcessEnv, id: string): string[] {
-  const raw = env[`NEST_${id.toUpperCase()}_ARGS`] ?? ''
+  const raw = env[`FORAY_${id.toUpperCase()}_ARGS`] ?? ''
   return raw.split(/\s+/).filter(Boolean)
 }
 
 /**
- * The providers to offer. With NEST_AGENTS unset, those whose data
+ * The providers to offer. With FORAY_AGENTS unset, those whose data
  * directory exists; with it set, exactly the ids it names. `exists` is
  * injectable so a test can stand in for the filesystem.
  */
@@ -43,11 +43,11 @@ export function providersFromEnv(
   home: string = os.homedir(),
   exists: (dir: string) => boolean = (dir) => fs.existsSync(dir),
 ): AgentProvider[] {
-  const wanted = env.NEST_AGENTS?.split(',').map((s) => s.trim()).filter(Boolean)
+  const wanted = env.FORAY_AGENTS?.split(',').map((s) => s.trim()).filter(Boolean)
   const chosen = wanted
     ? wanted.map((id) => {
         const found = REGISTRY.find((r) => r.id === id)
-        if (!found) throw new Error(`NEST_AGENTS names unknown agent "${id}" (known: ${REGISTRY.map((r) => r.id).join(', ')})`)
+        if (!found) throw new Error(`FORAY_AGENTS names unknown agent "${id}" (known: ${REGISTRY.map((r) => r.id).join(', ')})`)
         return found
       })
     : REGISTRY.filter((r) => exists(r.dir(home)))
