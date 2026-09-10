@@ -21,7 +21,9 @@ upgrade. Tests get a token from `startTestServer` and present it through
 `connect()`; the Playwright suite starts logged in via a cookie in its
 storage state. Keep new routes behind `requireAuth`, new message fields
 under a size cap in `SHAPES`, and read SECURITY.md before changing any of
-it.
+it. If the user is locked out of Foray (lost token, logged out
+everywhere), walk them through RECOVERY.md: it is written to be followed
+from a laptop with SSH to the server.
 
 ## Build & check
 
