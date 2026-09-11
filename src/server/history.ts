@@ -72,10 +72,17 @@ export interface Alignment {
 /**
  * Lines in `captured` (a fresh tail of the history) that come after the
  * last lines already sent. Matches the longest run of `sentTail`'s end
- * found in `captured`, searching from the newest end; a tail too short to
- * give `minOverlap` lines is searched from the oldest end instead. Returns
- * null when they don't overlap at all, meaning the client is too far
- * behind to append and must reset.
+ * found in `captured`. Returns null when they don't overlap at all,
+ * meaning the client is too far behind to append and must reset.
+ *
+ * The match has to be the only one: terminals repeat themselves (blank
+ * lines, a prompt, a progress line, anything a loop prints), and a run
+ * that occurs twice in the capture gives no way to tell which occurrence
+ * is where the client actually stands. Picking one loses every line
+ * between them if it guesses too new, and sends the lines twice if it
+ * guesses too old. So an ambiguous capture returns null as well, and the
+ * caller sends the history again instead of appending to it: a resend
+ * costs bandwidth, a wrong guess costs the reader lines they never see.
  *
  * History rows never change once written, with one exception: a line
  * still being wrapped onto the visible screen is captured as its history
@@ -94,34 +101,35 @@ export function alignHistory(
   const minRun = Math.min(minOverlap, sentTail.length)
   const last = sentTail[sentTail.length - 1]
   const extends_ = (line: string): boolean => last !== '' && line.length > last.length && line.startsWith(last)
-  // A tail shorter than the overlap it would want is the whole history as
-  // it was, so it sits at the oldest end of the capture: a blank line or a
-  // prompt that recurs nearer the new end is a later line, not the tail.
-  const oldestFirst = sentTail.length < minOverlap
   for (let run = maxRun; run >= minRun; run--) {
     const block = sentTail.slice(sentTail.length - run)
     const lastStart = captured.length - run
+    // Every place this run could sit, not the first: two of them and the
+    // capture cannot say where the client stands.
+    let at = -1
     for (let i = 0; i <= lastStart; i++) {
-      const at = oldestFirst ? i : lastStart - i
       let matches = true
       for (let j = 0; j < run - 1; j++) {
-        if (captured[at + j] !== block[j]) {
+        if (captured[i + j] !== block[j]) {
           matches = false
           break
         }
       }
       if (!matches) continue
-      const end = at + run - 1
-      const grown = captured[end]
-      if (grown === last) {
-        return { fresh: captured.slice(end + 1), tail: sentTail.concat(captured.slice(end + 1)) }
-      }
-      if (extends_(grown)) {
-        return {
-          fresh: [grown.slice(last.length), ...captured.slice(end + 1)],
-          tail: sentTail.slice(0, -1).concat(captured.slice(end)),
-        }
-      }
+      const grown = captured[i + run - 1]
+      if (grown !== last && !extends_(grown)) continue
+      if (at >= 0) return null
+      at = i
+    }
+    if (at < 0) continue
+    const end = at + run - 1
+    const grown = captured[end]
+    if (grown === last) {
+      return { fresh: captured.slice(end + 1), tail: sentTail.concat(captured.slice(end + 1)) }
+    }
+    return {
+      fresh: [grown.slice(last.length), ...captured.slice(end + 1)],
+      tail: sentTail.slice(0, -1).concat(captured.slice(end)),
     }
   }
   return null

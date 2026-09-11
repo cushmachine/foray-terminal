@@ -120,20 +120,32 @@ test('alignHistory needs more than a one-line overlap when it has more to compar
   assert.deepEqual(fresh(['a'], ['a', 'b']), ['b'])
 })
 
-test('alignHistory matches a short sent tail at its oldest occurrence', () => {
-  // A tail shorter than the overlap it would want is the whole history as
-  // it was, so it sits at the front of the capture. Matching the newest
-  // repeat of a blank line or a prompt instead drops everything between
-  // and leaves the tail as it was, so the next capture drops lines again.
-  const aligned = alignHistory([''], ['', 'line 1', 'line 2', 'line 3', ''])
-  assert.deepEqual(aligned?.fresh, ['line 1', 'line 2', 'line 3', ''])
-  assert.deepEqual(aligned?.tail, ['', 'line 1', 'line 2', 'line 3', ''], 'the tail moves on')
-  assert.deepEqual(
+test('alignHistory refuses a capture that holds the sent tail twice', () => {
+  // Terminals repeat themselves, and a run that occurs twice says nothing
+  // about where the client stands. Taking the newer occurrence drops every
+  // line between the two for good; taking the older one sends lines the
+  // client already has. Neither is a guess worth making: null, and the
+  // caller sends the history again.
+  assert.equal(fresh([''], ['', 'line 1', 'line 2', 'line 3', '']), null)
+  assert.equal(
     fresh(['$ ls', 'a.txt'], ['$ ls', 'a.txt', 'b.txt', '$ ls', 'a.txt', 'c.txt']),
-    ['b.txt', '$ ls', 'a.txt', 'c.txt'],
+    null,
   )
-  // The short tail may still be growing.
-  assert.deepEqual(fresh(['xxxx'], ['xxxxyy', 'c', 'xxxx']), ['yy', 'c', 'xxxx'])
+  // Ambiguous because the tail matches once as it was and once grown.
+  assert.equal(fresh(['xxxx'], ['xxxxyy', 'c', 'xxxx']), null)
+  // Two lines that pin the tail down are enough to keep appending.
+  assert.deepEqual(fresh(['a', ''], ['a', '', 'line 1', '']), ['line 1', ''])
+  // The run repeating outside the window it could match in is no problem:
+  // only whole placements of the run count.
+  assert.deepEqual(fresh(['p', 'q'], ['q', 'p', 'q', 'r']), ['r'])
+})
+
+test('alignHistory keeps the lines between two repeats of a short tail', () => {
+  // The bug this guards: with ['a','b','c'] sent and the capture holding
+  // that run twice, matching the newer one reported only 'z' as new and
+  // marked the rest delivered. Those two lines were then never sent again.
+  const captured = ['a', 'b', 'c', 'ROW-06', 'ROW-07', 'a', 'b', 'c', 'z']
+  assert.equal(alignHistory(['a', 'b', 'c'], captured), null)
 })
 
 test('alignHistory lets the last sent line grow: a wrapped line still scrolling into history', () => {

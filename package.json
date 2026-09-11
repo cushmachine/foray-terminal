@@ -50,6 +50,7 @@
     "test": "npx tsx --test src/__tests__/*.test.ts src/server/__tests__/*.test.ts",
     "test:e2e": "FORAY_TMUX_SOCKET=foray-test npx tsx src/e2e/e2e.test.ts",
     "test:keys": "FORAY_TMUX_SOCKET=foray-test npx tsx src/e2e/keys.e2e.test.ts",
+    "test:history": "FORAY_TMUX_SOCKET=foray-test npx tsx src/e2e/history.e2e.test.ts",
     "test:visual": "playwright test"
   },
   "dependencies": {

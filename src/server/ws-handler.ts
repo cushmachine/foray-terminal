@@ -335,8 +335,18 @@ export function handleConnection(ws: WebSocket, deps: ConnectionDeps): Connectio
         if (reset) tracker.resetNext = true
         return
       }
+      // The size was read a tmux call ago and the pane keeps printing, so
+      // the history is at least this long by the time a capture runs and
+      // may be much longer. Asking for more rows than it holds is free —
+      // tmux starts at the oldest row it has — while capping the ask at
+      // the size we read hands back a window that starts *after* the
+      // client's last line, and its lines are then lost for good. The one
+      // size that must be honoured is zero: with no history at all,
+      // capture-pane answers with the top row of the visible screen.
+      const capture = (rows: number): Promise<string[]> =>
+        state.size === 0 ? Promise.resolve([]) : captureHistoryLines(windowId, rows, tmuxExec)
       if (plan.kind === 'sync') {
-        const captured = await captureHistoryLines(windowId, Math.min(state.size, plan.count + HISTORY_TAIL), tmuxExec)
+        const captured = await capture(plan.count + HISTORY_TAIL)
         if (stale()) return
         const aligned = alignHistory(tracker.sentTail, captured)
         if (aligned !== null) {
@@ -347,12 +357,13 @@ export function handleConnection(ws: WebSocket, deps: ConnectionDeps): Connectio
           tracker.known = state.size
           return
         }
-        // No overlap with what was sent: the client is too far behind to
-        // append, so fall through and start it over.
+        // No overlap with what was sent, or no way to tell where it sits:
+        // the client cannot be appended to, so fall through and start it over.
       }
-      // Only the tail the client will keep. `known` still records the full
-      // size so later syncs append from the right place.
-      const lines = await captureHistoryLines(windowId, Math.min(state.size, MAX_HISTORY_LINES), tmuxExec)
+      // Only the tail the client will keep. `known` still records the size
+      // as it was read: it can only lag what the capture actually holds,
+      // and a later sync that re-sends a line beats one that skips it.
+      const lines = await capture(MAX_HISTORY_LINES)
       if (stale()) return
       tracker.sentTail = nextTail(lines, HISTORY_TAIL)
       tracker.known = state.size
