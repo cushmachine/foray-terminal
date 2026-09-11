@@ -277,6 +277,33 @@ test('applyTmuxServerOptions re-asserts mouse and history-limit when a lost race
   assert.equal(tmux.serverOptions.get('history-limit'), '10000')
 })
 
+test('applyTmuxServerOptions leaves mouse/history-limit alone on the machine\'s default socket', async () => {
+  // FORAY_TMUX_SOCKET='' (tmuxSocketArgs() === []) means the server reached
+  // is the machine's own default tmux, running the user's ~/.tmux.conf, not
+  // one Foray owns. The mouse/history-limit belt exists only for the
+  // macOS-start race on Foray's *own* server; on someone else's server it
+  // must not silently overwrite settings the user chose for themselves.
+  const prevSocket = process.env.FORAY_TMUX_SOCKET
+  process.env.FORAY_TMUX_SOCKET = ''
+  try {
+    const tmux = fakeTmux()
+    // The user has their own settings; if applyTmuxServerOptions read or
+    // wrote these, it would show up in tmux.calls below.
+    tmux.serverOptions.set('mouse', 'on')
+    tmux.serverOptions.set('history-limit', '50000')
+    assert.equal(await applyTmuxServerOptions(tmux.exec), true)
+    assert.deepEqual(tmux.calls, [
+      ['set', '-s', 'extended-keys', 'always'],
+      ['set', '-s', 'extended-keys-format', 'csi-u'],
+    ], 'must not read or write mouse/history-limit on a server Foray does not own')
+    assert.equal(tmux.serverOptions.get('mouse'), 'on', 'the user\'s own mouse setting must survive')
+    assert.equal(tmux.serverOptions.get('history-limit'), '50000', 'the user\'s own history-limit must survive')
+  } finally {
+    if (prevSocket === undefined) delete process.env.FORAY_TMUX_SOCKET
+    else process.env.FORAY_TMUX_SOCKET = prevSocket
+  }
+})
+
 // scripts/foray.tmux.conf (S4) ships the same extended-keys values this
 // function re-asserts, so the two copies cannot drift silently. Skipped,
 // not invented, until that file exists.

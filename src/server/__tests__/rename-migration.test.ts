@@ -6,7 +6,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createWindow, listWindows, SEP, tmuxSocketArgs, type TmuxExecutor } from '../tmux.ts'
 import { fakeTmux } from './helpers.ts'
-import { LAST_SESSION_KEY, draftKeyFor, storageGet } from '../../storage.ts'
+import { LAST_SESSION_KEY, draftKeyFor, storageGet, storageRemove } from '../../storage.ts'
 
 /** One FORMAT line: id, name, cwd, then empty title/named so only the fields under test matter. */
 function line(id: number, name: string, cwd: string): string {
@@ -163,4 +163,18 @@ test('storageGet falls back once for a per-session draft key too', () => {
   const key = 'foray:draft:7'
   assert.equal(storageGet(key), 'unsent text', 'should fall back to the legacy draft value')
   assert.equal(store.getItem(key), 'unsent text', 'should rewrite the draft under the new key')
+})
+
+test('storageRemove deletes the legacy nest: twin too, not just the foray: key', () => {
+  const store = installFakeLocalStorage()
+  // A pre-rename draft that was never read (so storageGet never migrated
+  // it) still sits under the legacy key when the user sends the message
+  // and Composer clears the draft. If storageRemove only deletes the new
+  // key, the old text is untouched and storageGet's fallback resurrects it
+  // the next time this session's composer mounts.
+  store.setItem('nest:draft:5', 'rm -rf /')
+  const key = 'foray:draft:5'
+  storageRemove(key)
+  assert.equal(store.getItem('nest:draft:5'), null, 'the legacy key must be removed too')
+  assert.equal(storageGet(key), null, 'no fallback value should resurrect after a remove')
 })

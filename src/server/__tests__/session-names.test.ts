@@ -91,3 +91,22 @@ test('unmarkNamed clears both the current and the pre-rename stamp', async () =>
     ['set', '-u', '-t', '$0', '@nest_named'],
   ])
 })
+
+test('unmarkNamed swallows a failing set -u instead of throwing', async () => {
+  // session:revive calls unmarkNamed between createWindow and runInWindow;
+  // an unguarded throw here (e.g. the session vanished a beat after it was
+  // created) would abort before the resume command is ever typed, leaving
+  // an empty session behind. createWindow's own `set` calls are already
+  // wrapped in .catch(() => {}); unmarkNamed's two must be too.
+  const calls: string[][] = []
+  const failing = async (_cmd: string, args: string[]) => {
+    calls.push(args)
+    if (args[0] === 'set') throw Object.assign(new Error('lost server'), { stderr: 'lost server' })
+    return { stdout: '', stderr: '' }
+  }
+  await assert.doesNotReject(() => unmarkNamed(7, failing))
+  assert.deepEqual(calls, [
+    ['set', '-u', '-t', '$7', '@foray_named'],
+    ['set', '-u', '-t', '$7', '@nest_named'],
+  ], 'both unset attempts should still run even though the first failed')
+})

@@ -52,6 +52,12 @@ export function storageSet(key: string, value: string): void {
 export function storageRemove(key: string): void {
   try {
     window.localStorage.removeItem(key)
+    // storageGet falls back to the legacy twin and only migrates it on a
+    // read; a key that was written before the rename but never read (a
+    // draft that went straight from typed to sent, say) still has that
+    // twin sitting under the old prefix. Leaving it there would let the
+    // next storageGet resurrect what this remove was meant to clear.
+    if (key.startsWith(PREFIX)) window.localStorage.removeItem(LEGACY_PREFIX + key.slice(PREFIX.length))
   } catch {
     // Already as good as gone.
   }

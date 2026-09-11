@@ -345,16 +345,26 @@ async function serverOption(exec: TmuxExecutor, option: string): Promise<string 
  * Returns false when tmux did not take the extended-keys settings, most
  * often because its server was not running: the caller tries again once
  * it is.
+ *
+ * The mouse/history-limit belt only applies on Foray's own socket
+ * (tmuxSocketArgs() non-empty). With FORAY_TMUX_SOCKET='' the server
+ * reached is the machine's default one — someone's own tmux, running
+ * their own ~/.tmux.conf — and re-asserting these there would silently
+ * override settings the user chose for themselves. extended-keys is
+ * still set either way: Foray's panes need CSI u regardless of whose
+ * server they run on.
  */
 export async function applyTmuxServerOptions(exec: TmuxExecutor = defaultExec): Promise<boolean> {
   try {
     await exec('tmux', ['set', '-s', 'extended-keys', 'always'])
     await exec('tmux', ['set', '-s', 'extended-keys-format', 'csi-u'])
-    if ((await serverOption(exec, 'mouse')) !== MOUSE) {
-      await exec('tmux', ['set', '-g', 'mouse', MOUSE])
-    }
-    if ((await serverOption(exec, 'history-limit')) !== HISTORY_LIMIT) {
-      await exec('tmux', ['set', '-g', 'history-limit', HISTORY_LIMIT])
+    if (tmuxSocketArgs().length > 0) {
+      if ((await serverOption(exec, 'mouse')) !== MOUSE) {
+        await exec('tmux', ['set', '-g', 'mouse', MOUSE])
+      }
+      if ((await serverOption(exec, 'history-limit')) !== HISTORY_LIMIT) {
+        await exec('tmux', ['set', '-g', 'history-limit', HISTORY_LIMIT])
+      }
     }
     return true
   } catch {
@@ -432,11 +442,15 @@ export async function killWindow(
  * name Foray chose, not the user.
  */
 export async function unmarkNamed(sessionId: number, exec: TmuxExecutor = defaultExec): Promise<void> {
-  await exec('tmux', ['set', '-u', '-t', `$${sessionId}`, NAMED_OPTION])
+  // On session:revive this runs between createWindow and runInWindow, both
+  // of which matter more than this cosmetic stamp: like createWindow's own
+  // `set` calls, a failure here (the session already gone, say) must not
+  // abort the revive and leave the resume command untyped.
+  await exec('tmux', ['set', '-u', '-t', `$${sessionId}`, NAMED_OPTION]).catch(() => {})
   // A session named before the rename carries the old stamp, and FORMAT
   // falls back to it, so clearing only the new one would leave the session
   // still reading as named. Unsetting an absent option is not an error.
-  await exec('tmux', ['set', '-u', '-t', `$${sessionId}`, LEGACY_NAMED_OPTION])
+  await exec('tmux', ['set', '-u', '-t', `$${sessionId}`, LEGACY_NAMED_OPTION]).catch(() => {})
 }
 
 /**

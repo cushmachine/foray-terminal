@@ -29,6 +29,7 @@
     "!src/e2e",
     "scripts",
     "install.sh",
+    "ecosystem.config.cjs",
     "index.html",
     "public",
     "tsconfig.json",
@@ -44,8 +45,8 @@
     "deploy": "bash scripts/deploy.sh",
     "token": "bash scripts/token.sh",
     "test": "npx tsx --test src/__tests__/*.test.ts src/server/__tests__/*.test.ts",
-    "test:e2e": "npx tsx src/e2e/e2e.test.ts",
-    "test:keys": "npx tsx src/e2e/keys.e2e.test.ts",
+    "test:e2e": "FORAY_TMUX_SOCKET=foray-test npx tsx src/e2e/e2e.test.ts",
+    "test:keys": "FORAY_TMUX_SOCKET=foray-test npx tsx src/e2e/keys.e2e.test.ts",
     "test:visual": "playwright test"
   },
   "dependencies": {
