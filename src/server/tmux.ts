@@ -385,18 +385,19 @@ export async function paneHistoryState(
   let stdout: string
   try {
     ;({ stdout } = await exec('tmux', [
-      'display-message', '-p', '-t', `$${sessionId}`, '-F', '#{history_size} #{history_limit} #{alternate_on}',
+      'display-message', '-p', '-t', `$${sessionId}`, '-F', '#{history_size} #{history_limit} #{alternate_on} #{pane_width}',
     ]))
   } catch (err) {
     // Killed since it was listed, by another client or from inside tmux.
     if (isMissingTarget(err)) throw new ClientError('Session not found')
     throw err
   }
-  const [size = '0', limit = '0', alternate = '0'] = stdout.trim().split(/\s+/)
+  const [size = '0', limit = '0', alternate = '0', width = '0'] = stdout.trim().split(/\s+/)
   return {
     size: parseInt(size, 10) || 0,
     limit: parseInt(limit, 10) || 0,
     alternate: alternate === '1',
+    width: parseInt(width, 10) || 0,
   }
 }
 

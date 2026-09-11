@@ -173,6 +173,7 @@ export function Terminal({
       >
         <div
           ref={historyRef}
+          data-testid="terminal-history"
           style={{
             fontSize,
             lineHeight: 1.4,

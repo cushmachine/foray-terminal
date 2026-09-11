@@ -61,6 +61,8 @@ export interface FakeSession {
   /** Indexes of rows tmux soft-wrapped, so `capture-pane -J` joins each with the row after it. */
   wrapped: number[]
   alternate: boolean
+  /** The pane's width in cells: how long a wrapped row is. Rows in `history` should match. */
+  width: number
 }
 
 export interface FakeTmux {
@@ -97,6 +99,7 @@ export function fakeTmux(): FakeTmux {
     history: [],
     wrapped: [],
     alternate: false,
+    width: 20,
     ...overrides,
   })
 
@@ -171,7 +174,7 @@ export function fakeTmux(): FakeTmux {
       }
       case 'display-message': {
         const s = target(args)
-        return ok(`${s.history.length} 2000 ${s.alternate ? 1 : 0}\n`)
+        return ok(`${s.history.length} 2000 ${s.alternate ? 1 : 0} ${s.width}\n`)
       }
       case 'capture-pane': {
         const s = target(args)

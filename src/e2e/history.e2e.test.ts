@@ -101,3 +101,82 @@ tmuxIt('e2e: repeating output reaches the browser with no lines missing', async 
     await close()
   }
 })
+
+/**
+ * Resizing is the one mechanism present only where the bug shows up: the
+ * desktop resizes the pty with the window, phones keep a fixed size. Every
+ * width change makes tmux reflow its wrapped history, so the row count
+ * moves without a single new line being written, and every height change
+ * moves rows between the screen and the history. Both feed the matcher a
+ * capture that looks nothing like the last one while output keeps landing.
+ *
+ * The lines are numbered and wider than the narrowest pane, so a duplicate,
+ * a dropped line and a line spliced mid-word are all visible in the numbers.
+ */
+tmuxIt('e2e: resizing while output lands does not duplicate or lose lines', async () => {
+  const { url, close } = await startServer(0, { quiet: true, auth: { token: TEST_TOKEN } })
+  let windowId: number | null = null
+  try {
+    const { ws } = await connect(url)
+    try {
+      const createdPromise = waitForTypeOrError(ws, 'session:created')
+      ws.send(JSON.stringify({ type: 'session:create', name: `${SESSION}-resize` }))
+      windowId = (await createdPromise).window.id as number
+
+      const client: string[] = []
+      ws.addEventListener('message', (event: { data: unknown }) => {
+        const msg = JSON.parse(String(event.data))
+        if (msg.type !== 'terminal:history' || msg.windowId !== windowId) return
+        if (msg.reset) client.length = 0
+        client.push(...(msg.lines as string[]).map(plain))
+      })
+
+      ws.send(JSON.stringify({ type: 'terminal:attach', windowId, cols: 120, rows: 30 }))
+      await sleep(1500)
+      // 140 characters, so it wraps at every width below that and at none above.
+      ws.send(JSON.stringify({
+        type: 'terminal:input',
+        windowId,
+        data: 'for i in $(seq 1 120); do printf "L%04d %s\\n" "$i" "$(printf "x%.0s" $(seq 1 130))"; sleep 0.12; done\r',
+      }))
+
+      // Drag the window about while the lines land: wider, narrower, shorter, taller.
+      const sizes = [
+        { cols: 200, rows: 30 }, { cols: 70, rows: 30 }, { cols: 200, rows: 18 },
+        { cols: 90, rows: 44 }, { cols: 140, rows: 30 },
+      ]
+      for (const size of sizes) {
+        await sleep(1800)
+        ws.send(JSON.stringify({ type: 'terminal:resize', windowId, ...size }))
+      }
+
+      await sleep(120 * 120 + 3000)
+      ws.send(JSON.stringify({ type: 'terminal:input', windowId, data: 'printf "\\n%.0s" $(seq 1 50)\r' }))
+      await sleep(3000)
+
+      const numbers = (lines: readonly string[]): number[] =>
+        lines.flatMap((line) => {
+          const m = /^L(\d{4}) x+$/.exec(line.trimEnd())
+          return m ? [Number(m[1])] : []
+        })
+      const seen = numbers(client)
+      assert.ok(seen.length > 20, `the client saw ${seen.length} whole numbered lines, expected most of 120`)
+      const dupe = seen.findIndex((n, i) => i > 0 && n <= seen[i - 1])
+      assert.equal(dupe, -1, dupe < 0 ? '' :
+        `line ${dupe} goes backwards: ${JSON.stringify(seen.slice(Math.max(0, dupe - 2), dupe + 3))}`)
+      const missing = []
+      for (let n = seen[0]; n <= seen[seen.length - 1]; n++) if (!seen.includes(n)) missing.push(n)
+      assert.deepEqual(missing, [], `lines the client never got: ${missing.join(',')}`)
+      // Nothing spliced mid-word: every L-line is whole or absent, never a fragment.
+      const garbled = client.filter((line) => /L\d{4}/.test(line) && !/^L\d{4} x*$/.test(line.trimEnd()))
+      assert.deepEqual(garbled, [], `lines arrived spliced: ${JSON.stringify(garbled.slice(0, 3))}`)
+    } finally {
+      try { ws.close() } catch {}
+    }
+  } finally {
+    if (windowId !== null) {
+      try { tmuxSync(['kill-session', '-t', `$${windowId}`]) } catch {}
+    }
+    await close()
+  }
+})

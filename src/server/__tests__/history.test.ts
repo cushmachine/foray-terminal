@@ -19,7 +19,7 @@ import {
 
 /** A pane well below its limit, on the main screen, unless overridden. */
 function state(size: number, overrides: Partial<PaneHistoryState> = {}): PaneHistoryState {
-  return { size, limit: 2000, alternate: false, ...overrides }
+  return { size, limit: 2000, alternate: false, width: 80, ...overrides }
 }
 
 /** Lines l<from>..l<to>, oldest first. */
@@ -76,15 +76,17 @@ test('planHistoryUpdate syncs the delta when the history grew', () => {
 // alignHistory
 // ---------------------------------------------------------------------------
 
-/** The lines an alignment would send. */
-const fresh = (sent: string[], captured: string[]) => alignHistory(sent, captured)?.fresh ?? null
+/** The lines an alignment would send, against a four-cell-wide pane. */
+const ROW = 4
+const fresh = (sent: string[], captured: string[], width = ROW) =>
+  alignHistory(sent, captured, width)?.fresh ?? null
 
 test('alignHistory returns only the lines after what was already sent', () => {
   assert.deepEqual(fresh(lines(1, 5), lines(1, 7)), ['l6', 'l7'])
   // The capture need not start where the sent tail starts.
   assert.deepEqual(fresh(lines(1, 5), lines(3, 7)), ['l6', 'l7'])
   // The tail carries on from what was sent.
-  assert.deepEqual(alignHistory(lines(1, 5), lines(3, 7))?.tail, lines(1, 7))
+  assert.deepEqual(alignHistory(lines(1, 5), lines(3, 7), ROW)?.tail, lines(1, 7))
 })
 
 test('alignHistory returns [] when nothing new has arrived', () => {
@@ -145,17 +147,17 @@ test('alignHistory keeps the lines between two repeats of a short tail', () => {
   // that run twice, matching the newer one reported only 'z' as new and
   // marked the rest delivered. Those two lines were then never sent again.
   const captured = ['a', 'b', 'c', 'ROW-06', 'ROW-07', 'a', 'b', 'c', 'z']
-  assert.equal(alignHistory(['a', 'b', 'c'], captured), null)
+  assert.equal(alignHistory(['a', 'b', 'c'], captured, ROW), null)
 })
 
 test('alignHistory lets the last sent line grow: a wrapped line still scrolling into history', () => {
-  // The line was captured as far as it had got; now two more rows of it are in.
-  const aligned = alignHistory(['a', 'b', 'xxxx'], ['a', 'b', 'xxxxyyyyzz', 'c'])
-  assert.deepEqual(aligned?.fresh, ['yyyyzz', 'c'], 'only the new part goes to the client')
-  assert.deepEqual(aligned?.tail, ['a', 'b', 'xxxxyyyyzz', 'c'], 'the tail remembers the joined line')
+  // The line was captured as far as it had got; now another row of it is in.
+  const aligned = alignHistory(['a', 'b', 'xxxx'], ['a', 'b', 'xxxxyyyy', 'c'], ROW)
+  assert.deepEqual(aligned?.fresh, ['yyyy', 'c'], 'only the new part goes to the client')
+  assert.deepEqual(aligned?.tail, ['a', 'b', 'xxxxyyyy', 'c'], 'the tail remembers the joined line')
   // Growing again from that tail: the earlier rows are not repeated.
-  assert.deepEqual(fresh(['a', 'b', 'xxxxyyyyzz', 'c'], ['b', 'xxxxyyyyzz', 'c']), [])
-  assert.deepEqual(fresh(['a', 'b', 'xxxxyyyyzz'], ['a', 'b', 'xxxxyyyyzzw']), ['w'])
+  assert.deepEqual(fresh(['a', 'b', 'xxxxyyyy', 'c'], ['b', 'xxxxyyyy', 'c']), [])
+  assert.deepEqual(fresh(['a', 'b', 'xxxxyyyy'], ['a', 'b', 'xxxxyyyyzzzz']), ['zzzz'])
 })
 
 test('alignHistory does not let an empty or a shortened last line match by prefix', () => {
@@ -163,6 +165,15 @@ test('alignHistory does not let an empty or a shortened last line match by prefi
   assert.equal(fresh(['a', 'b', ''], ['a', 'b', 'c']), null)
   // A line that came back shorter is on the screen again: nothing to append to.
   assert.equal(fresh(['a', 'b', 'xxxxyyyy'], ['a', 'b', 'xxxx']), null)
+  // Only a line tmux cut at the end of a row can still be growing. This one
+  // ends mid-row, so it was whole: a longer line starting the same way is a
+  // different line, and slicing it at the anchor's length would have sent
+  // the reader a fragment of it spliced mid-word.
+  assert.equal(fresh(['a', 'b', 'xxxxy'], ['a', 'b', 'xxxxyyyy']), null)
+  // The same capture, against a pane whose rows really do end there.
+  assert.deepEqual(fresh(['a', 'b', 'xxxxy'], ['a', 'b', 'xxxxyyyy'], 5), ['yyy'])
+  // An unknown width rules the case out rather than guessing.
+  assert.equal(fresh(['a', 'b', 'xxxx'], ['a', 'b', 'xxxxyyyy'], 0), null)
   // Only the last line may grow.
   assert.equal(fresh(['a', 'xxxx', 'c'], ['a', 'xxxxyy', 'c']), null)
 })

@@ -348,7 +348,7 @@ export function handleConnection(ws: WebSocket, deps: ConnectionDeps): Connectio
       if (plan.kind === 'sync') {
         const captured = await capture(plan.count + HISTORY_TAIL)
         if (stale()) return
-        const aligned = alignHistory(tracker.sentTail, captured)
+        const aligned = alignHistory(tracker.sentTail, captured, state.width)
         if (aligned !== null) {
           tracker.sentTail = nextTail(aligned.tail, HISTORY_TAIL)
           if (aligned.fresh.length > 0) {

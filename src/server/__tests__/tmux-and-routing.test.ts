@@ -362,23 +362,25 @@ test('the server sets extended keys once tmux is listed, and again after tmux re
 // comes from tmux history; history.ts decides what to do with these)
 // ---------------------------------------------------------------------------
 
-test('paneHistoryState parses size, limit and the alternate-screen flag', async () => {
+test('paneHistoryState parses size, limit, the alternate-screen flag and the width', async () => {
   const calls: string[][] = []
   const mockExec: TmuxExecutor = async (_cmd, args) => {
     calls.push(args)
-    return { stdout: '120 2000 0\n', stderr: '' }
+    return { stdout: '120 2000 0 96\n', stderr: '' }
   }
 
-  assert.deepEqual(await paneHistoryState(7, mockExec), { size: 120, limit: 2000, alternate: false })
+  // The width is how long a full history row is: history.ts needs it to tell
+  // a line tmux cut at a row boundary from one that simply ends there.
+  assert.deepEqual(await paneHistoryState(7, mockExec), { size: 120, limit: 2000, alternate: false, width: 96 })
   assert.equal(calls.length, 1)
   assert.equal(calls[0][0], 'display-message')
   assert.ok(calls[0].includes('$7'))
-  assert.equal(calls[0][calls[0].indexOf('-F') + 1], '#{history_size} #{history_limit} #{alternate_on}')
+  assert.equal(calls[0][calls[0].indexOf('-F') + 1], '#{history_size} #{history_limit} #{alternate_on} #{pane_width}')
 })
 
 test('paneHistoryState reports the alternate screen', async () => {
-  const state = await paneHistoryState(7, execReturning('5 2000 1\n'))
-  assert.deepEqual(state, { size: 5, limit: 2000, alternate: true })
+  const state = await paneHistoryState(7, execReturning('5 2000 1 96\n'))
+  assert.deepEqual(state, { size: 5, limit: 2000, alternate: true, width: 96 })
 })
 
 test('captureHistoryLines asks for the last N history rows and splits them', async () => {

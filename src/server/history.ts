@@ -17,6 +17,8 @@
 export interface PaneHistoryState {
   /** Rows currently in the pane's history (above the visible screen). */
   size: number
+  /** The pane's width in cells: how long a full history row is. */
+  width: number
   /** history-limit for the pane: history stops growing here and rotates. */
   limit: number
   /** True while a full-screen app has the alternate screen; history is frozen. */
@@ -90,17 +92,31 @@ export interface Alignment {
  * captured line that extends it, and the extension is sent as a line of
  * its own: it starts at column zero on the pane, where tmux's wrap put it.
  * The remembered tail takes the joined line, so the next capture matches.
+ *
+ * That exception is where a wrong match hurts most: the extension is cut
+ * at the anchor's length, so accepting some unrelated line that merely
+ * starts the same way emits a fragment of it, spliced mid-word. Only a
+ * line tmux cut at a row boundary can have grown, so the anchor's length
+ * must be a whole number of `paneWidth` rows. An anchor that fails the
+ * test is not treated as growing and the history is sent again, which
+ * costs a capture; accepting one that never grew costs the reader a line
+ * of nonsense. Pass 0 for an unknown width to rule the case out entirely.
  */
 export function alignHistory(
   sentTail: readonly string[],
   captured: readonly string[],
+  paneWidth: number,
   minOverlap: number = 3,
 ): Alignment | null {
   const maxRun = Math.min(sentTail.length, captured.length)
   if (maxRun === 0) return null
   const minRun = Math.min(minOverlap, sentTail.length)
   const last = sentTail[sentTail.length - 1]
-  const extends_ = (line: string): boolean => last !== '' && line.length > last.length && line.startsWith(last)
+  // Whole rows only: tmux breaks a wrapped line at the pane's width, so
+  // the part of it left in history is always a multiple of that.
+  const cutAtRowEnd = last !== '' && paneWidth > 0 && last.length % paneWidth === 0
+  const extends_ = (line: string): boolean =>
+    cutAtRowEnd && line.length > last.length && line.startsWith(last)
   for (let run = maxRun; run >= minRun; run--) {
     const block = sentTail.slice(sentTail.length - run)
     const lastStart = captured.length - run
