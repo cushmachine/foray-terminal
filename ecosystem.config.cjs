@@ -1,3 +1,15 @@
+const fs = require('fs')
+
+// A box that still has the pre-rename unit installed keeps Foray on the
+// machine's default tmux socket: its sessions live there, and sessions
+// cannot be moved between tmux servers, so switching would hide them and
+// start a second server with nothing holding it. Detected rather than
+// configured, because an owner who forgets should get the safe answer.
+// scripts/tmux-server.sh and scripts/ensure-tmux-unit.sh spell the same
+// rule — change all three together. Override in ecosystem.local.cjs.
+const LEGACY_UNIT = '/etc/systemd/system/nest-tmux.service'
+const defaultSocket = fs.existsSync(LEGACY_UNIT) ? '' : 'foray'
+
 module.exports = {
   apps: [{
     name: 'foray',
@@ -23,13 +35,10 @@ module.exports = {
       // One variable per agent: FORAY_<AGENT ID, uppercased>_ARGS. pm2 does
       // not load your shell profile, so set them here, not in ~/.bashrc.
       FORAY_CLAUDE_ARGS: '',
-      // Foray runs tmux on its own socket ('foray'), so it never adopts or
-      // touches a tmux server you already run. Leave this unset unless you
-      // have Foray sessions from before the socket existed: those live on
-      // the machine's default socket and cannot be moved between servers,
-      // so such a box sets FORAY_TMUX_SOCKET to '' until every one of them
-      // has been closed or resumed. Do that in ecosystem.local.cjs, below,
-      // not here — here it would follow every install.
+      // Foray runs tmux on its own socket, so it never adopts or touches a
+      // tmux server you already run. See defaultSocket above for the one
+      // exception, which is detected, not configured.
+      FORAY_TMUX_SOCKET: defaultSocket,
     },
     watch: false,
     max_memory_restart: '200M',

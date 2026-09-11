@@ -17,7 +17,18 @@
 
 set -u
 
-SOCKET="${FORAY_TMUX_SOCKET-foray}"
+# Default socket: "foray" normally, but the machine's default socket on a
+# box that still has the pre-rename unit installed. Its sessions live there
+# and cannot be moved between tmux servers, so switching sockets would hide
+# them and start a second, unprotected server. Detected rather than
+# configured: an owner who forgets gets the safe answer. The same rule is
+# in scripts/ensure-tmux-unit.sh and ecosystem.config.cjs — change all three
+# together. Set FORAY_TMUX_SOCKET explicitly to override.
+default_socket() {
+  [ -f /etc/systemd/system/nest-tmux.service ] && echo "" || echo foray
+}
+
+SOCKET="${FORAY_TMUX_SOCKET-$(default_socket)}"
 SOCK=()
 [ -n "$SOCKET" ] && SOCK=(-L "$SOCKET")
 CONF="$(cd "$(dirname "$0")" && pwd)/foray.tmux.conf"

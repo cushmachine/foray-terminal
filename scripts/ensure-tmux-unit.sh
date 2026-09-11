@@ -30,7 +30,18 @@ cd "$(dirname "$0")/.."
 # pm2's cgroup, with no unit around it — which is the OOM exposure of
 # 2026-09-08 recreated in silence, and exiting 0 means scripts/start.sh
 # reports success and warns nobody.
-SOCKET="${FORAY_TMUX_SOCKET-foray}"
+# Default socket: "foray" normally, but the machine's default socket on a
+# box that still has the pre-rename unit installed. Its sessions live there
+# and cannot be moved between tmux servers, so switching sockets would hide
+# them and start a second, unprotected server. Detected rather than
+# configured: an owner who forgets gets the safe answer. The same rule is
+# in scripts/ensure-tmux-unit.sh and ecosystem.config.cjs — change all three
+# together. Set FORAY_TMUX_SOCKET explicitly to override.
+default_socket() {
+  [ -f /etc/systemd/system/nest-tmux.service ] && echo "" || echo foray
+}
+
+SOCKET="${FORAY_TMUX_SOCKET-$(default_socket)}"
 SOCK=()
 [ -n "$SOCKET" ] && SOCK=(-L "$SOCKET")
 # Baked into the unit's own Environment=, below, so tmux-server.sh and the
