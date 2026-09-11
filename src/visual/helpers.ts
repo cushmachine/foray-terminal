@@ -78,6 +78,9 @@ export async function createSession(page: Page, name: string): Promise<void> {
   const row = page.getByTestId('session-row').filter({ has: page.locator('[data-active="true"]') }).last()
   await row.getByTestId('session-rename').click()
   const input = page.getByTestId('session-name-input')
+  // The inline editor can take a beat to appear on a slow box, and filling
+  // before it does hangs until the test times out.
+  await expect(input).toBeVisible()
   await input.fill(name)
   await input.press('Enter')
   await expect(sessionItem(page, name)).toBeVisible()

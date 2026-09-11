@@ -102,15 +102,19 @@ test.describe('text fields on a phone', () => {
   // does not undo itself on blur.
   test('the Composer, the rename field and the editor use a 16px font', async ({ page }) => {
     await page.goto('/')
-    const fontSize = (selector: string) =>
-      page.locator(selector).first().evaluate((el) => getComputedStyle(el).fontSize)
-    expect(await fontSize('[data-composer] textarea')).toBe('16px')
+    // App remounts the Composer once the active session resolves over the
+    // socket, so a one-shot read can be holding the discarded textarea by
+    // the time it evaluates, and getComputedStyle on a detached node answers
+    // "". toHaveCSS re-resolves the locator on every poll instead.
+    const expectFontSize = (selector: string) =>
+      expect(page.locator(selector).first()).toHaveCSS('font-size', '16px')
+    await expectFontSize('[data-composer] textarea')
 
     await openDrawer(page)
     await page.getByTestId('session-rename').first().click()
     const input = page.getByTestId('session-name-input')
     await expect(input).toBeVisible()
-    expect(await fontSize('[data-testid="session-name-input"]')).toBe('16px')
+    await expectFontSize('[data-testid="session-name-input"]')
     await input.press('Escape')
     await page.getByTestId('sidebar-close').click()
     await expect(page.getByTestId('sidebar')).toBeHidden()
@@ -119,7 +123,7 @@ test.describe('text fields on a phone', () => {
     await page.getByTestId('file-panel').getByRole('button', { name: /\.md$/ }).first().click()
     await page.getByTestId('file-edit-toggle').click()
     await expect(page.getByTestId('file-panel').locator('.cm-content')).toBeVisible()
-    expect(await fontSize('[data-testid="file-panel"] .cm-content')).toBe('16px')
+    await expectFontSize('[data-testid="file-panel"] .cm-content')
   })
 })
 
