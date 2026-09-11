@@ -34,7 +34,9 @@
 #   npx foray-terminal setup
 #
 # Environment variables:
-#   FORAY_DIR   — where to install (default: ~/foray)
+#   FORAY_DIR   — where to install. Defaults to the checkout running this
+#                 script when it's a git checkout (the contributor path
+#                 above), otherwise ~/foray (the npm path).
 #   FORAY_SKIP_SERVICE — set to 1 to skip pm2 and the boot service (for Docker)
 #   FORAY_ALLOW_NO_TAILSCALE — set to 1 to install without Tailscale present
 #   FORAY_ALLOW_ROOT — set to 1 to install as root with no terminal to confirm
@@ -44,7 +46,6 @@
 
 set -euo pipefail
 
-FORAY_DIR="${FORAY_DIR:-$HOME/foray}"
 FORAY_PORT=3000
 NODE_MAJOR="24"
 
@@ -58,8 +59,17 @@ die()   { printf '\033[1;31m✗\033[0m %s\n' "$@" >&2; exit 1; }
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ -d "$SCRIPT_DIR/.git" ]; then
   info "Running from a git checkout at $SCRIPT_DIR (contributor path)."
+  # Default FORAY_DIR to the checkout that's actually running this script,
+  # not $HOME/foray. Without this, `git clone ... ~/src/foray && cd
+  # ~/src/foray && bash install.sh` clones the repo a *second* time into
+  # ~/foray and installs/deploys that copy, while the contributor goes on
+  # editing ~/src/foray — every change they make is invisible to the
+  # running app. `foray setup` is unaffected: it always passes FORAY_DIR
+  # explicitly (see bin/foray.mjs), which wins over this default either way.
+  FORAY_DIR="${FORAY_DIR:-$SCRIPT_DIR}"
 else
   info "Running as \`foray setup\`, from the installed npm package."
+  FORAY_DIR="${FORAY_DIR:-$HOME/foray}"
 fi
 
 # ---------- preflight ----------
@@ -160,6 +170,35 @@ npm install 2>&1 | tail -5
 
 # ---------- Tailscale ----------
 
+# `tailscale status --json | grep -q '"BackendState": *"Running"'` (the
+# previous version of this check) is a SIGPIPE trap: under `set -o
+# pipefail` (above), `grep -q` exits at its first match and closes its end
+# of the pipe, so once `tailscale` has more to write than fits in one
+# pipe buffer it gets SIGPIPE, exits 141, and pipefail makes the whole
+# pipeline read as failure even though the state really is "Running". This
+# box's own `tailscale status --json` is a few KB with one peer; a busier
+# tailnet (~2.4 KB/peer here, so roughly 30-40 peers) is enough to trigger
+# it. Avoid the whole class of bug by never leaving the pipe with only one
+# reader that can quit early: write the output to a file first (so nothing
+# is still writing when it's read), then parse it as JSON rather than
+# pattern-matching the text.
+tailscale_running() {
+  local status_file
+  status_file="$(mktemp)"
+  tailscale status --json >"$status_file" 2>/dev/null || true
+  node -e '
+    try {
+      const st = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))
+      process.exit(st.BackendState === "Running" ? 0 : 1)
+    } catch {
+      process.exit(1)
+    }
+  ' "$status_file"
+  local result=$?
+  rm -f "$status_file"
+  return $result
+}
+
 # Check for Tailscale now, before Foray starts, not as a footnote after the
 # fact. Skipped along with the rest of this section when
 # FORAY_SKIP_SERVICE=1 — nothing is being exposed to reach in the first
@@ -177,7 +216,7 @@ elif [ "$OS" = Linux ]; then
     warn "No Tailscale binary found; continuing (FORAY_ALLOW_NO_TAILSCALE=1)."
     warn "Foray will be reachable only from this machine until you set up"
     warn "Tailscale or another HTTPS proxy — see SECURITY.md."
-  elif tailscale status --json 2>/dev/null | grep -q '"BackendState": *"Running"'; then
+  elif tailscale_running; then
     info "Exposing Foray over Tailscale HTTPS..."
     if tailscale serve --bg "$FORAY_PORT" >/dev/null 2>&1; then
       info "Done — run 'tailscale serve status' any time to see the URL."

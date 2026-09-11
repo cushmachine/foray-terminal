@@ -44,6 +44,10 @@ anyone else can reach.
 
 ## Token & updates
 
+`setup` also installs the `foray` command itself, globally, so it's on
+your PATH afterwards (running it again there is harmless if you'd rather
+stick with `npx foray-terminal ...`).
+
 Print the access token again any time — a new device, or if you lost it:
 
 ```bash

@@ -21,7 +21,15 @@ cd "$(dirname "$0")/.."
 # macOS has no cgroups, so there is nothing to escape from: the tmux server
 # daemonizes into its own process group and outlives pm2 restarts on its own.
 if [ "$(uname)" = Linux ]; then
-  scripts/ensure-tmux-unit.sh || echo "[start] tmux unit setup failed; sessions will run under pm2" >&2
+  if ! scripts/ensure-tmux-unit.sh; then
+    echo "[start] ============================================================" >&2
+    echo "[start] WARNING: foray-tmux.service setup failed (see the error above)." >&2
+    echo "[start] Sessions are UNPROTECTED: they will start under pm2's own cgroup," >&2
+    echo "[start] so a pm2 crash, 'pm2 stop', or an OOM teardown of pm2 can kill" >&2
+    echo "[start] every session at once. Fix the error above (it names the exact" >&2
+    echo "[start] command to run), then redeploy." >&2
+    echo "[start] ============================================================" >&2
+  fi
 fi
 
 STAGE=dist.next

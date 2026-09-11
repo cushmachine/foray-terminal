@@ -58,10 +58,36 @@ SOCKET_FLAG=""
 UNIT=foray-tmux.service
 CGROUP=/sys/fs/cgroup/system.slice/$UNIT
 
+# Writing the unit file and driving systemd both need root. As root, run
+# them directly; as anyone else (the dedicated `foray` user SECURITY.md
+# recommends, say), try sudo non-interactively only — a password prompt
+# here would just hang scripts/start.sh, which runs this unattended on
+# every deploy. When even -n sudo is not available, fail loudly with the
+# exact command to run once by hand rather than limping on: a swallowed
+# failure here is exactly how sessions end up back in pm2's cgroup (see
+# scripts/start.sh, which wraps the call to this script).
+SUDO=()
+if [ "$(id -u)" -ne 0 ]; then
+  if sudo -n true >/dev/null 2>&1; then
+    SUDO=(sudo -n)
+  else
+    echo "[tmux-unit] not root, and passwordless sudo (sudo -n) is not available." >&2
+    echo "[tmux-unit] Cannot install or start $UNIT, so sessions cannot move out of" >&2
+    echo "[tmux-unit] pm2's cgroup. Run this once, by hand, as a user that can sudo:" >&2
+    echo "[tmux-unit]" >&2
+    echo "[tmux-unit]   sudo bash $(pwd)/scripts/ensure-tmux-unit.sh" >&2
+    echo "[tmux-unit]" >&2
+    echo "[tmux-unit] or grant this account passwordless sudo for 'install' and" >&2
+    echo "[tmux-unit] 'systemctl daemon-reload|enable|start' on $UNIT (see" >&2
+    echo "[tmux-unit] SECURITY.md's Recommended deployment, item 1)." >&2
+    exit 1
+  fi
+fi
+
 install_if_changed() {
   local src="$1" dst="$2"
   if ! cmp -s "$src" "$dst"; then
-    install -D -m 644 "$src" "$dst" && echo "[tmux-unit] installed $dst"
+    "${SUDO[@]}" install -D -m 644 "$src" "$dst" && echo "[tmux-unit] installed $dst"
     return 0
   fi
   return 1
@@ -137,10 +163,10 @@ install_if_changed scripts/systemd/pm2-oom-override.conf \
 install_if_changed scripts/systemd/needrestart-foray-tmux.conf \
   /etc/needrestart/conf.d/foray-tmux.conf
 if [ "$changed" = 1 ]; then
-  systemctl daemon-reload
-  systemctl enable "$UNIT" >/dev/null 2>&1
+  "${SUDO[@]}" systemctl daemon-reload
+  "${SUDO[@]}" systemctl enable "$UNIT" >/dev/null 2>&1
 fi
-systemctl start "$UNIT" || { echo "[tmux-unit] could not start $UNIT" >&2; exit 1; }
+"${SUDO[@]}" systemctl start "$UNIT" || { echo "[tmux-unit] could not start $UNIT" >&2; exit 1; }
 # Type=simple returns before the server has its socket; give it a moment.
 for _ in 1 2 3 4 5 6 7 8 9 10; do
   tmux "${SOCK[@]}" display-message -p '#{pid}' >/dev/null 2>&1 && break
@@ -150,6 +176,25 @@ done
 # Adopt a server that is running somewhere else — but only on Foray's own
 # socket. The default socket may belong to someone else's tmux entirely and
 # is never touched here.
+#
+# When SOCKET is empty, SOCK is empty too, and every "${SOCK[@]}" tmux call
+# above and below runs against the *default* socket, not a Foray-owned one
+# — there is no such thing as "Foray's own socket" to adopt in that case.
+# The guard at the top of this file already refuses to reach here while
+# nest-tmux.service is installed, but that is not the only way the socket
+# can end up empty (e.g. mid-cutover, after the legacy unit has been
+# deleted by hand but before ecosystem.local.cjs has been), so check again,
+# directly, right before the one block that can move live processes.
+# Without this, an empty socket would make the walk below find whatever
+# tmux server already happens to be on the machine's default socket —
+# someone else's, or the box's own pre-rename sessions — and move it into
+# foray-tmux.service, whose ExecStop is a bare `tmux kill-server`.
+if [ ${#SOCK[@]} -eq 0 ]; then
+  echo "[tmux-unit] FORAY_TMUX_SOCKET is empty: there is no Foray-owned socket to"
+  echo "[tmux-unit] adopt a server from, so skipping the adoption walk."
+  exit 0
+fi
+
 server_pid=$(tmux "${SOCK[@]}" display-message -p '#{pid}' 2>/dev/null || true)
 [ -n "$server_pid" ] || exit 0
 current=$(cut -d: -f3 /proc/"$server_pid"/cgroup 2>/dev/null || true)
@@ -164,6 +209,8 @@ descendants() {
 }
 moved=0
 for pid in "$server_pid" $(descendants "$server_pid"); do
-  if echo "$pid" > "$CGROUP/cgroup.procs" 2>/dev/null; then moved=$((moved + 1)); fi
+  if "${SUDO[@]}" bash -c "echo '$pid' > '$CGROUP/cgroup.procs'" 2>/dev/null; then
+    moved=$((moved + 1))
+  fi
 done
 echo "[tmux-unit] adopted tmux server $server_pid from $current ($moved processes)"

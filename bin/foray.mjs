@@ -75,13 +75,15 @@ const SKIP_COPY = new Set(['node_modules', '.git', 'dist.next', '.playwright'])
  * built it before this ever shipped), scripts and install.sh. Overwrites
  * whatever is already there, so callers decide first whether that's wanted
  * (cmdSetup does not call this over an existing install; cmdUpdate does,
- * deliberately, to actually deliver an update).
+ * deliberately, to actually deliver an update). `src` defaults to this
+ * process's own package (PKG_ROOT); cmdUpdate passes a freshly-resolved
+ * one instead — see the comment there for why that matters.
  */
-function seedFromPackage(dir) {
+function seedFromPackage(dir, src = PKG_ROOT) {
   try {
-    fs.cpSync(PKG_ROOT, dir, {
+    fs.cpSync(src, dir, {
       recursive: true,
-      filter: (src) => !SKIP_COPY.has(path.basename(src)),
+      filter: (p) => !SKIP_COPY.has(path.basename(p)),
     })
   } catch (err) {
     console.error(`foray: could not copy Foray into ${dir}: ${err.message}`)
@@ -106,10 +108,30 @@ function cmdSetup() {
   // Passing FORAY_DIR explicitly (rather than trusting it's already set)
   // means install.sh's "existing checkout" branch is what runs next,
   // never the clone — regardless of what the caller's shell had set.
-  execTo('bash', [path.join(dir, 'install.sh')], {
+  runStep('bash', [path.join(dir, 'install.sh')], {
     cwd: dir,
     env: { ...process.env, FORAY_DIR: dir },
   })
+  // `npx foray-terminal setup` only ever downloads this CLI into npx's
+  // ephemeral cache — nothing above puts a `foray` command on PATH for
+  // next time. Without this, README's and DEPLOY.md's `foray token` /
+  // `foray update` would be "command not found" for exactly the install
+  // path they document. Best effort: setup itself already succeeded, so a
+  // failure here is a convenience miss, not a reason to report the whole
+  // command as failed.
+  // Installed from THIS package's own directory, never `foray-terminal@latest`
+  // from the registry: the copy running right now is the one the user chose
+  // (an npx download, or a local tarball under test), and fetching "latest"
+  // here would put a different — possibly older — version on their PATH than
+  // the one that just set their machine up, without saying so.
+  console.log('foray: installing the `foray` command globally (for `foray token` / `foray update` later)...')
+  const globalInstall = spawnSync('npm', ['i', '-g', PKG_ROOT], { stdio: 'inherit' })
+  if (globalInstall.error || globalInstall.status !== 0) {
+    console.error(
+      "foray: could not install the `foray` command globally. Use `npx foray-terminal token` /\n" +
+        "`npx foray-terminal update` instead, or run 'npm i -g foray-terminal' yourself later.",
+    )
+  }
 }
 
 function cmdToken() {
@@ -138,8 +160,37 @@ function cmdUpdate() {
     runStep('npm', ['run', 'deploy'], { cwd: dir })
     return
   }
-  console.log(`foray: ${dir} is not a git checkout; updating the installed package instead`)
-  runStep('npm', ['i', '-g', 'foray-terminal@latest'])
+  if (!process.env.FORAY_UPDATE_REEXEC) {
+    console.log(`foray: ${dir} is not a git checkout; updating the installed package instead`)
+    runStep('npm', ['i', '-g', 'foray-terminal@latest'])
+    // `npm i -g` above updates the *global* install; it does nothing to this
+    // running process. When this file was launched via `npx foray-terminal
+    // update`, PKG_ROOT (top of file) is npx's own cache copy of whatever
+    // version started this run, and that never updates itself mid-process —
+    // so seeding from PKG_ROOT here would silently reinstall the *old*
+    // files while printing "refreshing from the updated package". Resolve
+    // where `npm i -g` actually put the new package and re-exec its own
+    // bin/foray.mjs so the rest of update — seeding FORAY_DIR and
+    // redeploying — runs as the new code reading the new files, not old
+    // code reading new files it may not even know how to handle correctly.
+    // FORAY_UPDATE_REEXEC marks the re-exec so the new process seeds and
+    // redeploys directly instead of looping back through this same step.
+    const globalRoot = spawnSync('npm', ['root', '-g'], { encoding: 'utf8' })
+    if (globalRoot.error || globalRoot.status !== 0) {
+      console.error(
+        `foray: could not resolve the global npm root: ${(globalRoot.stderr || globalRoot.error?.message || '').trim()}`,
+      )
+      process.exit(1)
+    }
+    const newBin = path.join(globalRoot.stdout.trim(), 'foray-terminal', 'bin', 'foray.mjs')
+    if (!fs.existsSync(newBin)) {
+      console.error(`foray: expected the updated package's CLI at ${newBin}, but it is not there.`)
+      process.exit(1)
+    }
+    execTo(process.execPath, [newBin, 'update'], {
+      env: { ...process.env, FORAY_DIR: dir, FORAY_UPDATE_REEXEC: '1' },
+    })
+  }
   // cmdSetup leaves an existing install alone on purpose; update's whole
   // job is the opposite of that, so it seeds directly rather than calling
   // cmdSetup — otherwise "update" would upgrade the CLI and redeploy the

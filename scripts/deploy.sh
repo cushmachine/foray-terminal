@@ -43,7 +43,14 @@ set -- $(printf '%s' "$jlist" | node -e '
 started_ms=${1:-0}
 legacy_ms=${2:-0}
 # GNU stat (Linux) and BSD stat (macOS) spell "mtime in seconds" differently.
-mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1"; }
+# The final `|| echo 0` covers $CONFIG not existing at all (both stat forms
+# fail): without it, `mtime` prints nothing and the arithmetic below
+# ($(mtime "$CONFIG") * 1000) blows up with a bash syntax error instead of
+# degrading — a missing config then falls through to pm2's own, readable
+# "config not found" error (if nothing is running yet) or a plain restart
+# of whatever is already running (if it is), rather than a cryptic crash
+# here.
+mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo 0; }
 config_ms=$(( $(mtime "$CONFIG") * 1000 ))
 
 if [ "$started_ms" -eq 0 ]; then

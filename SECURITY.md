@@ -107,18 +107,32 @@ run. Its own sessions are named `foray_*`. On Linux that server lives in
 its own systemd unit, `foray-tmux.service`, so it survives deploys; see
 DEPLOY.md. On a box installed before the rename, Foray still shares the
 machine's default tmux socket (`nest_*` sessions, plain `tmux ls`) in
-`nest-tmux.service` — that box keeps `FORAY_TMUX_SOCKET` empty on purpose
-until every session on it has been closed or resumed.
+`nest-tmux.service`. `ecosystem.config.cjs` ships with no
+`FORAY_TMUX_SOCKET` set at all (a fresh install defaults to Foray's own
+`foray` socket), so a box like this one needs an untracked
+`ecosystem.local.cjs` next to it — `{ env: { FORAY_TMUX_SOCKET: '' } }` —
+kept until every session on the default socket has been closed or resumed.
+Without that file, the next deploy moves the box onto the `foray` socket
+and the `nest_*` sessions stop appearing in the sidebar (they are not
+lost — they stay in `nest-tmux.service` and can still be attached by
+hand — but the app can no longer see them).
 
 ## Recommended deployment
 
 1. **A dedicated user.** Create `foray`, install as that user, and let the
    sessions run as it. On Linux, the tmux-unit setup
-   (`scripts/ensure-tmux-unit.sh`, run automatically by `npm run deploy`)
-   generates the systemd unit's `User=`, `Group=` and working directory for
-   whichever account runs it, so sessions run as that user, not root, with
-   nothing to edit by hand. Give the user `sudo` only if you need it inside
-   sessions.
+   (`scripts/ensure-tmux-unit.sh`, run by `scripts/start.sh` on every
+   deploy) generates the systemd unit's `User=`, `Group=` and working
+   directory for whichever account runs it, so sessions run as that user,
+   not root — but installing and starting the unit itself still needs
+   root. As anyone but root, the script calls `sudo -n` (non-interactive)
+   for those steps, so give `foray` passwordless sudo for `install` and
+   `systemctl daemon-reload|enable|start` on `foray-tmux.service` (or run
+   `sudo bash scripts/ensure-tmux-unit.sh` once by hand as `foray` — it's
+   idempotent). Without one of those, every deploy prints a loud warning
+   and sessions fall back to running under pm2, unprotected from a pm2
+   crash or an OOM teardown. Give the user broader `sudo` only if sessions
+   themselves need it.
 2. **Bind to loopback and serve over Tailscale HTTPS.** `ecosystem.config.cjs`
    already sets `HOST: '127.0.0.1'`; `install.sh` runs
    `tailscale serve --bg 3000` for you when it can, or prints the command.

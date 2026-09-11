@@ -36,20 +36,29 @@ rather than writing over it. `install.sh` prints which path it is on
 can always tell. It finishes the same way either path: your access token
 printed once, and the Tailscale step if it could not run that for you.
 
-Two more commands come from the package's `bin/`:
+`setup` finishes by installing the CLI itself globally too
+(`npm i -g foray-terminal@latest`), best effort, so two more commands are
+on your PATH after that:
 
 ```bash
 foray token   # print the access token again, any time
 foray update  # pull the latest release and redeploy
 ```
 
+(if that install didn't take — no global npm prefix, offline, whatever —
+`npx foray-terminal token` / `npx foray-terminal update` do the same
+thing).
+
 `foray update` acts on `$FORAY_DIR` (default `~/foray`) and never discards
 local changes. Inside a git checkout it runs
 `git pull --ff-only && npm install && npm run deploy`. If that directory is
 not a git checkout — the npm install path — it reinstalls the package
-(`npm i -g foray-terminal@latest`) and refreshes the directory from the new
-copy. Either way a dirty checkout stops it: it prints what it found rather
-than resetting anything.
+(`npm i -g foray-terminal@latest`), resolves where that actually put the
+new files (`npm root -g`, not wherever this invocation itself happened to
+run from — `npx` in particular runs from its own ephemeral cache, which
+never updates itself mid-command), and re-execs the freshly installed
+CLI to refresh `$FORAY_DIR` from it. Either way a dirty checkout stops it:
+it prints what it found rather than resetting anything.
 
 There is also `foray start`: the server in the foreground, no pm2 and no
 build, run from the checkout at `$FORAY_DIR` — for Docker or local dev
