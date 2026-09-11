@@ -22,7 +22,7 @@ export type TmuxExecutor = (
   args: string[],
 ) => Promise<{ stdout: string; stderr: string }>
 
-/** Env var naming Foray's own tmux socket; unset means the dedicated socket below, '' means the machine's default one. */
+/** Foray's own tmux socket name; see tmuxSocketArgs for what unset/'' mean. */
 const DEFAULT_SOCKET = 'foray'
 
 /**

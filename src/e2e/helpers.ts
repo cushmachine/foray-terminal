@@ -9,8 +9,8 @@ import { tmuxSocketArgs } from '../server/tmux.ts'
 const execFileAsync = promisify(_execFile)
 
 /** Run a real tmux command on Foray's own socket (FORAY_TMUX_SOCKET), synchronously. */
-export function tmuxSync(args: string[], options: { stdio?: 'pipe' | 'ignore' } = {}): string {
-  return execFileSync('tmux', [...tmuxSocketArgs(), ...args], { stdio: ['ignore', options.stdio ?? 'pipe', 'ignore'] }).toString()
+export function tmuxSync(args: string[]): string {
+  return execFileSync('tmux', [...tmuxSocketArgs(), ...args], { stdio: ['ignore', 'pipe', 'ignore'] }).toString()
 }
 
 /** Run a real tmux command on Foray's own socket (FORAY_TMUX_SOCKET), asynchronously. */

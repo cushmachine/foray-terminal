@@ -454,16 +454,17 @@ export function startServer(
 
   const tmuxExec = options.tmuxExec
 
-  // Modified keys reach panes as CSI u only once the tmux server has these
-  // options. A tmux server that is not up yet cannot take them, and one
-  // that exits (it does, with its last session) comes back without them,
-  // so the listing below applies them to every server it sees.
-  let extendedKeysSet = false
-  const ensureExtendedKeys = async (): Promise<void> => {
-    if (extendedKeysSet) return
-    extendedKeysSet = await applyTmuxServerOptions(tmuxExec)
+  // The four options Foray needs — modified keys as CSI u, mouse off, and a
+  // 10k scrollback — are set by scripts/foray.tmux.conf when tmux starts the
+  // server, but tmux honours -f only then. A server that is not up yet cannot
+  // take them, and one that exits (it does, with its last session) comes back
+  // without them, so the listing below re-asserts them on every server it sees.
+  let serverOptionsSet = false
+  const ensureServerOptions = async (): Promise<void> => {
+    if (serverOptionsSet) return
+    serverOptionsSet = await applyTmuxServerOptions(tmuxExec)
   }
-  void ensureExtendedKeys()
+  void ensureServerOptions()
 
   // Live refresh. Only changes made through Foray (create/kill/rename) reach
   // us as messages. A `cd` in the shell, or a program retitling its
@@ -480,8 +481,8 @@ export function startServer(
       lastWindows = await mirrorTitles(await listWindows(tmuxExec), tmuxExec)
       // A listing proves the tmux server is up; an empty one is what a
       // server that has gone looks like, and its successor starts bare.
-      if (lastWindows.length > 0) void ensureExtendedKeys()
-      else extendedKeysSet = false
+      if (lastWindows.length > 0) void ensureServerOptions()
+      else serverOptionsSet = false
     } catch (err) {
       log.error('list-sessions failed:', err)
     }
