@@ -69,6 +69,15 @@ if [ -z "$SOCKET" ] && systemctl cat nest-tmux.service >/dev/null 2>&1; then
   echo "[tmux-unit] has been closed or resumed."
   exit 0
 fi
+# An empty socket with the old unit gone is never a state this script may
+# act on: the unit it would render stops by killing the machine's default
+# tmux server, whatever is living in it. Refuse.
+if [ -z "$SOCKET" ]; then
+  echo "[tmux-unit] FORAY_TMUX_SOCKET is empty but nest-tmux.service is not installed." >&2
+  echo "[tmux-unit] Refusing to manage the machine's default tmux socket. Unset" >&2
+  echo "[tmux-unit] FORAY_TMUX_SOCKET (or set it to foray) and redeploy." >&2
+  exit 1
+fi
 
 UNIT=foray-tmux.service
 CGROUP=/sys/fs/cgroup/system.slice/$UNIT

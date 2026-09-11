@@ -107,15 +107,12 @@ run. Its own sessions are named `foray_*`. On Linux that server lives in
 its own systemd unit, `foray-tmux.service`, so it survives deploys; see
 DEPLOY.md. On a box installed before the rename, Foray still shares the
 machine's default tmux socket (`nest_*` sessions, plain `tmux ls`) in
-`nest-tmux.service`. `ecosystem.config.cjs` ships with no
-`FORAY_TMUX_SOCKET` set at all (a fresh install defaults to Foray's own
-`foray` socket), so a box like this one needs an untracked
-`ecosystem.local.cjs` next to it — `{ env: { FORAY_TMUX_SOCKET: '' } }` —
-kept until every session on the default socket has been closed or resumed.
-Without that file, the next deploy moves the box onto the `foray` socket
-and the `nest_*` sessions stop appearing in the sidebar (they are not
-lost — they stay in `nest-tmux.service` and can still be attached by
-hand — but the app can no longer see them).
+`nest-tmux.service`. That is detected, not configured: while
+`/etc/systemd/system/nest-tmux.service` exists, `ecosystem.config.cjs`
+sets `FORAY_TMUX_SOCKET` to the default socket and the unit script does
+nothing, so those sessions stay visible. Once every one of them has been
+closed or resumed, retire the old unit and the next deploy moves the box
+onto the `foray` socket.
 
 ## Recommended deployment
 
