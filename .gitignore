@@ -11,3 +11,4 @@ dist.next/
 
 # Per-machine pm2 env overrides (see ecosystem.config.cjs).
 ecosystem.local.cjs
+*.tgz
