@@ -155,18 +155,15 @@ cd "$FORAY_DIR"
 info "Installing npm dependencies (includes compiling node-pty)..."
 npm install 2>&1 | tail -5
 
-# Foray runs its own tmux server, on its own socket, with its own config
-# (scripts/foray.tmux.conf, applied by scripts/tmux-server.sh) — it never
-# writes or edits ~/.tmux.conf, so nothing to do here.
+# Foray's tmux config lives in scripts/foray.tmux.conf (applied by
+# scripts/tmux-server.sh) — nothing to do here; this never touches ~/.tmux.conf.
 
 # ---------- Tailscale ----------
 
-# Foray binds 127.0.0.1 (ecosystem.config.cjs) and stays that way; the only
-# way another device reaches it is Tailscale (or your own HTTPS proxy) in
-# front of that loopback port. Check for it now, before Foray starts, not
-# as a footnote after the fact. Skipped along with the rest of this section
-# when FORAY_SKIP_SERVICE=1 — nothing is being exposed to reach in the
-# first place.
+# Check for Tailscale now, before Foray starts, not as a footnote after the
+# fact. Skipped along with the rest of this section when
+# FORAY_SKIP_SERVICE=1 — nothing is being exposed to reach in the first
+# place.
 if [ "${FORAY_SKIP_SERVICE:-0}" = "1" ]; then
   :
 elif [ "$OS" = Linux ]; then
