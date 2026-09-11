@@ -122,17 +122,21 @@ hand — but the app can no longer see them).
 1. **A dedicated user.** Create `foray`, install as that user, and let the
    sessions run as it. On Linux, the tmux-unit setup
    (`scripts/ensure-tmux-unit.sh`, run by `scripts/start.sh` on every
-   deploy) generates the systemd unit's `User=`, `Group=` and working
-   directory for whichever account runs it, so sessions run as that user,
-   not root — but installing and starting the unit itself still needs
-   root. As anyone but root, the script calls `sudo -n` (non-interactive)
-   for those steps, so give `foray` passwordless sudo for `install` and
-   `systemctl daemon-reload|enable|start` on `foray-tmux.service` (or run
-   `sudo bash scripts/ensure-tmux-unit.sh` once by hand as `foray` — it's
-   idempotent). Without one of those, every deploy prints a loud warning
-   and sessions fall back to running under pm2, unprotected from a pm2
-   crash or an OOM teardown. Give the user broader `sudo` only if sessions
-   themselves need it.
+   deploy) generates the systemd unit's `User=`, `Group=`, `HOME=` and
+   working directory for whichever account should own the sessions, so
+   sessions run as that user, not root — but installing and starting the
+   unit itself still needs root. As anyone but root, the script calls
+   `sudo -n` (non-interactive) for those steps, so give `foray` passwordless
+   sudo for `install` and `systemctl daemon-reload|enable|start` on
+   `foray-tmux.service` (or run `sudo bash scripts/ensure-tmux-unit.sh`
+   once by hand as `foray` — it's idempotent). That second path runs as
+   root, but the script reads `$SUDO_USER` and renders the unit (and node's
+   `PATH`, resolved from that account's own login shell rather than sudo's
+   `secure_path`, so an nvm install is still found) for the person who
+   typed `sudo`, not for root. Without one of those, every deploy prints a
+   loud warning and sessions fall back to running under pm2, unprotected
+   from a pm2 crash or an OOM teardown. Give the user broader `sudo` only
+   if sessions themselves need it.
 2. **Bind to loopback and serve over Tailscale HTTPS.** `ecosystem.config.cjs`
    already sets `HOST: '127.0.0.1'`; `install.sh` runs
    `tailscale serve --bg 3000` for you when it can, or prints the command.

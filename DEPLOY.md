@@ -36,14 +36,22 @@ rather than writing over it. `install.sh` prints which path it is on
 can always tell. It finishes the same way either path: your access token
 printed once, and the Tailscale step if it could not run that for you.
 
-`setup` finishes by installing the CLI itself globally too
-(`npm i -g foray-terminal@latest`), best effort, so two more commands are
-on your PATH after that:
+`setup` finishes by installing the CLI itself globally too, best effort, so
+two more commands are on your PATH after that:
 
 ```bash
 foray token   # print the access token again, any time
 foray update  # pull the latest release and redeploy
 ```
+
+That install packs the running copy of the package into a tarball and
+installs *that* (`npm pack` then `npm i -g` the result), rather than
+`npm i -g` on the running copy's own directory. The directory can be npx's
+own ephemeral cache, and npm's docs say installing a plain folder from
+outside your project symlinks to it instead of copying — a symlink into a
+cache directory with no promised lifetime, which would eventually leave
+`foray` a dangling link. Packing first makes npm copy real files instead,
+the same as installing a published release would.
 
 (if that install didn't take — no global npm prefix, offline, whatever —
 `npx foray-terminal token` / `npx foray-terminal update` do the same
@@ -57,8 +65,11 @@ not a git checkout — the npm install path — it reinstalls the package
 new files (`npm root -g`, not wherever this invocation itself happened to
 run from — `npx` in particular runs from its own ephemeral cache, which
 never updates itself mid-command), and re-execs the freshly installed
-CLI to refresh `$FORAY_DIR` from it. Either way a dirty checkout stops it:
-it prints what it found rather than resetting anything.
+CLI to refresh `$FORAY_DIR` from it. That refresh copies the new package's
+files over the old ones, except it leaves an existing `ecosystem.config.cjs`
+alone — that's the file "Network and access" below tells you to edit for
+`HOST`, so an update never quietly reverts it. Either way a dirty checkout
+stops it: it prints what it found rather than resetting anything.
 
 There is also `foray start`: the server in the foreground, no pm2 and no
 build, run from the checkout at `$FORAY_DIR` — for Docker or local dev

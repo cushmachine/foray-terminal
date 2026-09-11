@@ -16,7 +16,7 @@ test('isPromptLine: the empty input box, blank rows and ordinary output are not 
   assert.equal(isPromptLine('❯'), false)
   assert.equal(isPromptLine('❯ '), false)
   assert.equal(isPromptLine(''), false)
-  assert.equal(isPromptLine('root@foray:~# printf "❯ x"'), false)
+  assert.equal(isPromptLine('root@box:~# printf "❯ x"'), false)
   assert.equal(isPromptLine('  than framing this as a quality pass'), false)
 })
 

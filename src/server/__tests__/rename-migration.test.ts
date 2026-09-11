@@ -4,7 +4,17 @@
 // Run with: npx tsx --test src/server/__tests__/rename-migration.test.ts
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createWindow, listWindows, SEP, tmuxSocketArgs, type TmuxExecutor } from '../tmux.ts'
+import fs from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
+import {
+  createWindow,
+  listWindows,
+  listWindowSessions,
+  SEP,
+  tmuxSocketArgs,
+  type TmuxExecutor,
+} from '../tmux.ts'
 import { fakeTmux } from './helpers.ts'
 import { LAST_SESSION_KEY, draftKeyFor, storageGet, storageRemove } from '../../storage.ts'
 
@@ -125,6 +135,61 @@ test('tmuxSocketArgs: a named socket is passed through as -L', () => {
   withEnv('FORAY_TMUX_SOCKET', 'foray-test', () => {
     assert.deepEqual(tmuxSocketArgs(), ['-L', 'foray-test'])
   })
+})
+
+// tmuxSocketArgs() above is proven pure, but nothing proved the *other*
+// half of plan.md's S3 box: that `defaultExec` (tmux.ts's un-exported
+// executor, the path all ~16 real server-to-tmux calls take) actually
+// spreads it onto argv. `fakeTmux` never sees it (it dispatches on
+// `args[0]` as the subcommand, so a real caller would only ever pass
+// `defaultExec` itself), so a broken spread there would pass all 471
+// other tests while Foray silently adopted the machine's default tmux
+// server. Prove it the way scripts/test-hermetic.sh already does: shadow
+// `tmux` on PATH with a stub that only logs its argv, call a function
+// that uses `defaultExec` under its own default parameter (no exec
+// argument given), and read the log back.
+test('defaultExec really composes -L foray onto a real tmux invocation', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'foray-defaultexec-'))
+  try {
+    const log = path.join(dir, 'tmux.log')
+    const stub = path.join(dir, 'tmux')
+    // Logs argv, then fails the way real tmux does with no server running,
+    // so listWindowSessions() resolves cleanly instead of throwing.
+    await fs.writeFile(
+      stub,
+      [
+        '#!/usr/bin/env bash',
+        `printf '%s\\n' "$*" >> ${JSON.stringify(log)}`,
+        'echo "no server running" >&2',
+        'exit 1',
+        '',
+      ].join('\n'),
+    )
+    await fs.chmod(stub, 0o755)
+
+    const prevPath = process.env.PATH
+    const prevSocket = process.env.FORAY_TMUX_SOCKET
+    delete process.env.FORAY_TMUX_SOCKET // unset -> tmuxSocketArgs() must lead with -L foray
+    process.env.PATH = `${dir}${path.delimiter}${prevPath ?? ''}`
+    try {
+      await listWindowSessions() // no executor passed: takes tmux.ts's own default, defaultExec
+    } finally {
+      process.env.PATH = prevPath
+      if (prevSocket === undefined) delete process.env.FORAY_TMUX_SOCKET
+      else process.env.FORAY_TMUX_SOCKET = prevSocket
+    }
+
+    const logged = (await fs.readFile(log, 'utf8')).trim()
+    assert.ok(logged.length > 0, 'expected the PATH-shadowed tmux stub to have been invoked at all')
+    const argv = logged.split('\n')[0].split(' ')
+    assert.deepEqual(
+      argv.slice(0, 2),
+      ['-L', 'foray'],
+      `expected defaultExec's real argv to lead with -L foray, got: ${JSON.stringify(argv)}`,
+    )
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true })
+  }
 })
 
 // ---------------------------------------------------------------------------

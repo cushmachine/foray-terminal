@@ -142,21 +142,21 @@ function fakeRequest(headers: Record<string, string | undefined>): import('node:
 }
 
 test('originAllowed: same host passes, another origin or a malformed one does not, no Origin passes', () => {
-  assert.equal(originAllowed(fakeRequest({ host: 'foray:3000', origin: 'http://foray:3000' })), true)
-  assert.equal(originAllowed(fakeRequest({ host: 'foray:3000', origin: 'https://FORAY:3000' })), true, 'scheme and case do not matter')
-  assert.equal(originAllowed(fakeRequest({ host: 'foray:3000', origin: 'http://evil.example' })), false)
-  assert.equal(originAllowed(fakeRequest({ host: 'foray:3000', origin: 'http://foray' })), false, 'the port is part of the host')
-  assert.equal(originAllowed(fakeRequest({ host: 'foray:3000', origin: 'null' })), false)
-  assert.equal(originAllowed(fakeRequest({ host: 'foray:3000', origin: '' })), false)
-  assert.equal(originAllowed(fakeRequest({ host: 'foray:3000' })), true, 'not a browser page; still has to authenticate')
+  assert.equal(originAllowed(fakeRequest({ host: 'box:3000', origin: 'http://box:3000' })), true)
+  assert.equal(originAllowed(fakeRequest({ host: 'box:3000', origin: 'https://BOX:3000' })), true, 'scheme and case do not matter')
+  assert.equal(originAllowed(fakeRequest({ host: 'box:3000', origin: 'http://evil.example' })), false)
+  assert.equal(originAllowed(fakeRequest({ host: 'box:3000', origin: 'http://box' })), false, 'the port is part of the host')
+  assert.equal(originAllowed(fakeRequest({ host: 'box:3000', origin: 'null' })), false)
+  assert.equal(originAllowed(fakeRequest({ host: 'box:3000', origin: '' })), false)
+  assert.equal(originAllowed(fakeRequest({ host: 'box:3000' })), true, 'not a browser page; still has to authenticate')
   assert.equal(
-    originAllowed(fakeRequest({ host: '127.0.0.1:3000', 'x-forwarded-host': 'foray.tail1.ts.net', origin: 'https://foray.tail1.ts.net' })),
+    originAllowed(fakeRequest({ host: '127.0.0.1:3000', 'x-forwarded-host': 'box.tail1.ts.net', origin: 'https://box.tail1.ts.net' })),
     true,
     'behind a proxy that rewrote Host, the forwarded host counts',
   )
   assert.equal(originAllowed(fakeRequest({ host: '[::1]:3000', origin: 'http://[::1]:3000' })), true, 'IPv6 literal')
-  assert.equal(originAllowed(fakeRequest({ host: 'foray.tail1.ts.net:443', origin: 'https://foray.tail1.ts.net' })), true, 'a default port a proxy wrote out')
-  assert.equal(originAllowed(fakeRequest({ host: 'foray:80', origin: 'http://foray' })), true)
+  assert.equal(originAllowed(fakeRequest({ host: 'box.tail1.ts.net:443', origin: 'https://box.tail1.ts.net' })), true, 'a default port a proxy wrote out')
+  assert.equal(originAllowed(fakeRequest({ host: 'box:80', origin: 'http://box' })), true)
 })
 
 test('clientAddress: the socket address, or the first forwarded hop behind a loopback proxy', () => {

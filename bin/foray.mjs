@@ -69,21 +69,40 @@ function forayDir() {
 // state, not the app.
 const SKIP_COPY = new Set(['node_modules', '.git', 'dist.next', '.playwright'])
 
+// Shipped files a user is documented to hand-edit in place, so a re-seed
+// must leave an existing copy alone rather than overwrite it back to the
+// package's default. ecosystem.config.cjs is the one case today: DEPLOY.md
+// tells people to widen HOST in it directly, and SECURITY.md's dedicated-
+// user instructions assume it stays put. cpSync overwrites existing files
+// by default, so without this, `foray update` on the npm path (cmdUpdate's
+// seedFromPackage call, below) would silently revert that edit on every
+// update — breaking README's "update never discards local changes" and
+// possibly locking out whoever was relying on the widened HOST. Nothing
+// else in package.json's "files" list is ever documented as something to
+// edit at the destination; add to this set if that changes.
+const PRESERVE_IF_EXISTS = new Set(['ecosystem.config.cjs'])
+
 /**
  * Populate `dir` with this package's own files — the server source, the
  * already-built `dist/` (this package's whole reason to exist; prepack
  * built it before this ever shipped), scripts and install.sh. Overwrites
- * whatever is already there, so callers decide first whether that's wanted
- * (cmdSetup does not call this over an existing install; cmdUpdate does,
- * deliberately, to actually deliver an update). `src` defaults to this
- * process's own package (PKG_ROOT); cmdUpdate passes a freshly-resolved
- * one instead — see the comment there for why that matters.
+ * whatever is already there — except PRESERVE_IF_EXISTS files that already
+ * exist at the destination, which are left untouched — so callers decide
+ * first whether the rest is wanted (cmdSetup does not call this over an
+ * existing install; cmdUpdate does, deliberately, to actually deliver an
+ * update). `src` defaults to this process's own package (PKG_ROOT);
+ * cmdUpdate passes a freshly-resolved one instead — see the comment there
+ * for why that matters.
  */
 function seedFromPackage(dir, src = PKG_ROOT) {
   try {
     fs.cpSync(src, dir, {
       recursive: true,
-      filter: (p) => !SKIP_COPY.has(path.basename(p)),
+      filter: (srcPath, destPath) => {
+        if (SKIP_COPY.has(path.basename(srcPath))) return false
+        if (PRESERVE_IF_EXISTS.has(path.basename(srcPath)) && fs.existsSync(destPath)) return false
+        return true
+      },
     })
   } catch (err) {
     console.error(`foray: could not copy Foray into ${dir}: ${err.message}`)
@@ -124,13 +143,40 @@ function cmdSetup() {
   // (an npx download, or a local tarball under test), and fetching "latest"
   // here would put a different — possibly older — version on their PATH than
   // the one that just set their machine up, without saying so.
+  //
+  // Not `npm i -g PKG_ROOT` directly, though: PKG_ROOT is a plain directory
+  // (npx extracts the package to one in its own cache before ever running
+  // it), and per npm's own docs (npm-install.md:67 in the npm package
+  // shipped on this box), `npm install <folder>` outside the current
+  // project *symlinks* to it instead of copying. npx's cache directory has
+  // no promised lifetime, so that symlink can go dangling later, quietly
+  // turning `foray token` / `foray update` into "command not found".
+  // `npm pack` first, then installing the resulting tarball, makes npm
+  // copy real files instead — the same as installing a published release
+  // would.
   console.log('foray: installing the `foray` command globally (for `foray token` / `foray update` later)...')
-  const globalInstall = spawnSync('npm', ['i', '-g', PKG_ROOT], { stdio: 'inherit' })
-  if (globalInstall.error || globalInstall.status !== 0) {
-    console.error(
-      "foray: could not install the `foray` command globally. Use `npx foray-terminal token` /\n" +
-        "`npx foray-terminal update` instead, or run 'npm i -g foray-terminal' yourself later.",
-    )
+  const packDir = fs.mkdtempSync(path.join(os.tmpdir(), 'foray-setup-'))
+  try {
+    const pack = spawnSync('npm', ['pack', PKG_ROOT, '--silent', '--pack-destination', packDir], {
+      encoding: 'utf8',
+    })
+    const tarballName = pack.stdout?.trim().split('\n').pop()
+    if (pack.error || pack.status !== 0 || !tarballName) {
+      console.error(
+        "foray: could not package Foray for a global install (`npm pack` failed). Use `npx foray-terminal token` /\n" +
+          "`npx foray-terminal update` instead, or run 'npm i -g foray-terminal' yourself later.",
+      )
+      return
+    }
+    const globalInstall = spawnSync('npm', ['i', '-g', path.join(packDir, tarballName)], { stdio: 'inherit' })
+    if (globalInstall.error || globalInstall.status !== 0) {
+      console.error(
+        "foray: could not install the `foray` command globally. Use `npx foray-terminal token` /\n" +
+          "`npx foray-terminal update` instead, or run 'npm i -g foray-terminal' yourself later.",
+      )
+    }
+  } finally {
+    fs.rmSync(packDir, { recursive: true, force: true })
   }
 }
 
