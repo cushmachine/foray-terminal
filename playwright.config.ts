@@ -28,13 +28,18 @@ const STORAGE_STATE = `.playwright/state-${VISUAL_PORT}.json`
 export const VISUAL_TOKEN = 'visual-suite-token-0123456789'
 
 // The visual suite drives real tmux, so it runs on a throwaway socket and can
-// never see — or kill — sessions someone actually uses. The runner process
-// (helpers.ts, via tmuxSocketArgs) and the server under test are separate
-// processes and must agree: set it here for the runner, pass it through in
-// the webServer command below. An empty FORAY_TMUX_SOCKET means "the
-// machine's default socket" everywhere else; here it deliberately does not,
-// because the default socket is exactly where a person's own sessions live.
-export const TMUX_SOCKET = process.env.FORAY_TMUX_SOCKET || 'foray-test'
+// never see — or kill — sessions someone actually uses. Fixed, and
+// deliberately NOT read from process.env.FORAY_TMUX_SOCKET: that variable is
+// exactly what SECURITY.md and DEPLOY.md teach an owner to export (e.g.
+// FORAY_TMUX_SOCKET=foray, the production socket) for their own shell, and
+// global-teardown.ts kills whatever server this socket names — so honouring
+// an ambient value here would hand a stray exported env var the power to
+// kill every live Foray session the moment someone runs `npm run
+// test:visual`. The runner process (helpers.ts, via tmuxSocketArgs) and the
+// server under test are separate processes and must agree: set it here for
+// the runner, pass it through in the webServer command below — never
+// through the caller's own environment.
+export const TMUX_SOCKET = 'foray-test'
 process.env.FORAY_TMUX_SOCKET = TMUX_SOCKET
 
 export default defineConfig({

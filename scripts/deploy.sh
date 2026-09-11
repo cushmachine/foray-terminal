@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Deploy Foray: typecheck, then restart it under pm2, applying
-# ecosystem.config.cjs if that changed. This is what `npm run deploy` runs.
+# ecosystem.config.cjs (or its untracked ecosystem.local.cjs override) if
+# either changed. This is what `npm run deploy` runs.
 #
 # The typecheck comes first because scripts/start.sh builds with vite alone
 # (no tsc) and would happily serve a bundle the types reject; failing here
@@ -18,6 +19,11 @@ cd "$(dirname "$0")/.."
 APP=foray
 LEGACY_APP=nest
 CONFIG=ecosystem.config.cjs
+# Untracked per-machine override (see ecosystem.config.cjs's own comment):
+# merged into the app's env at pm2-start time, so creating, editing or
+# removing it changes what the running app actually gets, exactly like
+# editing $CONFIG itself — the relaunch check below must treat it the same.
+LOCAL_CONFIG=ecosystem.local.cjs
 
 if ! command -v pm2 >/dev/null 2>&1; then
   echo "[deploy] pm2 is not installed; run install.sh or 'npm install -g pm2'" >&2
@@ -43,15 +49,23 @@ set -- $(printf '%s' "$jlist" | node -e '
 started_ms=${1:-0}
 legacy_ms=${2:-0}
 # GNU stat (Linux) and BSD stat (macOS) spell "mtime in seconds" differently.
-# The final `|| echo 0` covers $CONFIG not existing at all (both stat forms
-# fail): without it, `mtime` prints nothing and the arithmetic below
-# ($(mtime "$CONFIG") * 1000) blows up with a bash syntax error instead of
-# degrading — a missing config then falls through to pm2's own, readable
-# "config not found" error (if nothing is running yet) or a plain restart
-# of whatever is already running (if it is), rather than a cryptic crash
-# here.
+# The final `|| echo 0` covers $CONFIG (or $LOCAL_CONFIG) not existing at
+# all (both stat forms fail): without it, `mtime` prints nothing and the
+# arithmetic below blows up with a bash syntax error instead of degrading —
+# a missing config then falls through to pm2's own, readable "config not
+# found" error (if nothing is running yet) or a plain restart of whatever
+# is already running (if it is), rather than a cryptic crash here.
 mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo 0; }
 config_ms=$(( $(mtime "$CONFIG") * 1000 ))
+local_config_ms=$(( $(mtime "$LOCAL_CONFIG") * 1000 ))
+# Whichever of the two changed most recently is what should trigger a
+# relaunch: creating or deleting $LOCAL_CONFIG changes the app's env just as
+# much as editing $CONFIG does, and looking only at $CONFIG's mtime made
+# that silently a no-op — pm2 would just restart the process with pm2's own
+# cached env, never picking up the local override at all.
+if [ "$local_config_ms" -gt "$config_ms" ]; then
+  config_ms=$local_config_ms
+fi
 
 if [ "$started_ms" -eq 0 ]; then
   # The pre-rename app is still up on this port: starting a second app
@@ -67,7 +81,7 @@ if [ "$started_ms" -eq 0 ]; then
   echo "[deploy] $APP is not running; starting it from $CONFIG"
   pm2 start "$CONFIG"
 elif [ "$config_ms" -gt "$started_ms" ]; then
-  echo "[deploy] $CONFIG changed since $APP started; relaunching from it"
+  echo "[deploy] $CONFIG or $LOCAL_CONFIG changed since $APP started; relaunching from it"
   pm2 delete "$APP"
   pm2 start "$CONFIG"
 else

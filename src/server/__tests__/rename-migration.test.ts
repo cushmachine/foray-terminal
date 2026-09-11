@@ -138,7 +138,7 @@ test('tmuxSocketArgs: a named socket is passed through as -L', () => {
 })
 
 // tmuxSocketArgs() above is proven pure, but nothing proved the *other*
-// half of plan.md's S3 box: that `defaultExec` (tmux.ts's un-exported
+// half of the contract: that `defaultExec` (tmux.ts's un-exported
 // executor, the path all ~16 real server-to-tmux calls take) actually
 // spreads it onto argv. `fakeTmux` never sees it (it dispatches on
 // `args[0]` as the subcommand, so a real caller would only ever pass

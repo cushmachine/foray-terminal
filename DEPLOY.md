@@ -57,19 +57,29 @@ the same as installing a published release would.
 `npx foray-terminal token` / `npx foray-terminal update` do the same
 thing).
 
-`foray update` acts on `$FORAY_DIR` (default `~/foray`) and never discards
-local changes. Inside a git checkout it runs
+`foray update` acts on `$FORAY_DIR` (default `~/foray`), and its two paths
+handle local changes differently — one refuses to discard them, the other
+has no way to know they're there. Inside a git checkout, it refuses:
+`git status --porcelain` must come back clean, or it stops and prints what
+it found, before running
 `git pull --ff-only && npm install && npm run deploy`. If that directory is
-not a git checkout — the npm install path — it reinstalls the package
-(`npm i -g foray-terminal@latest`), resolves where that actually put the
-new files (`npm root -g`, not wherever this invocation itself happened to
-run from — `npx` in particular runs from its own ephemeral cache, which
-never updates itself mid-command), and re-execs the freshly installed
-CLI to refresh `$FORAY_DIR` from it. That refresh copies the new package's
-files over the old ones, except it leaves an existing `ecosystem.config.cjs`
-alone — that's the file "Network and access" below tells you to edit for
-`HOST`, so an update never quietly reverts it. Either way a dirty checkout
-stops it: it prints what it found rather than resetting anything.
+not a git checkout — the npm install path — there is no working tree to
+check, so nothing is refused. It first verifies the release is actually
+usable: packs `foray-terminal@latest` and checks the tarball itself has a
+`bin/foray.mjs` and a built `dist/` before anything touches the global
+install (the registry has served a placeholder with no CLI under this name
+before, and this must never trade a working `foray` for one that isn't).
+Once verified, it installs from that exact tarball, resolves where that
+put the new files (`npm root -g`, not wherever this invocation itself
+happened to run from — `npx` in particular runs from its own ephemeral
+cache, which never updates itself mid-command), and re-execs the freshly
+installed CLI to refresh `$FORAY_DIR` from it. That refresh copies the new
+package's files over the old ones **unconditionally** — any other file you
+have hand-edited under `$FORAY_DIR` on this path is overwritten — except
+it leaves an existing `ecosystem.config.cjs` alone, since that's the file
+"Network and access" below tells you to edit for `HOST`. Put `$FORAY_DIR`
+under git yourself (even without pushing it anywhere) if you want update
+to protect more than that one file.
 
 There is also `foray start`: the server in the foreground, no pm2 and no
 build, run from the checkout at `$FORAY_DIR` — for Docker or local dev

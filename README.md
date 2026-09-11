@@ -10,10 +10,15 @@ Foray is a browser terminal, backed by tmux sessions on a server you run, built 
 
 Foray runs on a server you control — a small Linux VPS or a Mac you leave on — and you reach it over [Tailscale](https://tailscale.com), so it is never exposed to the open internet.
 
-1. Get a Linux VPS (Ubuntu 22.04+) or set aside a Mac to act as the server.
+1. Get a Linux VPS (Ubuntu 22.04+) or set aside a Mac to act as the server,
+   and make sure Node.js 24+ is on it — a fresh Ubuntu box ships with none,
+   and step 3 needs `npx` to even start:
+   `curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash - && sudo apt-get install -y nodejs`
+   (Mac: `brew install node`).
 2. Install Tailscale on it and sign in.
-3. `npx foray-terminal setup`
-4. Paste the token it prints into the login screen, once per device.
+3. `npx foray-terminal setup` — installs tmux and pm2, deploys Foray, and
+   prints your access token plus a `https://<name>.<tailnet>.ts.net` URL.
+4. Open that URL and paste in the token, once per device.
 
 ## From source
 
@@ -60,9 +65,14 @@ Update to the latest release:
 foray update
 ```
 
-`foray update` never discards local changes: it pulls (or reinstalls) and
-redeploys, but stops and tells you if it finds any, rather than resetting
-anything. From a source checkout, the equivalents are `npm run token` and:
+`foray update` behaves differently depending on how you installed. From a
+git checkout (the "From source" path), it refuses rather than discarding
+anything: it stops and prints what it found if the checkout is dirty,
+otherwise runs a fast-forward-only `git pull`. From the npm path, there is
+no checkout to check for local edits, so nothing is refused: it copies the
+new release's files over `~/foray` unconditionally, except an existing
+`ecosystem.config.cjs` is left alone. From a source checkout, the
+equivalents are `npm run token` and:
 
 ```bash
 cd ~/foray

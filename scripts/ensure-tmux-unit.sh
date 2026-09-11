@@ -53,10 +53,9 @@ SOCKET_FLAG=""
 # --- leave a pre-rename box alone -------------------------------------
 # An empty socket means this box deliberately stays on the machine's
 # default tmux socket, because it has Foray sessions from before Foray had
-# its own and sessions cannot move between tmux servers
-# (docs/plans/foray-tmux-socket.md item 6). Those sessions are already held
-# by the old unit, so there is nothing here to install and nothing to
-# adopt: do nothing at all.
+# its own, and tmux sessions cannot be moved between tmux servers. Those
+# sessions are already held by the old unit, so there is nothing here to
+# install and nothing to adopt: do nothing at all.
 #
 # Note this tests $SOCKET, not whether FORAY_TMUX_SOCKET is set. Installing
 # the unit for socket "foray" on such a box is harmless — it is a different
@@ -122,13 +121,24 @@ if [ "$(id -u)" -ne 0 ]; then
   fi
 fi
 
+# Returns 0 (and prints) only once $dst is actually holding $src's content;
+# 1 when it already was and nothing needed doing. Exits the whole script on
+# a failed install rather than returning either of those — the previous
+# version returned 0 (masked by `&&` only gating the echo, not the return),
+# so a failed install here read as success to every caller below, which
+# then went on to daemon-reload/enable/start against a unit file that may
+# be stale, partial or missing.
 install_if_changed() {
   local src="$1" dst="$2"
-  if ! cmp -s "$src" "$dst"; then
-    "${SUDO[@]}" install -D -m 644 "$src" "$dst" && echo "[tmux-unit] installed $dst"
-    return 0
+  if cmp -s "$src" "$dst"; then
+    return 1
   fi
-  return 1
+  if ! "${SUDO[@]}" install -D -m 644 "$src" "$dst"; then
+    echo "[tmux-unit] could not install $dst" >&2
+    exit 1
+  fi
+  echo "[tmux-unit] installed $dst"
+  return 0
 }
 
 # Same idiom as the macOS LaunchAgent plist in install.sh: an unquoted
@@ -261,10 +271,26 @@ descendants() {
     descendants "$pid"
   done
 }
+pids=("$server_pid" $(descendants "$server_pid"))
 moved=0
-for pid in "$server_pid" $(descendants "$server_pid"); do
+for pid in "${pids[@]}"; do
   if "${SUDO[@]}" bash -c "echo '$pid' > '$CGROUP/cgroup.procs'" 2>/dev/null; then
     moved=$((moved + 1))
   fi
 done
-echo "[tmux-unit] adopted tmux server $server_pid from $current ($moved processes)"
+# Report what actually happened: "(0 processes)" used to print as though
+# adoption had succeeded even when every move failed, leaving the server
+# right where it started — still in pm2's cgroup, still exposed to a pm2
+# stop or an OOM teardown of pm2, which is the one thing this whole script
+# exists to prevent.
+total=${#pids[@]}
+if [ "$moved" -eq 0 ]; then
+  echo "[tmux-unit] could not move tmux server $server_pid (or any of its $total process(es))" >&2
+  echo "[tmux-unit] from $current into $UNIT's cgroup; it is still in pm2's, unprotected." >&2
+  exit 1
+elif [ "$moved" -lt "$total" ]; then
+  echo "[tmux-unit] adopted tmux server $server_pid from $current ($moved/$total processes moved;" >&2
+  echo "[tmux-unit] the rest are still in $current)" >&2
+else
+  echo "[tmux-unit] adopted tmux server $server_pid from $current ($moved processes)"
+fi

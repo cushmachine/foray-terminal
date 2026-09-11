@@ -53,11 +53,15 @@ info()  { printf '\033[1;32m→\033[0m %s\n' "$*"; }
 warn()  { printf '\033[1;33m!\033[0m %s\n' "$*"; }
 die()   { printf '\033[1;31m✗\033[0m %s\n' "$@" >&2; exit 1; }
 
-# A git checkout has a .git dir next to this script; the npm package never
-# does (npm does not ship it), so this tells the two callers above apart
-# without needing anything passed in from foray setup.
+# A git checkout has a .git entry next to this script; the npm package
+# never does (npm does not ship it), so this tells the two callers above
+# apart without needing anything passed in from foray setup. `.git` is a
+# directory in a normal clone but a plain file (pointing at the real one)
+# in a git worktree, so this checks existence with -e, not -d: a -d check
+# misreads a worktree as the npm path and clones a second checkout next to
+# it — the exact bug FORAY_DIR's default just below exists to prevent.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [ -d "$SCRIPT_DIR/.git" ]; then
+if [ -e "$SCRIPT_DIR/.git" ]; then
   info "Running from a git checkout at $SCRIPT_DIR (contributor path)."
   # Default FORAY_DIR to the checkout that's actually running this script,
   # not $HOME/foray. Without this, `git clone ... ~/src/foray && cd

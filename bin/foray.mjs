@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 // The `foray` CLI: setup / token / update / start. Each subcommand execs an
-// existing script rather than reimplementing it — see the "Reuse map" in
-// this project's longrun plan for why. install.sh stays the one place that
-// knows how to install system deps, Node, pm2 and the boot service; this
-// finds it and runs it with the caller's environment passed through
-// (FORAY_SKIP_SERVICE, FORAY_ALLOW_NO_TAILSCALE, FORAY_ALLOW_ROOT — see
-// install.sh's own header for what each does).
+// existing script rather than reimplementing its logic here, so there is
+// exactly one place that knows how to do each job: install.sh stays the
+// one place that knows how to install system deps, Node, pm2 and the boot
+// service; this finds it and runs it with the caller's environment passed
+// through (FORAY_SKIP_SERVICE, FORAY_ALLOW_NO_TAILSCALE, FORAY_ALLOW_ROOT —
+// see install.sh's own header for what each does).
 
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
@@ -157,9 +157,22 @@ function cmdSetup() {
   console.log('foray: installing the `foray` command globally (for `foray token` / `foray update` later)...')
   const packDir = fs.mkdtempSync(path.join(os.tmpdir(), 'foray-setup-'))
   try {
-    const pack = spawnSync('npm', ['pack', PKG_ROOT, '--silent', '--pack-destination', packDir], {
-      encoding: 'utf8',
-    })
+    // --ignore-scripts: without it, `npm pack` on a local folder runs that
+    // folder's own `prepack` — here, `npm run build` (tsc + vite) — before
+    // packing it. Both are devDependencies, and PKG_ROOT is the package
+    // *this process is already running from*: an `npx`/global install
+    // installs production dependencies only, so devDependencies are absent
+    // and that build fails every time, taking this whole step down with it
+    // (README's and DEPLOY.md's `foray token` / `foray update` then become
+    // "command not found" on exactly the path they document). None of that
+    // is needed anyway: PKG_ROOT's dist/ is already built — it shipped
+    // pre-built in the tarball that got this far — so packing it as-is is
+    // the correct behaviour, not a shortcut.
+    const pack = spawnSync(
+      'npm',
+      ['pack', PKG_ROOT, '--silent', '--ignore-scripts', '--pack-destination', packDir],
+      { encoding: 'utf8' },
+    )
     const tarballName = pack.stdout?.trim().split('\n').pop()
     if (pack.error || pack.status !== 0 || !tarballName) {
       console.error(
@@ -208,7 +221,61 @@ function cmdUpdate() {
   }
   if (!process.env.FORAY_UPDATE_REEXEC) {
     console.log(`foray: ${dir} is not a git checkout; updating the installed package instead`)
-    runStep('npm', ['i', '-g', 'foray-terminal@latest'])
+    // `npm i -g foray-terminal@latest` succeeding (exit 0) says nothing
+    // about the package actually containing a working CLI: this name has
+    // served a binary-less placeholder from the registry before, and a
+    // plain `npm i -g` would happily overwrite a working global `foray`
+    // with it, only for this process to exit a few lines below on the
+    // missing binary — leaving the box with no working `foray` command at
+    // all and no easy way back to the one that worked a moment ago. Verify
+    // first, the same way cmdSetup does above and for the same reason
+    // (`npm pack` touches nothing global): pack the exact release and
+    // check its own tarball has a bin/foray.mjs and a built dist/ before
+    // it goes anywhere near the global install. Install from that verified
+    // tarball rather than re-resolving 'foray-terminal@latest' a second
+    // time, which could hand npm a different release than the one just
+    // checked.
+    const packDir = fs.mkdtempSync(path.join(os.tmpdir(), 'foray-update-'))
+    try {
+      const pack = spawnSync(
+        'npm',
+        ['pack', 'foray-terminal@latest', '--silent', '--ignore-scripts', '--pack-destination', packDir],
+        { encoding: 'utf8' },
+      )
+      const tarballName = pack.stdout?.trim().split('\n').pop()
+      if (pack.error || pack.status !== 0 || !tarballName) {
+        console.error(
+          "foray: could not download foray-terminal@latest to verify it (`npm pack` failed).\n" +
+            'Leaving the existing global install alone.',
+        )
+        process.exit(1)
+      }
+      const tarballPath = path.join(packDir, tarballName)
+      const extractDir = path.join(packDir, 'extracted')
+      fs.mkdirSync(extractDir)
+      const extract = spawnSync('tar', ['-xzf', tarballPath, '-C', extractDir], { encoding: 'utf8' })
+      const extractedBin = path.join(extractDir, 'package', 'bin', 'foray.mjs')
+      const extractedDist = path.join(extractDir, 'package', 'dist')
+      const usable =
+        !extract.error &&
+        extract.status === 0 &&
+        fs.existsSync(extractedBin) &&
+        fs.existsSync(extractedDist) &&
+        fs.readdirSync(extractedDist).length > 0
+      if (!usable) {
+        console.error(
+          'foray: foray-terminal@latest does not look like a usable release (missing bin/foray.mjs or a\n' +
+            "built dist/). Leaving the existing global install alone rather than replacing it with\n" +
+            'something with no working CLI. Try again later, or report this at\n' +
+            'https://github.com/cushmachine/foray-terminal/issues.',
+        )
+        process.exit(1)
+      }
+      console.log('foray: verified foray-terminal@latest has a working CLI; installing it globally')
+      runStep('npm', ['i', '-g', tarballPath])
+    } finally {
+      fs.rmSync(packDir, { recursive: true, force: true })
+    }
     // `npm i -g` above updates the *global* install; it does nothing to this
     // running process. When this file was launched via `npx foray-terminal
     // update`, PKG_ROOT (top of file) is npx's own cache copy of whatever
