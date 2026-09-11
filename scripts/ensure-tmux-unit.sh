@@ -22,30 +22,14 @@
 set -u
 cd "$(dirname "$0")/.."
 
-# --- leave a pre-rename box alone, before touching anything -----------
-# A box that still has nest-tmux.service installed is holding live sessions
-# on the machine's default socket, and they cannot be moved between tmux
-# servers (docs/plans/foray-tmux-socket.md item 6). So do nothing at all
-# here unless the caller has explicitly opted in by setting
-# FORAY_TMUX_SOCKET to a non-empty name — which is the documented cutover
-# step, taken by hand at a quiet moment.
-#
-# The test is ${FORAY_TMUX_SOCKET:-}, not ${FORAY_TMUX_SOCKET-foray}, so
-# that *unset* counts as "not opted in" too. The pm2 config sets the
-# variable to '' on such a box, but this script's own header invites
-# running it by hand, and by hand there is no pm2 env: the socket would
-# default to "foray" and this guard would wave the run through on exactly
-# the machine it exists to protect.
-#
-# A fresh install has no legacy unit, so the second test fails and
-# everything below proceeds normally.
-if [ -z "${FORAY_TMUX_SOCKET:-}" ] && systemctl cat nest-tmux.service >/dev/null 2>&1; then
-  echo "[tmux-unit] nest-tmux.service is installed; its sessions live on the default"
-  echo "[tmux-unit] socket and cannot be moved. Leaving this box alone. To cut over,"
-  echo "[tmux-unit] set FORAY_TMUX_SOCKET=foray once every session has been closed."
-  exit 0
-fi
-
+# Resolve the socket exactly the way the server does (tmuxSocketArgs in
+# src/server/tmux.ts): unset means Foray's own socket, "foray"; an explicit
+# empty value means the machine's default socket. The two MUST agree. If
+# this script skips on a value the server treats as "foray", the server
+# still spawns a tmux server on that socket — as a child of itself, inside
+# pm2's cgroup, with no unit around it — which is the OOM exposure of
+# 2026-09-08 recreated in silence, and exiting 0 means scripts/start.sh
+# reports success and warns nobody.
 SOCKET="${FORAY_TMUX_SOCKET-foray}"
 SOCK=()
 [ -n "$SOCKET" ] && SOCK=(-L "$SOCKET")
@@ -54,6 +38,27 @@ SOCK=()
 # process that happened to install it.
 SOCKET_FLAG=""
 [ -n "$SOCKET" ] && SOCKET_FLAG="-L $SOCKET "
+
+# --- leave a pre-rename box alone -------------------------------------
+# An empty socket means this box deliberately stays on the machine's
+# default tmux socket, because it has Foray sessions from before Foray had
+# its own and sessions cannot move between tmux servers
+# (docs/plans/foray-tmux-socket.md item 6). Those sessions are already held
+# by the old unit, so there is nothing here to install and nothing to
+# adopt: do nothing at all.
+#
+# Note this tests $SOCKET, not whether FORAY_TMUX_SOCKET is set. Installing
+# the unit for socket "foray" on such a box is harmless — it is a different
+# tmux server from the one holding the old sessions, and the adoption walk
+# below never looks at any socket but this one — and it is what keeps the
+# server's own new sessions inside a unit instead of inside pm2.
+if [ -z "$SOCKET" ] && systemctl cat nest-tmux.service >/dev/null 2>&1; then
+  echo "[tmux-unit] FORAY_TMUX_SOCKET is empty and nest-tmux.service is installed:"
+  echo "[tmux-unit] this box keeps its sessions on the default socket, in the old"
+  echo "[tmux-unit] unit. Nothing to do. Remove that setting once every one of them"
+  echo "[tmux-unit] has been closed or resumed."
+  exit 0
+fi
 
 UNIT=foray-tmux.service
 CGROUP=/sys/fs/cgroup/system.slice/$UNIT
