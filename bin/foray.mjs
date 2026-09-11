@@ -34,6 +34,7 @@ Commands:
            checkout at FORAY_DIR (default ~/foray) — for Docker or local
            dev against an already-built dist/. Not what 'foray setup'
            uses for the real deploy; that's install.sh under pm2.
+  version  Print this package's version (also --version, -v).
 
 Environment variables come from your shell; foray passes them through
 rather than setting its own.
@@ -317,6 +318,24 @@ function cmdUpdate() {
   })
 }
 
+/**
+ * Read the version out of the package this file belongs to, rather than
+ * repeating it here: a hardcoded string is one more thing to forget on a
+ * release, and it would then lie about the code actually running. PKG_ROOT
+ * (top of file) is wherever npm put this package, so the same read works
+ * from a git checkout, a global install and npx's cache alike.
+ */
+function cmdVersion() {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(PKG_ROOT, 'package.json'), 'utf8'))
+    console.log(pkg.version)
+  } catch (err) {
+    console.error(`foray: could not read this package's version: ${err.message}`)
+    process.exit(1)
+  }
+  process.exit(0)
+}
+
 function cmdStart() {
   // The foreground server, not scripts/start.sh: no vite build, no pm2.
   // Runs from FORAY_DIR — the checkout 'foray setup'/'foray update' seed
@@ -351,6 +370,11 @@ switch (command) {
   case '--help':
     process.stdout.write(USAGE)
     process.exit(0)
+    break
+  case '-v':
+  case '--version':
+  case 'version':
+    cmdVersion()
     break
   case 'setup':
     cmdSetup()

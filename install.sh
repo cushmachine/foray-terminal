@@ -16,7 +16,8 @@
 # What it does:
 #   1. Installs system deps (tmux, build tools for node-pty): apt on
 #      Linux, Homebrew plus the Xcode command-line tools on macOS
-#   2. Installs Node.js 24 via nvm
+#   2. Installs Node.js 24 via nvm, but only when Node is missing or older
+#      than that (package.json's engines says ">=24", so newer is fine)
 #   3. Uses whatever is already in FORAY_DIR, or clones the repo there
 #   4. Runs npm install (dev deps included: prod runs with tsx and vite)
 #   5. Checks for Tailscale — refuses to continue without it unless told
@@ -118,6 +119,15 @@ if [ "$OS" = Darwin ]; then
   command -v brew >/dev/null 2>&1 || die "Homebrew is required on macOS: https://brew.sh"
   info "Installing tmux via Homebrew..."
   brew list --versions tmux >/dev/null 2>&1 || brew install tmux
+  # node-gyp shells out to python3 to build node-pty, the same way the apt
+  # branch below installs it. Recent Xcode command-line tools carry a
+  # python3; an older install may not, and when it is missing the failure
+  # surfaces much later as an opaque node-gyp error in the middle of npm
+  # install rather than as anything a reader could act on.
+  if ! command -v python3 >/dev/null 2>&1; then
+    info "Installing python3 via Homebrew (node-pty needs it to compile)..."
+    brew list --versions python3 >/dev/null 2>&1 || brew install python3
+  fi
 else
   info "Installing system packages (tmux, build-essential, python3)..."
   if command -v apt-get >/dev/null 2>&1; then
@@ -140,13 +150,26 @@ fi
 # shellcheck source=/dev/null
 . "$NVM_DIR/nvm.sh"
 
+# NODE_MAJOR is a floor, not a target: package.json's engines says ">=24",
+# so 25 and later are supported too. An exact-major test here would see the
+# Node that README step 1's `brew install node` just installed, decide it is
+# "wrong", and run `nvm alias default 24` — quietly moving someone's
+# system-wide default Node *backwards* to satisfy a constraint that does not
+# exist. Only install when Node is missing or genuinely too old.
 CURRENT_NODE="$(node -v 2>/dev/null || echo "")"
-if [[ "$CURRENT_NODE" != v${NODE_MAJOR}.* ]]; then
+CURRENT_MAJOR="${CURRENT_NODE#v}"      # v24.20.0 -> 24.20.0
+CURRENT_MAJOR="${CURRENT_MAJOR%%.*}"   # 24.20.0  -> 24
+case "$CURRENT_MAJOR" in
+  # No node at all, or a version string we cannot read: treat it as too old
+  # so the arithmetic test below never sees a non-number and aborts.
+  '' | *[!0-9]*) CURRENT_MAJOR=0 ;;
+esac
+if [ "$CURRENT_MAJOR" -lt "$NODE_MAJOR" ]; then
   info "Installing Node.js ${NODE_MAJOR}..."
   nvm install "$NODE_MAJOR"
   nvm alias default "$NODE_MAJOR"
 else
-  info "Node.js ${CURRENT_NODE} already installed."
+  info "Node.js ${CURRENT_NODE} is new enough (Foray needs ${NODE_MAJOR} or later)."
 fi
 
 # ---------- clone or detect repo ----------
