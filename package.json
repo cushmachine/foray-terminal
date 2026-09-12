@@ -1,7 +1,6 @@
 {
   "name": "foray-terminal",
   "version": "0.1.0",
-  "private": true,
   "license": "AGPL-3.0-only",
   "type": "module",
   "description": "A browser terminal that serves tmux sessions from your own box.",
