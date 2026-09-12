@@ -320,6 +320,10 @@ export async function startTestServer(options: ServerOptions = {}): Promise<Test
   const tmux = fakeTmux()
   const { spawner, ptys } = fakePtySpawner()
   const started = await startServer(0, {
+    // Loopback only: even a fake-tmux server is a shell on this machine,
+    // and the default is every interface — an ephemeral port, but a real
+    // one, open to the network for as long as the suite runs.
+    host: '127.0.0.1',
     tmuxExec: tmux.exec,
     ptySpawner: spawner,
     quiet: true,

@@ -35,10 +35,12 @@ by its `Origin` header before credentials are looked at. This is what
 stops a web page you happen to visit from driving your terminal through
 your own browser's position on the network.
 
-**Brute force is slowed.** After five wrong tokens from one address, each
-further attempt from it waits, doubling up to fifteen minutes. Behind
-`tailscale serve` the address is the one Tailscale forwards, so one peer's
-guessing does not lock out another. The token has 256 bits of entropy.
+**Blind guessing is slowed.** After five wrong tokens, each further
+attempt from the same caller waits, doubling up to fifteen minutes. The
+limiter identifies a caller by the address the request comes from, or by
+the address a proxy in front of Foray reports, so it is only as trustworthy
+as that proxy — a brake on guessing rather than a boundary. The token's own
+256 bits of entropy are what make it unguessable.
 
 **Browser-side hardening.** Every response carries a Content Security
 Policy (same-origin scripts only, no framing, no plugins), `X-Frame-Options:
@@ -105,14 +107,7 @@ socket (`FORAY_TMUX_SOCKET`, default `foray`; look with `tmux -L foray
 ls`), so it never adopts or shows sessions from a tmux server you already
 run. Its own sessions are named `foray_*`. On Linux that server lives in
 its own systemd unit, `foray-tmux.service`, so it survives deploys; see
-DEPLOY.md. On a box installed before the rename, Foray still shares the
-machine's default tmux socket (`nest_*` sessions, plain `tmux ls`) in
-`nest-tmux.service`. That is detected, not configured: while
-`/etc/systemd/system/nest-tmux.service` exists, `ecosystem.config.cjs`
-sets `FORAY_TMUX_SOCKET` to the default socket and the unit script does
-nothing, so those sessions stay visible. Once every one of them has been
-closed or resumed, retire the old unit and the next deploy moves the box
-onto the `foray` socket.
+DEPLOY.md.
 
 ## Recommended deployment
 
@@ -176,6 +171,20 @@ other machine. Do this for local development only.
 | `FORAY_ALLOWED_HOSTS` | Comma-separated host names requests may use. Empty means any. |
 | `HOST` | Interface to listen on. Empty means every interface. |
 | `PORT` | Port, default 3000. |
+| `FORAY_TOKEN_FILE` | Where the token file lives, if not `~/.foray/token`. The server and `npm run token` read the same variable, so the two cannot drift apart. |
+| `FORAY_TMUX_SOCKET` | The tmux socket Foray's sessions live on. Unset means its own `foray` socket; empty means the machine's default one. |
+| `FORAY_AGENTS` | Comma-separated agent ids whose past sessions Foray offers; `claude` is the only one today. Unset means every agent whose data directory exists. An unknown id stops the server at startup. |
+| `FORAY_<ID>_ARGS` | Extra arguments for that agent's own command when Foray revives one of its past sessions, split on whitespace — `FORAY_CLAUDE_ARGS='--model opus'`. The model and the flags stay yours to choose. |
+| `FORAY_DIR` | Where Foray is installed. Defaults to the checkout `install.sh` runs from, otherwise `~/foray`. |
+| `FORAY_SKIP_SERVICE` | `1` skips pm2, the boot service and the Tailscale check, for when you start Foray yourself (Docker). |
+| `FORAY_ALLOW_NO_TAILSCALE` | `1` lets `install.sh` finish with no Tailscale present. Nothing but the machine itself can reach Foray until you put Tailscale or another HTTPS proxy in front of it. |
+| `FORAY_ALLOW_ROOT` | `1` lets `install.sh` continue as root with no terminal to confirm. Every session is then a root shell. |
+
+The last four are read by `install.sh` and the `foray` CLI, never by the
+server. The rest are the server's own, and pm2 does not load your shell
+profile, so set them in `ecosystem.config.cjs` (or an untracked
+`ecosystem.local.cjs`, which is merged over it and survives a `git pull`)
+rather than in `~/.bashrc`.
 
 ## Audit history
 

@@ -49,10 +49,13 @@ cd ~/foray && npm run deploy && npm run token
 Anywhere you have a shell on the server:
 
 ```bash
-openssl rand -base64 32 > ~/.foray/token
+(umask 077; openssl rand -base64 32 > ~/.foray/token)
 cd ~/foray && npm run deploy
 npm run token
 ```
+
+The `umask 077` keeps the new file readable only by you; a plain `>` would
+leave it readable by every other account on the machine.
 
 Every device is logged out and needs the new token once.
 
@@ -70,9 +73,6 @@ pm2 status
 pm2 logs foray --lines 50
 ```
 
-(On a box installed before the rename, the pm2 app is still named `nest`:
-`pm2 logs nest --lines 50`.)
-
 And that Tailscale is serving it (`tailscale serve status`). See
 DEPLOY.md.
 
@@ -82,6 +82,3 @@ They are in tmux, which runs separately from Foray. From a server shell,
 `tmux -L foray ls` lists them (Foray runs its own tmux server, not the
 machine's default one). On Linux that server lives in its own systemd
 unit, `foray-tmux.service`; see CLAUDE.md for what never to do to it.
-
-(On a box installed before the rename, sessions are on the machine's
-default socket instead — plain `tmux ls`, no `-L` — in `nest-tmux.service`.)

@@ -12,7 +12,7 @@ interface TopBarProps {
   onSetMobileView: (view: MobileView) => void
   filePanelOpen: boolean
   onToggleFilePanel: () => void
-  /** Desktop only: whether the key toolbar is showing (off by default next to a physical keyboard). */
+  /** Desktop only: whether the key toolbar is showing (on unless the user has turned it off). */
   toolbarVisible: boolean
   onToggleToolbar: () => void
 }
@@ -129,7 +129,7 @@ export function TopBar({
         </div>
       )}
 
-      {/* Desktop key toolbar toggle: off by default next to a real keyboard */}
+      {/* Desktop key toolbar toggle: the bar starts visible, so this is mostly how it gets hidden */}
       {!isMobile && (
         <button
           className="btn-outline"

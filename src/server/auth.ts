@@ -3,8 +3,9 @@
 // Foray is a root-equivalent shell on the machine it runs on, so every
 // route that does anything (the WebSocket, uploads) requires proof that
 // the caller holds the access token. The token is one secret per install:
-// FORAY_TOKEN in the environment, or else ~/.foray/token, generated on
-// first start (mode 0600) and printed by `npm run token`.
+// FORAY_TOKEN in the environment, or else the token file (~/.foray/token,
+// or FORAY_TOKEN_FILE when that is set), generated on first start (mode
+// 0600) and printed by `npm run token`.
 //
 // A browser presents the token once (POST /api/login) and gets a cookie.
 // The cookie is derived from the token, not stored anywhere, so a deploy
@@ -28,6 +29,8 @@ import path from 'node:path'
 import type http from 'node:http'
 
 export const TOKEN_ENV = 'FORAY_TOKEN'
+/** Moves the token file; scripts/token.sh reads the same variable. */
+export const TOKEN_FILE_ENV = 'FORAY_TOKEN_FILE'
 export const DEFAULT_TOKEN_FILE = path.join(os.homedir(), '.foray', 'token')
 export const SESSION_COOKIE = 'foray_session'
 /** How long a login lasts before the browser must present the token again. */
@@ -38,8 +41,10 @@ export const LOGIN_FAILURES_BEFORE_DELAY = 5
 /** First wait after too many failures; doubles per further failure. */
 export const LOGIN_DELAY_BASE_MS = 30_000
 /**
- * Longest wait. Behind `tailscale serve` every client is 127.0.0.1, so one
- * address's lockout is everyone's; a cap keeps a flood from locking the
+ * Longest wait. Callers are told apart by what clientAddress can establish,
+ * which behind a proxy is whatever that proxy reports — and a proxy that
+ * reports nothing usable leaves every caller sharing the loopback bucket,
+ * where one flood is everyone's lockout. A cap keeps that from shutting the
  * owner out for long (existing cookies keep working regardless).
  */
 export const LOGIN_DELAY_MAX_MS = 15 * 60 * 1000
@@ -50,7 +55,10 @@ const MIN_TOKEN_CHARS = 16
 export interface AuthOptions {
   /** The token itself; tests pass one. Wins over the env and the file. */
   token?: string
-  /** Where to read (or create) the token when neither `token` nor FORAY_TOKEN is set. */
+  /**
+   * Where to read (or create) the token when neither `token` nor
+   * FORAY_TOKEN is set. Default: FORAY_TOKEN_FILE, else ~/.foray/token.
+   */
   tokenFile?: string
   /** Environment to read FORAY_TOKEN from. */
   env?: NodeJS.ProcessEnv
@@ -91,7 +99,12 @@ export function loadToken(options: AuthOptions = {}): LoadedToken {
   if (fromEnv !== undefined && fromEnv !== '') {
     return { token: checkToken(fromEnv, TOKEN_ENV), source: 'env', created: false }
   }
-  const file = options.tokenFile ?? DEFAULT_TOKEN_FILE
+  // FORAY_TOKEN_FILE is read here and nowhere else in the server, because
+  // scripts/token.sh honours it too: a server that ignored it would print
+  // one token through `npm run token` and accept another, which is a
+  // lockout that only shows up when someone tries to log in.
+  const fromEnvFile = env[TOKEN_FILE_ENV]
+  const file = options.tokenFile ?? (fromEnvFile || DEFAULT_TOKEN_FILE)
   let existing: string | null = null
   try {
     existing = fs.readFileSync(file, 'utf8').trim()
@@ -99,6 +112,17 @@ export function loadToken(options: AuthOptions = {}): LoadedToken {
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
   }
   if (existing !== null && existing !== '') {
+    // A token rotated by hand (`openssl rand ... > the file`) lands at
+    // whatever umask the shell had, usually 0644 — and then every account
+    // on the box can read a token that is a root shell. Only the create
+    // path below sets the mode, so tighten an existing file on the way
+    // past rather than trusting how it was written.
+    try {
+      fs.chmodSync(file, 0o600)
+    } catch {
+      // Someone else's file, or a filesystem without modes: not ours to
+      // tighten, and not a reason to refuse to start.
+    }
     return { token: checkToken(existing, file), source: 'file', file, created: false }
   }
   const token = generateToken()
@@ -171,14 +195,22 @@ export function canonicalHost(host: string): string {
  * on this machine (`tailscale serve`) every socket is loopback, so the
  * proxy's X-Forwarded-For is what tells clients apart; from anywhere
  * else that header is whatever the client wrote and is ignored.
+ *
+ * The last hop in the header, not the first. A proxy appends the address
+ * it saw to whatever X-Forwarded-For the client already sent (Go's
+ * httputil.ReverseProxy, which is what `tailscale serve` runs, does
+ * exactly that), so the entries in front of it are the client's own
+ * writing: read the first and a guesser picks a new identity per attempt
+ * and never waits. The last entry is the one the proxy itself wrote.
  */
 export function clientAddress(req: http.IncomingMessage): string {
   const direct = req.socket.remoteAddress ?? 'unknown'
   if (!isLoopbackAddress(direct)) return direct
   const forwarded = req.headers['x-forwarded-for']
   if (typeof forwarded !== 'string') return direct
-  const first = forwarded.split(',')[0].trim()
-  return first || direct
+  const hops = forwarded.split(',')
+  const last = hops[hops.length - 1].trim()
+  return last || direct
 }
 
 function isLoopbackAddress(address: string): boolean {

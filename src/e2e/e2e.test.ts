@@ -85,7 +85,7 @@ if (!TMUX_AVAILABLE) {
 // ---------------------------------------------------------------------------
 
 tmuxIt('e2e: terminal I/O round-trip', async () => {
-  const { url, close } = await startServer(0, { quiet: true, auth: { token: TEST_TOKEN } })
+  const { url, close } = await startServer(0, { quiet: true, host: '127.0.0.1', auth: { token: TEST_TOKEN } })
   let windowId: number | null = null
   try {
     const { ws } = await connect(url)
@@ -119,7 +119,7 @@ tmuxIt('e2e: terminal I/O round-trip', async () => {
 // ---------------------------------------------------------------------------
 
 tmuxIt('e2e: terminal resize does not crash', async () => {
-  const { url, close } = await startServer(0, { quiet: true, auth: { token: TEST_TOKEN } })
+  const { url, close } = await startServer(0, { quiet: true, host: '127.0.0.1', auth: { token: TEST_TOKEN } })
   let windowId: number | null = null
   try {
     const { ws } = await connect(url)

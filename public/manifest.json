@@ -2,7 +2,7 @@
   "id": "/",
   "name": "Foray",
   "short_name": "Foray",
-  "description": "Remote dev cockpit",
+  "description": "A browser terminal that serves tmux sessions from your own box, built for driving coding agents from your phone.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

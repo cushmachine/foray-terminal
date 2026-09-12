@@ -1,16 +1,16 @@
 # Foray
 
+Instructions for coding agents working on Foray itself. This is not user documentation — the README is.
+
 ## Deploy
 
-Run `npm run deploy` to build and restart the app. It runs `scripts/deploy.sh`, which typechecks first (a type error aborts before pm2 is touched), then restarts Foray under pm2, or relaunches it from `ecosystem.config.cjs` when that file changed (pm2 does not pick up a changed script or interpreter on a plain restart). pm2 runs `scripts/start.sh`, which builds the client and then starts the server, so every restart is a full deploy and the server and page stamps always match. The app prompts connected clients to reload via `VersionBanner`. There is no dev server — we deploy straight to prod. Never run `pm2 restart` or `pm2 start` by hand; use `npm run deploy`.
+Run `npm run deploy` to build and restart the app. It runs `scripts/deploy.sh`, which typechecks first (a type error aborts before pm2 is touched), then restarts Foray under pm2, or relaunches it from `ecosystem.config.cjs` when that file changed (pm2 does not pick up a changed script or interpreter on a plain restart). pm2 runs `scripts/start.sh`, which builds the client and then starts the server, so every restart is a full deploy and the server and page stamps always match. The app prompts connected clients to reload via `VersionBanner`. Foray has no dev server; a deploy is the only way to run it. Never run `pm2 restart` or `pm2 start` by hand; use `npm run deploy`.
 
 Prod runs from the checkout with `tsx` and builds with `vite`, so the dev dependencies must be installed on the box (`npm install`, never `--omit=dev`).
 
 ## Sessions live in foray-tmux.service
 
-The tmux server that holds every session runs in its own systemd unit, `foray-tmux.service` (generated and installed by `scripts/ensure-tmux-unit.sh`, run from `start.sh` on every deploy), not under pm2. So a deploy, a pm2 crash, or an OOM teardown of pm2 leaves sessions alive. Never `systemctl stop` or `restart foray-tmux`: that kills every session. Foray runs on its own tmux socket (`tmux -L foray ls`; `FORAY_TMUX_SOCKET`, default `foray`), never the machine's default one, so it never touches a tmux server you already run. To recover lost sessions, find their uuids in `~/.claude/activity.log` and run `claude --resume <uuid>` inside a new `foray_<name>` tmux session on that socket.
-
-On a box installed before the rename (this one), the unit is still `nest-tmux.service` and sessions are on the machine's default tmux socket (plain `tmux ls`, `nest_<name>` prefix). `ecosystem.config.cjs`, `scripts/tmux-server.sh` and `scripts/ensure-tmux-unit.sh` all detect that unit file and keep the default socket while it exists; no `ecosystem.local.cjs` is needed. Retire the old unit only when every session in it has been closed or resumed.
+The tmux server that holds every session runs in its own systemd unit, `foray-tmux.service` (generated and installed by `scripts/ensure-tmux-unit.sh`, run from `start.sh` on every deploy), not under pm2. So a deploy, a pm2 crash, or an OOM teardown of pm2 leaves sessions alive. Never `systemctl stop` or `restart foray-tmux`: that kills every session. Foray runs on its own tmux socket (`tmux -L foray ls`; `FORAY_TMUX_SOCKET`, default `foray`), never the machine's default one, so it never touches a tmux server you already run. To recover a lost agent session, the sidebar's Past sessions list revives one from its transcript; by hand, the session ids are the transcript filenames under `~/.claude/projects/`, and `claude --resume <uuid>` inside a new `foray_<name>` tmux session on that socket does the same thing.
 
 On macOS there is no unit: `start.sh` skips it, and the tmux server survives pm2 restarts on its own because macOS has no cgroups. Boot persistence there is a LaunchAgent written by `install.sh` (see DEPLOY.md).
 

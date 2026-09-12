@@ -1,11 +1,11 @@
 // History wrapping: the scrollback pane breaks lines where the pty does.
 //
-// Symptom this guards (screenshot 2026-09-08 13:36): the pane was a
-// fraction of a cell narrower than the pty, so rows tmux or a program had
-// already made exactly `cols` wide wrapped again in the browser and left
-// single-character orphan rows ("Eigh" / "t"). The pane is now locked to
-// exactly `cols` cells measured in its own font, and tmux's wrapped rows
-// are captured joined so a long line is wrapped once, by the pane.
+// Symptom this guards: the pane was a fraction of a cell narrower than the
+// pty, so rows tmux or a program had already made exactly `cols` wide
+// wrapped again in the browser and left single-character orphan rows
+// ("Eigh" / "t"). The pane is now locked to exactly `cols` cells measured
+// in its own font, and tmux's wrapped rows are captured joined so a long
+// line is wrapped once, by the pane.
 //
 // Every test creates its own tmux session; the session active on load may
 // be someone's live shell.

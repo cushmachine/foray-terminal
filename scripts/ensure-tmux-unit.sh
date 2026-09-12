@@ -27,9 +27,9 @@ cd "$(dirname "$0")/.."
 # empty value means the machine's default socket. The two MUST agree. If
 # this script skips on a value the server treats as "foray", the server
 # still spawns a tmux server on that socket — as a child of itself, inside
-# pm2's cgroup, with no unit around it — which is the OOM exposure of
-# 2026-09-08 recreated in silence, and exiting 0 means scripts/start.sh
-# reports success and warns nobody.
+# pm2's cgroup, with no unit around it — which is the exact OOM exposure
+# this script exists to remove, recreated in silence, and exiting 0 means
+# scripts/start.sh reports success and warns nobody.
 # Default socket: "foray" normally, but the machine's default socket on a
 # box that still has the pre-rename unit installed. Its sessions live there
 # and cannot be moved between tmux servers, so switching sockets would hide
@@ -180,7 +180,7 @@ render_unit() {
 #
 # Without this the server is spawned by Foray under pm2, so it lives in
 # pm2's cgroup: a pm2 stop, or systemd tearing pm2 down after one of its
-# processes is OOM-killed (2026-09-08: a Playwright Chrome), kills every
+# processes is OOM-killed (one Playwright Chrome is enough), kills every
 # session at once.
 #
 # scripts/tmux-server.sh runs the server in the foreground (\`tmux -D\`), so
@@ -191,9 +191,9 @@ render_unit() {
 Description=tmux server for Foray sessions
 After=network.target
 # Stopping or restarting kills every session. Refuse \`systemctl stop/restart\`
-# (needrestart after an apt upgrade did that on 2026-09-09 06:10, and a
-# session testing this setting did it again at 06:48 while the key sat in
-# [Service], where systemd ignores it). Only a system shutdown may stop it.
+# (needrestart after an apt upgrade has done exactly that, and so has a
+# hand-run restart while this key sat in [Service], where systemd ignores
+# it — it only works in [Unit]). Only a system shutdown may stop it.
 # To really restart: remove this line, daemon-reload, restart, restore it.
 RefuseManualStop=yes
 

@@ -3,9 +3,13 @@
 # `npm run token` runs.
 #
 # The server reads FORAY_TOKEN from its environment, or else the file
-# ~/.foray/token, which it creates on first start. To rotate the token
-# (which logs every device out): delete the file and run `npm run deploy`,
-# or write a new one with `openssl rand -base64 32 > ~/.foray/token`.
+# ~/.foray/token, which it creates on first start. FORAY_TOKEN_FILE moves
+# that file; the server reads the same variable, so this prints the token
+# it actually accepts. To rotate the token (which logs every device out):
+# delete the file and run `npm run deploy`, or write a new one with
+# `(umask 077; openssl rand -base64 32 > ~/.foray/token)` -- the umask is
+# why that runs in a subshell: a plain `>` creates the file readable by
+# every account on the machine.
 # Run this as the user Foray runs as.
 
 set -eu

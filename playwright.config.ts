@@ -15,6 +15,7 @@
 // points every browser context's foray:lastSession at it (via storageState),
 // so a page load never attaches to someone's live session.
 
+import { randomBytes } from 'node:crypto'
 import { defineConfig } from '@playwright/test'
 
 // Override with VISUAL_PORT=<n> to run two copies of the suite side by side
@@ -25,7 +26,18 @@ const ROOT = `.playwright/root-${VISUAL_PORT}`
 const STORAGE_STATE = `.playwright/state-${VISUAL_PORT}.json`
 // The token the server under test accepts; global-setup turns it into the
 // session cookie every browser context starts with, so no spec logs in.
-export const VISUAL_TOKEN = 'visual-suite-token-0123456789'
+// Minted per run rather than written down here: this file is public, and
+// the token in it opens a root shell on whatever port the suite serves.
+// Playwright loads this config again in each worker process (auth.spec.ts
+// types VISUAL_TOKEN into the login form from there), so a bare
+// randomBytes() would mint a second token the running server has never
+// heard of. Keep the first one in the environment instead: workers are
+// forked from the runner and inherit it, and re-read it here rather than
+// minting another. The variable is this file talking to its own children,
+// not a knob for the caller.
+const VISUAL_TOKEN_ENV = 'FORAY_VISUAL_TOKEN'
+export const VISUAL_TOKEN = process.env[VISUAL_TOKEN_ENV] || randomBytes(24).toString('hex')
+process.env[VISUAL_TOKEN_ENV] = VISUAL_TOKEN
 
 // The visual suite drives real tmux, so it runs on a throwaway socket and can
 // never see — or kill — sessions someone actually uses. Fixed, and
@@ -68,10 +80,14 @@ export default defineConfig({
     },
   },
   webServer: {
+    // HOST is loopback on purpose: the entry point binds every interface
+    // when HOST is unset, so on a machine without a firewall `npm run
+    // test:visual` would put a root shell on VISUAL_PORT for the length of
+    // the run. baseURL is 127.0.0.1 already, so no spec notices.
     command: [
       `mkdir -p ${ROOT}`,
       `npx vite build --outDir ${ROOT}/dist --emptyOutDir`,
-      `cd ${ROOT} && NODE_ENV=production PORT=${VISUAL_PORT} FORAY_TOKEN=${VISUAL_TOKEN} FORAY_TMUX_SOCKET=${TMUX_SOCKET} ../../node_modules/.bin/tsx ../../src/server/index.ts`,
+      `cd ${ROOT} && NODE_ENV=production HOST=127.0.0.1 PORT=${VISUAL_PORT} FORAY_TOKEN=${VISUAL_TOKEN} FORAY_TMUX_SOCKET=${TMUX_SOCKET} ../../node_modules/.bin/tsx ../../src/server/index.ts`,
     ].join(' && '),
     port: VISUAL_PORT,
     reuseExistingServer: false,

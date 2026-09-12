@@ -216,9 +216,9 @@ npm install 2>&1 | tail -5
 # pipefail` (above), `grep -q` exits at its first match and closes its end
 # of the pipe, so once `tailscale` has more to write than fits in one
 # pipe buffer it gets SIGPIPE, exits 141, and pipefail makes the whole
-# pipeline read as failure even though the state really is "Running". This
-# box's own `tailscale status --json` is a few KB with one peer; a busier
-# tailnet (~2.4 KB/peer here, so roughly 30-40 peers) is enough to trigger
+# pipeline read as failure even though the state really is "Running". A
+# one-peer tailnet's `tailscale status --json` is only a few KB and slips
+# through; at roughly 2.4 KB per peer, 30-40 peers is enough to trigger
 # it. Avoid the whole class of bug by never leaving the pipe with only one
 # reader that can quit early: write the output to a file first (so nothing
 # is still writing when it's read), then parse it as JSON rather than

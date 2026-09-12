@@ -159,11 +159,14 @@ test('originAllowed: same host passes, another origin or a malformed one does no
   assert.equal(originAllowed(fakeRequest({ host: 'box:80', origin: 'http://box' })), true)
 })
 
-test('clientAddress: the socket address, or the first forwarded hop behind a loopback proxy', () => {
+test('clientAddress: the socket address, or the last forwarded hop behind a loopback proxy', () => {
   const at = (remoteAddress: string, forwarded?: string) =>
     clientAddress({ headers: { 'x-forwarded-for': forwarded }, socket: { remoteAddress } } as unknown as import('node:http').IncomingMessage)
   assert.equal(at('100.64.1.2', '9.9.9.9'), '100.64.1.2', 'a direct client cannot pick its own address')
-  assert.equal(at('127.0.0.1', '100.64.1.2, 10.0.0.1'), '100.64.1.2')
+  // The rightmost entry is the one the proxy in front of Foray appended.
+  // Everything to its left was written by the caller, who would otherwise
+  // choose their own rate-limit bucket and rotate it per request.
+  assert.equal(at('127.0.0.1', '1.2.3.4, 100.64.1.2'), '100.64.1.2', 'the hop the proxy added, not the one the client wrote')
   assert.equal(at('::ffff:127.0.0.1', '100.64.1.2'), '100.64.1.2')
   assert.equal(at('127.0.0.1'), '127.0.0.1', 'loopback with no proxy header stays loopback')
 })

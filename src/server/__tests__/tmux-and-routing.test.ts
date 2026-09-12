@@ -104,7 +104,7 @@ test('listWindows asks tmux for id, name, cwd, title, command and the named flag
 
 test('listWindows filters out non-Foray sessions', async () => {
   const mockExec = execReturning(
-    [line(0, 'foray_shell', '/root'), line(1, 'other_session', '/tmp'), line(2, 'foray_dev', '/root/project')].join('\n'),
+    [line(0, 'foray_shell', '/home/user'), line(1, 'other_session', '/tmp'), line(2, 'foray_dev', '/home/user/project')].join('\n'),
   )
 
   const windows = await listWindows(mockExec, HOST)
@@ -142,7 +142,7 @@ test('listWindows handles paths and titles with spaces', async () => {
 
 test('listWindows surfaces a title set by a running program', async () => {
   const mockExec = execReturning(
-    line(1, 'foray_bash', '/root/GitHub', { title: '✳ Test session', command: 'claude' }),
+    line(1, 'foray_bash', '/home/user/projects', { title: '✳ Test session', command: 'claude' }),
   )
   const [win] = await listWindows(mockExec, HOST)
   assert.equal(win.title, '✳ Test session')
@@ -151,21 +151,21 @@ test('listWindows surfaces a title set by a running program', async () => {
 })
 
 test('listWindows blanks the title when it is just the hostname (tmux default)', async () => {
-  const mockExec = execReturning(line(1, 'foray_bash', '/root', { title: HOST, command: 'claude' }))
+  const mockExec = execReturning(line(1, 'foray_bash', '/home/user', { title: HOST, command: 'claude' }))
   const [win] = await listWindows(mockExec, HOST)
   assert.equal(win.title, '')
 })
 
 test('listWindows blanks a stale title once a bare shell is in the foreground', async () => {
   // Claude set a title, then exited. tmux keeps the old title; we should not.
-  const mockExec = execReturning(line(1, 'foray_bash', '/root', { title: '✳ old', command: 'bash' }))
+  const mockExec = execReturning(line(1, 'foray_bash', '/home/user', { title: '✳ old', command: 'bash' }))
   const [win] = await listWindows(mockExec, HOST)
   assert.equal(win.title, '')
 })
 
 test('listWindows reads the @foray_named flag', async () => {
   const mockExec = execReturning(
-    line(1, 'foray_work', '/root', { title: '✳ something', command: 'claude', named: true }),
+    line(1, 'foray_work', '/home/user', { title: '✳ something', command: 'claude', named: true }),
   )
   const [win] = await listWindows(mockExec, HOST)
   assert.equal(win.named, true)
@@ -304,18 +304,13 @@ test('applyTmuxServerOptions leaves mouse/history-limit alone on the machine\'s 
   }
 })
 
-// scripts/foray.tmux.conf (S4) ships the same extended-keys values this
-// function re-asserts, so the two copies cannot drift silently. Skipped,
-// not invented, until that file exists.
-test('foray.tmux.conf keeps the same extended-keys values applyTmuxServerOptions re-asserts', async (t) => {
+// scripts/foray.tmux.conf ships the same extended-keys values this function
+// re-asserts, so the two copies cannot drift silently. A missing conf file
+// fails here rather than skipping: with nothing to compare against, the two
+// copies could drift the whole way apart unnoticed.
+test('foray.tmux.conf keeps the same extended-keys values applyTmuxServerOptions re-asserts', async () => {
   const confPath = path.join(import.meta.dirname, '..', '..', '..', 'scripts', 'foray.tmux.conf')
-  let conf: string
-  try {
-    conf = await fs.readFile(confPath, 'utf-8')
-  } catch {
-    t.skip('scripts/foray.tmux.conf does not exist yet (S4)')
-    return
-  }
+  const conf = await fs.readFile(confPath, 'utf-8')
   assert.match(conf, /^set -s extended-keys always$/m)
   assert.match(conf, /^set -s extended-keys-format csi-u$/m)
 })

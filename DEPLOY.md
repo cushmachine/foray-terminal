@@ -145,8 +145,15 @@ The browser asks for it once per device and keeps a cookie for 30 days
 of use. To log every device out, replace the file and redeploy:
 
 ```bash
-openssl rand -base64 32 > ~/.foray/token && npm run deploy
+(umask 077; openssl rand -base64 32 > ~/.foray/token) && npm run deploy
 ```
+
+The `umask 077` is why that runs in a subshell: a plain `>` creates the
+file at whatever umask your shell has, which on most systems leaves it
+readable by every other account on the machine. The server creates its own
+token file owner-only, and tightens the mode when it reads one back, but
+that is a repair after the fact — the token is only as private as the
+moment you wrote it.
 
 Because Foray only listens on loopback, Tailscale HTTPS is the way in;
 `install.sh` runs this for you when it can, or prints it:

@@ -179,7 +179,7 @@ test('safeErrorMessage: an errno is reduced to what it means', () => {
 })
 
 test('safeErrorMessage: anything else is generic and leaks nothing', () => {
-  assert.equal(safeErrorMessage(new Error('spawn tmux ENOENT at /root/.tmux')), 'Operation failed')
+  assert.equal(safeErrorMessage(new Error('spawn tmux ENOENT at /home/user/.tmux')), 'Operation failed')
   assert.equal(safeErrorMessage('a string'), 'Operation failed')
   assert.equal(safeErrorMessage(undefined), 'Operation failed')
   assert.equal(safeErrorMessage({ code: 'ENOENT' }), 'Operation failed', 'a bare object with a code is not an Error')

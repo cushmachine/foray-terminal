@@ -26,7 +26,7 @@ function hasTmux(): boolean {
 }
 
 test('Shift+Enter as CSI u reaches the pane unchanged', { skip: !hasTmux() && 'tmux not installed' }, async () => {
-  const { url, close } = await startServer(0, { quiet: true, auth: { token: TEST_TOKEN } })
+  const { url, close } = await startServer(0, { quiet: true, host: '127.0.0.1', auth: { token: TEST_TOKEN } })
   const { ws } = await connect(url)
   const created = waitForTypeOrError(ws, 'session:created')
   ws.send(JSON.stringify({ type: 'session:create', name: `e2e-keys-${Date.now().toString(36)}` }))

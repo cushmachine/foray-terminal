@@ -250,14 +250,14 @@ test('imageFilesFromClipboard: returns image files, skipping text and non-image 
 
 test('pathToTerminalInput: plain paths get a trailing space; awkward paths are single-quoted', () => {
   assert.equal(
-    pathToTerminalInput('/root/uploads/upload-2026-09-03-094512.png'),
-    '/root/uploads/upload-2026-09-03-094512.png ',
+    pathToTerminalInput('/home/user/uploads/upload-2026-09-03-094512.png'),
+    '/home/user/uploads/upload-2026-09-03-094512.png ',
   )
   assert.equal(pathToTerminalInput('/Users/Jo Smith/uploads/x.png'), "'/Users/Jo Smith/uploads/x.png' ")
   assert.equal(shellQuote("/tmp/it's.png"), "'/tmp/it'\\''s.png'")
   assert.equal(shellQuote('/tmp/$HOME.png'), "'/tmp/$HOME.png'")
   // Never a newline: the user should be able to keep typing the command.
-  assert.ok(!pathToTerminalInput('/root/uploads/a.png').includes('\n'))
+  assert.ok(!pathToTerminalInput('/home/user/uploads/a.png').includes('\n'))
 })
 
 test('uploadImage: resolves with the saved path on success and throws the server error on failure', async () => {

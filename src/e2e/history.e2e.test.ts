@@ -44,7 +44,7 @@ const plain = (line: string): string =>
  * the lines in between.
  */
 tmuxIt('e2e: repeating output reaches the browser with no lines missing', async () => {
-  const { url, close } = await startServer(0, { quiet: true, auth: { token: TEST_TOKEN } })
+  const { url, close } = await startServer(0, { quiet: true, host: '127.0.0.1', auth: { token: TEST_TOKEN } })
   let windowId: number | null = null
   try {
     const { ws } = await connect(url)
@@ -114,7 +114,7 @@ tmuxIt('e2e: repeating output reaches the browser with no lines missing', async 
  * a dropped line and a line spliced mid-word are all visible in the numbers.
  */
 tmuxIt('e2e: resizing while output lands does not duplicate or lose lines', async () => {
-  const { url, close } = await startServer(0, { quiet: true, auth: { token: TEST_TOKEN } })
+  const { url, close } = await startServer(0, { quiet: true, host: '127.0.0.1', auth: { token: TEST_TOKEN } })
   let windowId: number | null = null
   try {
     const { ws } = await connect(url)
