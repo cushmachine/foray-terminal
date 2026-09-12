@@ -116,15 +116,29 @@ if [ "$OS" = Darwin ]; then
     xcode-select --install || true
     die "Installing the Xcode command-line tools; rerun install.sh when that finishes."
   fi
-  command -v brew >/dev/null 2>&1 || die "Homebrew is required on macOS: https://brew.sh"
-  info "Installing tmux via Homebrew..."
-  brew list --versions tmux >/dev/null 2>&1 || brew install tmux
+  # Homebrew is only needed for the deps that are actually missing, so ask
+  # for it at the point of use rather than up front: a Mac that already has
+  # tmux and python3 needs no Homebrew at all, and an old one whose Homebrew
+  # no longer works ("no bottle available") can still install Foray.
+  need_brew() {
+    command -v brew >/dev/null 2>&1 || die "Homebrew is required on macOS: https://brew.sh"
+  }
+  # Ask whether tmux is on PATH, not whether Homebrew installed it: tmux from
+  # MacPorts, a source build or a system package counts just as much, and
+  # sending that machine down the Homebrew path turns a dependency that was
+  # already satisfied into a failed install.
+  if ! command -v tmux >/dev/null 2>&1; then
+    need_brew
+    info "Installing tmux via Homebrew..."
+    brew list --versions tmux >/dev/null 2>&1 || brew install tmux
+  fi
   # node-gyp shells out to python3 to build node-pty, the same way the apt
   # branch below installs it. Recent Xcode command-line tools carry a
   # python3; an older install may not, and when it is missing the failure
   # surfaces much later as an opaque node-gyp error in the middle of npm
   # install rather than as anything a reader could act on.
   if ! command -v python3 >/dev/null 2>&1; then
+    need_brew
     info "Installing python3 via Homebrew (node-pty needs it to compile)..."
     brew list --versions python3 >/dev/null 2>&1 || brew install python3
   fi

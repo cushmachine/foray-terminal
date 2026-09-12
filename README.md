@@ -10,9 +10,13 @@ Foray is a browser terminal, backed by tmux sessions on a server you run, built 
 
 Foray runs on a server you control — a small Linux VPS or a Mac you leave on — and you reach it over [Tailscale](https://tailscale.com), so it is never exposed to the open internet.
 
-1. Get a Linux VPS (Ubuntu 22.04+) or set aside a Mac to act as the server,
-   and make sure Node.js 24+ is on it — a fresh Ubuntu box ships with none,
-   and step 3 needs `npx` to even start:
+1. Get a Linux VPS (Ubuntu 22.04+) or set aside a Mac to act as the server.
+   A Mac needs [Homebrew](https://brew.sh), and a macOS recent enough that
+   Homebrew still supports it — it ships prebuilt packages for roughly the
+   last three releases, so macOS 15 (Sequoia) or newer; on an older one the
+   install dies at the first dependency it tries to fetch. Either way, make
+   sure Node.js 24+ is on it — Foray does not run on less, a fresh Ubuntu box
+   ships with none, and step 3 needs `npx` to even start:
    `curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash - && sudo apt-get install -y nodejs`
    (Mac: `brew install node`).
 2. Install Tailscale on it and sign in.
