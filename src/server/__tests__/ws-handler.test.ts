@@ -211,11 +211,14 @@ async function attached(conn: HandledConnection, windowId: number, size: object 
 }
 
 test('dispatch: ping answers pong and client:hello answers server:hello', async () => {
-  const conn = handleTestConnection({ serverBuild: 'srv-1', servedClientBuild: async () => 'cli-1' })
+  const conn = handleTestConnection({ serverBuild: 'srv-1', serverRoot: '/srv', servedClientBuild: async () => 'cli-1' })
   conn.socket.receive({ type: 'ping' })
   await until(() => sentOf(conn, 'pong').length === 1, 'the pong')
   await handled(conn, { type: 'client:hello', build: 'cli-0' })
-  assert.deepEqual(sentOf(conn, 'server:hello')[0], { type: 'server:hello', serverBuild: 'srv-1', clientBuild: 'cli-1' })
+  assert.deepEqual(
+    sentOf(conn, 'server:hello')[0],
+    { type: 'server:hello', serverBuild: 'srv-1', serverRoot: '/srv', clientBuild: 'cli-1' },
+  )
   conn.socket.emit('close')
 })
 

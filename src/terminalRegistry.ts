@@ -26,16 +26,26 @@ class TerminalRegistry {
   private readonly terminals = new Map<number, TerminalActions>()
   /** Per window: whether its scrollback holds a prompt line to jump to. */
   private readonly prompts = new Map<number, boolean>()
+  /** Windows whose terminal holds a pty on the server right now. */
+  private readonly attached = new Set<number>()
+  /** Per window: text waiting for that pty to exist (see runWhenAttached). */
+  private readonly pending = new Map<number, string>()
   private readonly listeners = new Set<() => void>()
   private activeId: number | null = null
 
   /** Register a window's actions. Returns the matching unregister. */
   register(windowId: number, actions: TerminalActions): () => void {
     this.terminals.set(windowId, actions)
+    // A remount of a window that still holds its pty can arrive after the
+    // work was queued; either order releases it.
+    this.flush(windowId)
     return () => {
       if (this.terminals.get(windowId) !== actions) return
       this.terminals.delete(windowId)
       this.prompts.delete(windowId)
+      this.attached.delete(windowId)
+      // The terminal is gone, so nothing queued for it can ever run.
+      this.pending.delete(windowId)
       this.notify()
     }
   }
@@ -56,6 +66,42 @@ class TerminalRegistry {
     if (this.prompts.get(windowId) === available) return
     this.prompts.set(windowId, available)
     this.notify()
+  }
+
+  /**
+   * Whether a window's terminal holds a pty, reported by the terminal as
+   * its attach state changes. No notify(): nothing on screen renders from
+   * this, it only releases work queued below.
+   */
+  setAttached(windowId: number, attached: boolean): void {
+    if (attached === this.attached.has(windowId)) return
+    if (attached) {
+      this.attached.add(windowId)
+      this.flush(windowId)
+    } else {
+      this.attached.delete(windowId)
+    }
+  }
+
+  /**
+   * Submit `text` in a window as soon as its terminal holds a pty, or now
+   * if it already does. Input for a window this connection has not
+   * finished attaching to reaches a pty that does not exist yet and is
+   * dropped on the floor, so a command sent the moment a session is
+   * created — "sync now" and its deploy — has to wait for the attach that
+   * follows. One queued text per window; the newest replaces it.
+   */
+  runWhenAttached(windowId: number, text: string): void {
+    this.pending.set(windowId, text)
+    this.flush(windowId)
+  }
+
+  private flush(windowId: number): void {
+    const text = this.pending.get(windowId)
+    const actions = this.terminals.get(windowId)
+    if (text === undefined || !actions || !this.attached.has(windowId)) return
+    this.pending.delete(windowId)
+    actions.submit(text)
   }
 
   // Bound, so a React component can hand them to useSyncExternalStore as they are.

@@ -645,6 +645,9 @@ export function startServer(
       },
       userAgent,
       serverBuild,
+      // Where a rebuild has to run: the same root clientDistDir() resolves
+      // dist/ against, since scripts/start.sh starts the server there.
+      serverRoot: process.cwd(),
       servedClientBuild: () => readServedClientBuild(options.clientDist ?? clientDistDir()),
     })
     connections.set(ws, connection)

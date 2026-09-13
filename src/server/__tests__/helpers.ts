@@ -420,6 +420,7 @@ export function handleTestConnection(overrides: Partial<ConnectionDeps> = {}): H
     dropAttachmentsFor: (windowId) => connection.dropAttachment(windowId),
     userAgent: 'test',
     serverBuild: 'test',
+    serverRoot: '/test/root',
     servedClientBuild: async () => null,
     ...overrides,
   })

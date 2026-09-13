@@ -372,6 +372,14 @@ export interface ServerHelloMessage {
   type: 'server:hello'
   serverBuild: string
   clientBuild: string | null
+  /**
+   * The directory the server runs from, and so the one a rebuild has to
+   * run in: the page offers to deploy there when the two have drifted
+   * apart. Optional because a server old enough not to send it is exactly
+   * the server a drifting page is talking to; treat it as unknown, never
+   * as an empty path.
+   */
+  serverRoot?: string
 }
 
 /** Union of every message the server may send to the client. */

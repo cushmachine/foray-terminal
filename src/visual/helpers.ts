@@ -7,7 +7,8 @@
 //   session-row, session-item (data-session-id, data-active), session-rename,
 //   session-kill, session-name-input, files-toggle, file-panel,
 //   key-toolbar, key-toolbar-row, keytoolbar-fade-right, keytoolbar-toggle,
-//   terminal (the active session's xterm container), version-banner.
+//   terminal (the active session's xterm container), version-banner,
+//   version-action (the banner's button; every notice has one).
 // Test hook: the active Terminal publishes its xterm instance as
 // window.__foray.term so tests can read the screen buffer, which the WebGL
 // renderer does not expose in the DOM, and its actions as

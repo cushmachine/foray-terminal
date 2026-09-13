@@ -52,7 +52,14 @@ import { terminalRegistry } from './terminalRegistry'
 import { TopBar } from './TopBar'
 import { Toast, failureText } from './Toast'
 import { VersionBanner } from './VersionBanner'
-import { readPageBuild, versionNotice, type VersionNotice } from './version'
+import {
+  SYNC_COMMAND,
+  holdsSyncSession,
+  planSync,
+  readPageBuild,
+  versionNotice,
+  type VersionNotice,
+} from './version'
 import type { PastSession } from './shared/protocol'
 
 function useFontSize(isMobile: boolean): [number, (size: number) => void] {
@@ -80,6 +87,14 @@ export function App() {
   // a given notice text until the server reports something different.
   const [notice, setNotice] = useState<VersionNotice | null>(null)
   const dismissedNotice = useRef<string | null>(null)
+  // Where the server runs from, from server:hello: the directory the
+  // banner's "sync now" deploys in. Null until the first hello, and on a
+  // server too old to send it (see ServerHelloMessage.serverRoot).
+  const serverRoot = useRef<string | null>(null)
+  // "sync now" is waiting for the session it asked for. Only the create
+  // this page sent may run the deploy: session:created is broadcast to
+  // every client, and another device's new session is not ours to type in.
+  const syncPending = useRef(false)
   // Desktop starts with the sidebar in view; a phone starts on the terminal.
   const [panels, setPanels] = useState<PanelState>(() => ({
     sidebarOpen: !detectMobile(),
@@ -169,6 +184,7 @@ export function App() {
   useEffect(() => {
     return onMessage((msg) => {
       if (msg.type === 'server:hello') {
+        serverRoot.current = msg.serverRoot ?? null
         const next = versionNotice(readPageBuild(), msg, import.meta.env.PROD)
         setNotice(next && next.text === dismissedNotice.current ? null : next)
         return
@@ -192,11 +208,28 @@ export function App() {
       // session op isn't silent. The reducer sees every error too: a
       // failed create must clear the wait for it.
       if (msg.type === 'error') {
+        // The session "sync now" asked for never arrived; nothing is
+        // waiting for it any more.
+        if (msg.request === 'session:create') syncPending.current = false
         if (!msg.request.startsWith('files:') && !msg.request.startsWith('terminal:')) {
           setToast(failureText(msg))
         }
       } else if (!msg.type.startsWith('session:')) {
         return
+      }
+      if (msg.type === 'session:created' && syncPending.current) {
+        syncPending.current = false
+        if (holdsSyncSession(msg.window)) {
+          // Not sent straight away: the terminal for a session this page
+          // just created has not attached yet, and input before that
+          // reaches no pty (terminalRegistry.runWhenAttached).
+          terminalRegistry.runWhenAttached(msg.window.id, SYNC_COMMAND)
+        } else {
+          // Another client's session arrived in the gap and took the name
+          // (or just took the wait); ours is a spare shell, and nothing
+          // has been typed into either.
+          setToast('Another session arrived first, so no deploy was started. Reload to try again.')
+        }
       }
       dispatchSessions({
         type: 'message',
@@ -235,6 +268,31 @@ export function App() {
   const killSession = useCallback((id: number) => {
     send({ type: 'session:kill', windowId: id })
   }, [send])
+
+  /**
+   * The version banner's "sync now": build and restart the server from a
+   * session on the box, where the user can watch it and answer anything it
+   * asks. The deploy restarts Foray under pm2, but tmux is a systemd unit
+   * of its own, so the session running the build outlives that; this page
+   * loses its socket for a moment and reconnects to the new server.
+   *
+   * The session is the lock (planSync): one already called "deploy" means
+   * a deploy is running, so this only brings it into view.
+   */
+  const syncServer = useCallback(() => {
+    const step = planSync(sessionsRef.current, serverRoot.current)
+    if (step.kind === 'focus') {
+      // Show the deploy that holds the lock rather than starting a second
+      // one. It may be a session an earlier deploy finished in and left
+      // behind, which is why the toast says what to do about that.
+      selectSession(step.windowId)
+      setToast('A deploy session is already open. If its build has finished, close it and sync again.')
+      return
+    }
+    syncPending.current = true
+    dispatchSessions({ type: 'create' })
+    send({ type: 'session:create', name: step.name, ...(step.cwd === null ? {} : { cwd: step.cwd }) })
+  }, [selectSession, send])
 
   // A revive arrives as an ordinary session:created, so the same wait
   // makes only this device switch to it.
@@ -467,7 +525,7 @@ export function App() {
           {/* In the flow above the top bar, so it never covers a control. */}
           <VersionBanner
             notice={notice}
-            onReload={() => window.location.reload()}
+            actions={{ reload: () => window.location.reload(), sync: syncServer }}
             onDismiss={() => {
               dismissedNotice.current = notice?.text ?? null
               setNotice(null)

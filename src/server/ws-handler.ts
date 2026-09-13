@@ -141,6 +141,8 @@ export interface ConnectionDeps {
   userAgent: string
   /** Commit the server process was started from (server/build.ts). */
   serverBuild: string
+  /** Directory the server runs from: where `npm run deploy` has to run. */
+  serverRoot: string
   /** Build id of the client bundle on disk right now, or null. */
   servedClientBuild: () => Promise<string | null>
 }
@@ -267,7 +269,7 @@ type Handlers = { [T in ClientMessage['type']]: (msg: MessageOf<T>) => void | Pr
 export function handleConnection(ws: WebSocket, deps: ConnectionDeps): Connection {
   const {
     remoteAddress, send, broadcast, ptySpawner, tmuxExec, pastSessions, logger, welcome, claimWindow, releaseWindow,
-    releaseAllWindows, dropAttachmentsFor, userAgent, serverBuild, servedClientBuild,
+    releaseAllWindows, dropAttachmentsFor, userAgent, serverBuild, serverRoot, servedClientBuild,
   } = deps
   const log = scopedLog(logger, 'ws')
 
@@ -467,7 +469,7 @@ export function handleConnection(ws: WebSocket, deps: ConnectionDeps): Connectio
     'client:hello': async (msg) => {
       // The one log line that says which bundle a device is running.
       log.log(`hello from ${remoteAddress} build=${msg.build ?? 'none'} ua="${userAgent}"`)
-      send({ type: 'server:hello', serverBuild, clientBuild: await servedClientBuild() })
+      send({ type: 'server:hello', serverBuild, serverRoot, clientBuild: await servedClientBuild() })
     },
     'session:list': async () => {
       send({ type: 'session:list', windows: await listWindows(tmuxExec) })

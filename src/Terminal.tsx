@@ -146,6 +146,14 @@ export function Terminal({
     terminalRegistry.setPromptAvailable(windowId, promptAvailable)
   }, [windowId, promptAvailable])
 
+  // Whether this terminal holds a pty, so text queued for a session that
+  // did not exist a moment ago (VersionBanner's "sync now") is submitted
+  // once there is something to submit it to, not into the gap before the
+  // attach lands.
+  useEffect(() => {
+    terminalRegistry.setAttached(windowId, state === 'attached')
+  }, [windowId, state])
+
   return (
     <div
       data-testid="terminal"

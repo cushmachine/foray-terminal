@@ -129,6 +129,24 @@ before starting the server, so a restart is a deploy; a broken client
 build keeps the previous `dist/` serving. Never run `pm2 restart` or
 `pm2 start` by hand.
 
+### When the page and the server disagree
+
+Foray stamps the server with the commit it started from and the page with
+the build it came from, and says so at the top of the app when the two
+differ. That strip always carries a button: **reload** when the browser is
+only holding an old page, and **sync now** when the server itself is
+behind. *sync now* opens a session called `deploy` and runs
+`npm run deploy` in it, so you can watch the build and answer anything it
+asks; the deploy restarts the server and this page reconnects on its own.
+Press it again while one is running and it just shows you the deploy
+already going — the session is the lock, and two builds at once is how a
+small box runs out of memory.
+
+They drift apart when something builds without deploying, so nothing but a
+deploy builds: `npm pack` and `npm publish` ship the `dist/` that is
+already there rather than making a new one, and stop with a message if it
+was not built from the checkout being packed. Deploy first, then pack.
+
 ## Network and access
 
 Foray binds `127.0.0.1:3000` by default (`ecosystem.config.cjs`; `HOST`
