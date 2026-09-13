@@ -30,31 +30,62 @@ Foray runs on a server you control — a small Linux VPS or a Mac you leave on �
    A Mac needs [Homebrew](https://brew.sh), and a macOS recent enough that
    Homebrew still supports it — it ships prebuilt packages for roughly the
    last three releases, so macOS 15 (Sequoia) or newer; on an older one the
-   install dies at the first dependency it tries to fetch. Either way, make
-   sure Node.js 24+ is on it — Foray does not run on less, a fresh Ubuntu box
-   ships with none, and step 3 needs `npx` to even start:
-   `curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash - && sudo apt-get install -y nodejs`
-   (Mac: `brew install node`).
+   install dies at the first dependency it tries to fetch.
 2. Install Tailscale on it and sign in.
-3. `npx foray-terminal setup` — installs tmux and pm2, deploys Foray, and
-   prints your access token plus a `https://<name>.<tailnet>.ts.net` URL.
+3. Run the installer on it:
+
+   ```bash
+   curl -fsSL https://foray-terminal.com/install.sh | bash
+   ```
+
+   It installs tmux, Node.js 24 and pm2, puts Foray in `~/foray`, deploys it,
+   and prints your access token plus the `https://<name>.<tailnet>.ts.net`
+   URL to reach it at. A fresh Ubuntu box needs nothing on it beforehand —
+   not even Node.
 4. Open that URL and paste in the token, once per device.
 
-## From source
+It has to be `| bash`. On most Linux boxes `sh` is a different shell
+(dash), which would misread the script, so the installer checks and stops
+rather than run under it. And as with any install one-liner: it is a shell
+script that will run as you, so [read it](install.sh) before you pipe it
+into a shell.
 
-For contributors, or if you'd rather not go through npm:
+`foray-terminal.com` does not serve the script yet. Until it does, take it
+from GitHub — same file, same command:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/cushmachine/foray-terminal/main/install.sh | bash
+```
+
+## Other ways to install
+
+**From npm.** The package carries a built client, so this installs without
+cloning anything — handy on a box with no git, or to pin a release:
+
+```bash
+npx foray-terminal setup
+```
+
+Unlike the one-liner, this one needs Node.js 24+ on the box already: `npx`
+has to run before anything else can. A fresh Ubuntu box ships with none —
+`curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash - && sudo apt-get install -y nodejs`
+(Mac: `brew install node`). It also leaves the `foray` command on your PATH
+(see "Token & updates" below).
+
+**From source**, for contributors or anyone who would rather clone it
+themselves:
 
 ```bash
 git clone https://github.com/cushmachine/foray-terminal.git ~/foray
 cd ~/foray && bash install.sh
 ```
 
-`install.sh` is the same script `npx foray-terminal setup` runs for you: it
-installs tmux and Node 24, runs `npm install`, and deploys Foray under pm2.
-It works on the same Linux VPS or Mac described above. Foray runs its own
-tmux server on its own socket, with its own config
-(`scripts/foray.tmux.conf`) — it never writes or edits your `~/.tmux.conf`,
-so it's safe to install alongside tmux sessions you already run.
+All three run the same `install.sh`, which installs tmux and Node 24, runs
+`npm install`, and deploys Foray under pm2 — on the same Linux VPS or Mac
+described above. Foray runs its own tmux server on its own socket, with its
+own config (`scripts/foray.tmux.conf`) — it never writes or edits your
+`~/.tmux.conf`, so it's safe to install alongside tmux sessions you already
+run.
 
 ## Using it
 
@@ -120,9 +151,12 @@ anyone else can reach.
 
 ## Token & updates
 
-`setup` also installs the `foray` command itself, globally, so it's on
-your PATH afterwards (running it again there is harmless if you'd rather
-stick with `npx foray-terminal ...`).
+The npm path's `setup` also installs the `foray` command itself, globally,
+so it's on your PATH afterwards (running it again there is harmless if
+you'd rather stick with `npx foray-terminal ...`). The one-liner and the
+from-source path leave you with a git checkout at `~/foray` and no global
+command; there, use the `npm run ...` equivalents at the end of this
+section.
 
 Print the access token again any time — a new device, or if you lost it:
 
@@ -137,13 +171,14 @@ foray update
 ```
 
 `foray update` behaves differently depending on how you installed. From a
-git checkout (the "From source" path), it refuses rather than discarding
-anything: it stops and prints what it found if the checkout is dirty,
-otherwise runs a fast-forward-only `git pull`. From the npm path, there is
-no checkout to check for local edits, so nothing is refused: it copies the
-new release's files over `~/foray` unconditionally, except an existing
-`ecosystem.config.cjs` is left alone. From a source checkout, the
-equivalents are `npm run token` and:
+git checkout — what the one-liner and "From source" both leave you with —
+it refuses rather than discarding anything: it stops and prints what it
+found if the checkout is dirty, otherwise runs a fast-forward-only `git
+pull`. From the npm path, there is no checkout to check for local edits, so
+nothing is refused: it copies the new release's files over `~/foray`
+unconditionally, except an existing `ecosystem.config.cjs` is left alone.
+From a checkout, with no `foray` command on your PATH, the equivalents are
+`npm run token` and:
 
 ```bash
 cd ~/foray

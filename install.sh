@@ -2,7 +2,10 @@
 # Foray installer — run on a fresh Ubuntu VPS (22.04+) or a Mac that will
 # act as the server (a MacBook or Mac mini at home, reached over Tailscale).
 #
-# This script has two callers, and does the same thing for both:
+# This script has three callers, and does the same thing for all of them:
+#   - anyone running the install one-liner, which pipes this file straight
+#     into bash (Usage below). There is no file on disk and no checkout, so
+#     this clones the repo into FORAY_DIR (~/foray by default);
 #   - a contributor, running it by hand from a git clone (Usage below);
 #   - `foray setup`, from the foray-terminal npm package. It copies the
 #     package's own files (the built client included) into FORAY_DIR when
@@ -27,23 +30,53 @@
 #      LaunchAgent on macOS (so it runs inside the logged-in user's session,
 #      where the agent's Keychain login lives)
 #
+# Usage (everyone else — the install one-liner). It must be `| bash`, not
+# `| sh`: see the shell check below for what `sh` does with this file.
+#   curl -fsSL https://foray-terminal.com/install.sh | bash
+#
 # Usage (contributors, from a clone):
 #   git clone https://github.com/cushmachine/foray-terminal.git ~/foray
 #   cd ~/foray && bash install.sh
 #
-# Usage (everyone else, from npm — runs this same script for you):
+# Usage (from npm — runs this same script for you):
 #   npx foray-terminal setup
 #
 # Environment variables:
 #   FORAY_DIR   — where to install. Defaults to the checkout running this
 #                 script when it's a git checkout (the contributor path
-#                 above), otherwise ~/foray (the npm path).
+#                 above), otherwise ~/foray (the one-liner and npm paths).
 #   FORAY_SKIP_SERVICE — set to 1 to skip pm2 and the boot service (for Docker)
 #   FORAY_ALLOW_NO_TAILSCALE — set to 1 to install without Tailscale present
 #   FORAY_ALLOW_ROOT — set to 1 to install as root with no terminal to confirm
 #
 # The port is 3000, set in ecosystem.config.cjs; Foray binds it to 127.0.0.1
 # only, so Tailscale (or your own HTTPS proxy) is what makes it reachable.
+
+# ---------- this is bash, and only bash ----------
+
+# A shebang only decides anything when a file is *executed*. The install
+# one-liner pipes this script into a shell instead, so whatever shell the
+# reader typed is what runs it — and someone will type `| sh`, which on
+# Debian and Ubuntu is dash. Nothing below is dash: BASH_SOURCE, arrays,
+# `local`, `read -p` and `set -o pipefail` are all bash. Worse, dash does
+# not fail on any of that loudly enough to stop: it prints "Bad
+# substitution" for ${BASH_SOURCE[0]} to stderr, leaves the assignment's
+# status at 0 so `set -e` never fires, and SCRIPT_DIR below silently
+# becomes the *current directory* — so `curl ... | sh` run from inside any
+# git repo took the contributor path and installed Foray into that repo.
+# Refuse before any of it runs, and say what to type instead.
+#
+# Keep this block POSIX: it has to parse and run in the shells it exists to
+# turn away. Nothing bash-only may appear above it, including `set -o
+# pipefail` (moved below on purpose).
+if [ -z "${BASH_VERSION:-}" ]; then
+  echo "install.sh needs bash — this shell is not bash, and would misread the script." >&2
+  echo "" >&2
+  echo "  curl -fsSL https://foray-terminal.com/install.sh | bash" >&2
+  echo "" >&2
+  echo "or, from a checkout:  bash install.sh" >&2
+  exit 1
+fi
 
 set -euo pipefail
 
@@ -61,8 +94,27 @@ die()   { printf '\033[1;31m✗\033[0m %s\n' "$@" >&2; exit 1; }
 # in a git worktree, so this checks existence with -e, not -d: a -d check
 # misreads a worktree as the npm path and clones a second checkout next to
 # it — the exact bug FORAY_DIR's default just below exists to prevent.
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [ -e "$SCRIPT_DIR/.git" ]; then
+#
+# ${BASH_SOURCE[0]} is this file's path when bash *executed* it, and unset
+# when bash read it from stdin (`curl ... | bash`), where there is no file
+# and so no directory to look in. That is "no script directory" — an empty
+# SCRIPT_DIR, which the test below requires to be non-empty before the
+# contributor path is even considered. Do not fall back to $0 or $PWD:
+# piped, both name whatever directory the reader happened to be standing
+# in, which is exactly how the one-liner used to decide someone else's git
+# repo was a Foray checkout and install into it.
+#
+# The `set +u` is for bash 3.2, the one macOS ships, which is fussier than
+# modern bash about subscripting an unset array while -u is on.
+set +u
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+set -u
+SCRIPT_DIR=""
+if [ -n "$SCRIPT_PATH" ]; then
+  SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" 2>/dev/null && pwd)" || SCRIPT_DIR=""
+fi
+
+if [ -n "$SCRIPT_DIR" ] && [ -e "$SCRIPT_DIR/.git" ]; then
   info "Running from a git checkout at $SCRIPT_DIR (contributor path)."
   # Default FORAY_DIR to the checkout that's actually running this script,
   # not $HOME/foray. Without this, `git clone ... ~/src/foray && cd
@@ -72,6 +124,9 @@ if [ -e "$SCRIPT_DIR/.git" ]; then
   # running app. `foray setup` is unaffected: it always passes FORAY_DIR
   # explicitly (see bin/foray.mjs), which wins over this default either way.
   FORAY_DIR="${FORAY_DIR:-$SCRIPT_DIR}"
+elif [ -z "$SCRIPT_DIR" ]; then
+  info "Running from a pipe (the install one-liner); nothing is checked out yet."
+  FORAY_DIR="${FORAY_DIR:-$HOME/foray}"
 else
   info "Running as \`foray setup\`, from the installed npm package."
   FORAY_DIR="${FORAY_DIR:-$HOME/foray}"
@@ -97,8 +152,26 @@ elif [ "$(id -u)" -ne 0 ]; then
 else
   warn "Running as root: every Foray session will be a root shell. A dedicated"
   warn "user is safer (see SECURITY.md's Recommended deployment section)."
+  # Ask, but never from stdin when stdin is the script: under the install
+  # one-liner `read` would swallow the rest of this file instead of waiting
+  # for an answer — and a fresh VPS is usually root, so that is the common
+  # case, not the odd one. When stdin is a terminal, read from it as
+  # before; otherwise go to the terminal directly with /dev/tty, which is
+  # still there under `curl ... | bash`. Opening /dev/tty fails outright
+  # when there is no controlling terminal (Docker, cron, a CI runner) — the
+  # genuinely unattended case FORAY_ALLOW_ROOT exists for — so that failure
+  # is what selects the branches below rather than anything guessed.
+  REPLY=""
+  ASKED=0
+  ROOT_PROMPT="Continue as root anyway? Type 'yes' to proceed: "
   if [ -t 0 ]; then
-    read -r -p "Continue as root anyway? Type 'yes' to proceed: " REPLY || REPLY=""
+    read -r -p "$ROOT_PROMPT" REPLY || REPLY=""
+    ASKED=1
+  elif { printf '%s' "$ROOT_PROMPT" >/dev/tty; } 2>/dev/null; then
+    read -r REPLY </dev/tty || REPLY=""
+    ASKED=1
+  fi
+  if [ "$ASKED" = 1 ]; then
     [ "$REPLY" = yes ] || die "Aborted. Create a dedicated user and re-run install.sh as it."
   elif [ "${FORAY_ALLOW_ROOT:-0}" != "1" ]; then
     die "Running as root with no terminal to confirm." \
@@ -146,7 +219,16 @@ else
   info "Installing system packages (tmux, build-essential, python3)..."
   if command -v apt-get >/dev/null 2>&1; then
     ${SUDO:+$SUDO} apt-get update -qq
-    ${SUDO:+$SUDO} apt-get install -y -qq tmux build-essential python3 git curl >/dev/null
+    # The two env vars are about stdin, not tidiness. Under the install
+    # one-liner stdin is this script, so anything apt decides to ask —
+    # dpkg's "keep or replace this config file?", or needrestart's "which
+    # services should be restarted?" on Ubuntu 22.04+ — reads the rest of
+    # install.sh as the answer and runs whatever is left. DEBIAN_FRONTEND
+    # takes dpkg's default instead of asking; NEEDRESTART_MODE=l makes
+    # needrestart list what wants restarting and restart nothing, which is
+    # also what we want on a box whose whole point is long-lived sessions.
+    ${SUDO:+$SUDO} env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=l \
+      apt-get install -y -qq tmux build-essential python3 git curl >/dev/null
   else
     die "Only apt-based distros (Ubuntu/Debian) are supported on Linux."
   fi
@@ -192,7 +274,13 @@ if [ -f "$FORAY_DIR/package.json" ]; then
   info "Using the existing Foray install at $FORAY_DIR."
 else
   info "Cloning Foray into $FORAY_DIR..."
-  if ! git clone https://github.com/cushmachine/foray-terminal.git "$FORAY_DIR" 2>/dev/null; then
+  # GIT_TERMINAL_PROMPT=0 so a repo this machine cannot read fails here and
+  # now with the message below. Without it git asks for a GitHub username
+  # and password on the terminal and waits — which the one-liner's reader,
+  # watching a script they piped into bash, has no reason to expect and no
+  # useful answer for. The 2>/dev/null above does not help: that prompt
+  # goes to /dev/tty, not stderr.
+  if ! GIT_TERMINAL_PROMPT=0 git clone https://github.com/cushmachine/foray-terminal.git "$FORAY_DIR" 2>/dev/null; then
     die "Clone failed. If the repo is private, clone it manually first:" \
         "  git clone https://github.com/cushmachine/foray-terminal.git $FORAY_DIR" \
         "  cd $FORAY_DIR && bash install.sh"
