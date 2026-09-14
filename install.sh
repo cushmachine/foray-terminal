@@ -2,17 +2,14 @@
 # Foray installer — run on a fresh Ubuntu VPS (22.04+) or a Mac that will
 # act as the server (a MacBook or Mac mini at home, reached over Tailscale).
 #
-# This script has three callers, and does the same thing for all of them:
+# This script has two callers, and does the same thing for both:
 #   - anyone running the install one-liner, which pipes this file straight
 #     into bash (Usage below). There is no file on disk and no checkout, so
 #     this clones the repo into FORAY_DIR (~/foray by default);
-#   - a contributor, running it by hand from a git clone (Usage below);
-#   - `foray setup`, from the foray-terminal npm package. It copies the
-#     package's own files (the built client included) into FORAY_DIR when
-#     nothing is installed there, then execs this file with FORAY_DIR
-#     pinned to that directory — so the clone step below is never reached
-#     on that path. Nothing needs git, and nothing is fetched: the package
-#     already carries everything.
+#   - a contributor, running it by hand from a git clone (Usage below).
+# A third shape still works but is nobody's documented path: running this
+# from an unpacked copy of the tree that is not a git checkout. Then
+# FORAY_DIR defaults to ~/foray and the clone below fills it.
 # It prints which one it thinks it is (see "running from" below) so a
 # reader watching the output knows which path they are on.
 #
@@ -38,13 +35,10 @@
 #   git clone https://github.com/cushmachine/foray-terminal.git ~/foray
 #   cd ~/foray && bash install.sh
 #
-# Usage (from npm — runs this same script for you):
-#   npx foray-terminal setup
-#
 # Environment variables:
 #   FORAY_DIR   — where to install. Defaults to the checkout running this
 #                 script when it's a git checkout (the contributor path
-#                 above), otherwise ~/foray (the one-liner and npm paths).
+#                 above), otherwise ~/foray.
 #   FORAY_SKIP_SERVICE — set to 1 to skip pm2 and the boot service (for Docker)
 #   FORAY_ALLOW_NO_TAILSCALE — set to 1 to install without Tailscale present
 #   FORAY_ALLOW_ROOT — set to 1 to install as root with no terminal to confirm
@@ -87,12 +81,12 @@ info()  { printf '\033[1;32m→\033[0m %s\n' "$*"; }
 warn()  { printf '\033[1;33m!\033[0m %s\n' "$*"; }
 die()   { printf '\033[1;31m✗\033[0m %s\n' "$@" >&2; exit 1; }
 
-# A git checkout has a .git entry next to this script; the npm package
-# never does (npm does not ship it), so this tells the two callers above
-# apart without needing anything passed in from foray setup. `.git` is a
+# A git checkout has a .git entry next to this script; an unpacked copy of
+# the tree does not, so this tells the callers above apart without needing
+# anything passed in. `.git` is a
 # directory in a normal clone but a plain file (pointing at the real one)
 # in a git worktree, so this checks existence with -e, not -d: a -d check
-# misreads a worktree as the npm path and clones a second checkout next to
+# misreads a worktree as an unpacked copy and clones a second checkout next to
 # it — the exact bug FORAY_DIR's default just below exists to prevent.
 #
 # ${BASH_SOURCE[0]} is this file's path when bash *executed* it, and unset
@@ -121,14 +115,14 @@ if [ -n "$SCRIPT_DIR" ] && [ -e "$SCRIPT_DIR/.git" ]; then
   # ~/src/foray && bash install.sh` clones the repo a *second* time into
   # ~/foray and installs/deploys that copy, while the contributor goes on
   # editing ~/src/foray — every change they make is invisible to the
-  # running app. `foray setup` is unaffected: it always passes FORAY_DIR
-  # explicitly (see bin/foray.mjs), which wins over this default either way.
+  # running app. An explicit FORAY_DIR in the environment always wins over
+  # this default.
   FORAY_DIR="${FORAY_DIR:-$SCRIPT_DIR}"
 elif [ -z "$SCRIPT_DIR" ]; then
   info "Running from a pipe (the install one-liner); nothing is checked out yet."
   FORAY_DIR="${FORAY_DIR:-$HOME/foray}"
 else
-  info "Running as \`foray setup\`, from the installed npm package."
+  info "Running from an unpacked copy of the tree, not a git checkout."
   FORAY_DIR="${FORAY_DIR:-$HOME/foray}"
 fi
 

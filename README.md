@@ -57,30 +57,16 @@ from GitHub — same file, same command:
 curl -fsSL https://raw.githubusercontent.com/cushmachine/foray-terminal/main/install.sh | bash
 ```
 
-## Other ways to install
+## From source
 
-**From npm.** The package carries a built client, so this installs without
-cloning anything — handy on a box with no git, or to pin a release:
-
-```bash
-npx foray-terminal setup
-```
-
-Unlike the one-liner, this one needs Node.js 24+ on the box already: `npx`
-has to run before anything else can. A fresh Ubuntu box ships with none —
-`curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash - && sudo apt-get install -y nodejs`
-(Mac: `brew install node`). It also leaves the `foray` command on your PATH
-(see "Token & updates" below).
-
-**From source**, for contributors or anyone who would rather clone it
-themselves:
+For contributors, or anyone who would rather clone it themselves:
 
 ```bash
 git clone https://github.com/cushmachine/foray-terminal.git ~/foray
 cd ~/foray && bash install.sh
 ```
 
-All three run the same `install.sh`, which installs tmux and Node 24, runs
+Both run the same `install.sh`, which installs tmux and Node 24, runs
 `npm install`, and deploys Foray under pm2 — on the same Linux VPS or Mac
 described above. Foray runs its own tmux server on its own socket, with its
 own config (`scripts/foray.tmux.conf`) — it never writes or edits your
@@ -151,34 +137,16 @@ anyone else can reach.
 
 ## Token & updates
 
-The npm path's `setup` also installs the `foray` command itself, globally,
-so it's on your PATH afterwards (running it again there is harmless if
-you'd rather stick with `npx foray-terminal ...`). The one-liner and the
-from-source path leave you with a git checkout at `~/foray` and no global
-command; there, use the `npm run ...` equivalents at the end of this
-section.
+Both install paths leave you with a git checkout at `~/foray`, so both of
+these run from there.
 
 Print the access token again any time — a new device, or if you lost it:
 
 ```bash
-foray token
+cd ~/foray && npm run token
 ```
 
 Update to the latest release:
-
-```bash
-foray update
-```
-
-`foray update` behaves differently depending on how you installed. From a
-git checkout — what the one-liner and "From source" both leave you with —
-it refuses rather than discarding anything: it stops and prints what it
-found if the checkout is dirty, otherwise runs a fast-forward-only `git
-pull`. From the npm path, there is no checkout to check for local edits, so
-nothing is refused: it copies the new release's files over `~/foray`
-unconditionally, except an existing `ecosystem.config.cjs` is left alone.
-From a checkout, with no `foray` command on your PATH, the equivalents are
-`npm run token` and:
 
 ```bash
 cd ~/foray
@@ -186,6 +154,12 @@ git pull
 npm install
 npm run deploy
 ```
+
+`git pull` will not quietly discard your work: if you have edited a file
+the update also changes, it stops and names it rather than overwriting it.
+`ecosystem.config.cjs` is the one you are most likely to have touched —
+"Network and access" in [DEPLOY.md](DEPLOY.md) tells you to edit it for
+`HOST`.
 
 ## Getting help
 

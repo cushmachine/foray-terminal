@@ -15,33 +15,9 @@
   "engines": {
     "node": ">=24"
   },
-  "bin": {
-    "foray": "bin/foray.mjs"
-  },
-  "files": [
-    "bin",
-    "dist",
-    "src",
-    "!src/__tests__",
-    "!src/server/__tests__",
-    "!src/visual",
-    "!src/e2e",
-    "scripts",
-    "install.sh",
-    "ecosystem.config.cjs",
-    "SECURITY.md",
-    "DEPLOY.md",
-    "RECOVERY.md",
-    "index.html",
-    "public",
-    "tsconfig.json",
-    "tsconfig.server.json",
-    "vite.config.ts"
-  ],
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.server.json",
     "build": "npm run typecheck && vite build",
-    "prepack": "npm run typecheck && npx tsx scripts/prepack.ts",
     "icons": "node scripts/make-icons.mjs",
     "start": "NODE_ENV=production tsx src/server/index.ts",
     "deploy": "bash scripts/deploy.sh",

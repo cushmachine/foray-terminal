@@ -8,6 +8,14 @@ dependencies (vite, tsx, typescript) are needed at runtime; install with
 ## First install
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/cushmachine/foray-terminal/main/install.sh | bash
+```
+
+It has to be `| bash`; the script checks and refuses to run under dash.
+That clones the repo into `~/foray` (or `$FORAY_DIR`) and installs from
+there. From a clone you already have, run the same script directly:
+
+```bash
 git clone https://github.com/cushmachine/foray-terminal.git ~/foray
 cd ~/foray && bash install.sh
 ```
@@ -17,78 +25,6 @@ registers pm2 to start at boot. Foray ships its own tmux config
 (`scripts/foray.tmux.conf`), applied only to its own server on its own
 socket (see "Sessions live in foray-tmux.service" in CLAUDE.md) — it never
 writes or edits `~/.tmux.conf`.
-
-## Installed from npm
-
-```bash
-npx foray-terminal setup
-```
-
-`npx foray-terminal setup` runs the package's `bin/foray.mjs`. It copies
-the package's own files — the built client included — into `~/foray` (or
-`$FORAY_DIR`) when nothing is installed there yet, then runs the very same
-`install.sh` as "First install" above against that directory. Nothing is
-cloned: the package already carries everything, which is what makes this
-work on a box with no git, and on a release you have in hand. If that
-directory already holds an install, `setup` leaves it alone and says so
-rather than writing over it. `install.sh` prints which path it is on
-("Running as `foray setup`..." vs "Running from a git checkout...") so you
-can always tell. It finishes the same way either path: your access token
-printed once, and the Tailscale step if it could not run that for you.
-
-`setup` finishes by installing the CLI itself globally too, best effort, so
-two more commands are on your PATH after that:
-
-```bash
-foray token   # print the access token again, any time
-foray update  # pull the latest release and redeploy
-```
-
-That install packs the running copy of the package into a tarball and
-installs *that* (`npm pack` then `npm i -g` the result), rather than
-`npm i -g` on the running copy's own directory. The directory can be npx's
-own ephemeral cache, and npm's docs say installing a plain folder from
-outside your project symlinks to it instead of copying — a symlink into a
-cache directory with no promised lifetime, which would eventually leave
-`foray` a dangling link. Packing first makes npm copy real files instead,
-the same as installing a published release would.
-
-(if that install didn't take — no global npm prefix, offline, whatever —
-`npx foray-terminal token` / `npx foray-terminal update` do the same
-thing).
-
-`foray update` acts on `$FORAY_DIR` (default `~/foray`), and its two paths
-handle local changes differently — one refuses to discard them, the other
-has no way to know they're there. Inside a git checkout, it refuses:
-`git status --porcelain` must come back clean, or it stops and prints what
-it found, before running
-`git pull --ff-only && npm install && npm run deploy`. If that directory is
-not a git checkout — the npm install path — there is no working tree to
-check, so nothing is refused. It first verifies the release is actually
-usable: packs `foray-terminal@latest` and checks the tarball itself has a
-`bin/foray.mjs` and a built `dist/` before anything touches the global
-install (the registry has served a placeholder with no CLI under this name
-before, and this must never trade a working `foray` for one that isn't).
-Once verified, it installs from that exact tarball, resolves where that
-put the new files (`npm root -g`, not wherever this invocation itself
-happened to run from — `npx` in particular runs from its own ephemeral
-cache, which never updates itself mid-command), and re-execs the freshly
-installed CLI to refresh `$FORAY_DIR` from it. That refresh copies the new
-package's files over the old ones **unconditionally** — any other file you
-have hand-edited under `$FORAY_DIR` on this path is overwritten — except
-it leaves an existing `ecosystem.config.cjs` alone, since that's the file
-"Network and access" below tells you to edit for `HOST`. Put `$FORAY_DIR`
-under git yourself (even without pushing it anywhere) if you want update
-to protect more than that one file.
-
-There is also `foray start`: the server in the foreground, no pm2 and no
-build, run from the checkout at `$FORAY_DIR` — for Docker or local dev
-against an already-built `dist/`. It needs that directory's own
-`node_modules` (Foray runs its TypeScript server through `tsx`, a dev
-dependency), which `install.sh` puts there; a bare `npm i -g
-foray-terminal` installs production dependencies only, so `start` before a
-`setup` tells you exactly which path is missing. The normal path here is
-`setup`, not `start`.
 
 ## macOS as the server
 
@@ -143,9 +79,8 @@ already going — the session is the lock, and two builds at once is how a
 small box runs out of memory.
 
 They drift apart when something builds without deploying, so nothing but a
-deploy builds: `npm pack` and `npm publish` ship the `dist/` that is
-already there rather than making a new one, and stop with a message if it
-was not built from the checkout being packed. Deploy first, then pack.
+deploy may build into the live `dist/`. If you ever run `npm run build` by
+hand, deploy afterwards so the server and the page it serves agree again.
 
 ## Network and access
 
