@@ -50,8 +50,10 @@ rather than run under it. And as with any install one-liner: it is a shell
 script that will run as you, so [read it](install.sh) before you pipe it
 into a shell.
 
-`foray-terminal.com` does not serve the script yet. Until it does, take it
-from GitHub — same file, same command:
+The site hands you the same file GitHub does — it fetches
+`install.sh` from this repo's `main` and refuses to serve anything else, so
+a bad fetch is a 502 rather than something your shell would run. To skip
+the middleman, take it from GitHub directly:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cushmachine/foray-terminal/main/install.sh | bash
