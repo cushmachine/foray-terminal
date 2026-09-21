@@ -1,0 +1,699 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Foray — vibecode from any device</title>
+<!-- The long-form description lives here, not on the page: it is what a
+     search result or a link preview shows. The page itself stays short. -->
+<meta name="description" content="Start vibecoding on your laptop. Keep going on your phone.">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#0a0a0c">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='5' fill='%230a0a0c'/%3E%3Cpath d='M9 6l6 6-6 6' fill='none' stroke='%233db8a9' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://foray-terminal.com/">
+<meta property="og:title" content="Foray">
+<meta property="og:description" content="Start vibecoding on your laptop. Keep going on your phone.">
+<style>
+  /* Light is the base; the dark palette is the app's own, from src/styles.css.
+     No JavaScript on this page and nothing fetched from anywhere else: the
+     only subresource is a screenshot, /hero.webp or /phone.webp depending on
+     the viewport, off this same origin. The only animation left is
+     the word spinner, every drawing is inline <svg>, and the only href outside
+     an <a> is the favicon. */
+  :root {
+    --bg: #fcfcfb;
+    --surface: #f2f2f0;
+    --border: #e2e2df;
+    /* The structural ink: diagram boxes and arrows. Near-black on the light
+       page, near-white on the dark one — the same job, high contrast either
+       way, because a white hairline on a white page draws nothing. */
+    --line-strong: #2b2b33;
+    --text: #17171c;
+    --text-strong: #08080d;
+    --text-dim: #5c5c68;
+    --accent: #0f6f65;
+    --accent-text: #0f6f65;
+    --accent-on: #ffffff;
+    --bad: #b0442f;
+    --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', 'Cascadia Code', ui-monospace, monospace;
+    --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0a0a0c;
+      --surface: #111116;
+      --border: #232330;
+      --line-strong: #eeeef4;
+      --text: #d4d4d8;
+      --text-strong: #ffffff;
+      --text-dim: #8a8a97;
+      --accent: #3db8a9;
+      --accent-text: #5cd4c4;
+      --accent-on: #04120f;
+      --bad: #d4634f;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-sans);
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 42rem;
+    margin: 0 auto;
+    padding: 1.25rem 1.25rem 3rem;
+  }
+  @media (max-width: 30rem) {
+    main { padding: 1rem 1rem 2.5rem; }
+  }
+
+  a { color: var(--accent-text); text-underline-offset: 2px; }
+  a:hover { text-decoration-thickness: 2px; }
+  p { margin: 0 0 1rem; }
+  .dot { padding: 0 0.35rem; color: var(--border); }
+
+  /* ------------------------------------------------------------- header */
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+  }
+  /* The wordmark carries the favicon's chevron, redrawn as inline <svg> and
+     sized in em so it tracks the type. Same path, same accent, no subresource. */
+  .wordmark {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-family: var(--font-mono);
+    font-size: 1.05rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    margin: 0;
+  }
+  .wordmark .mark {
+    width: 0.83em;
+    height: 1.1em;
+    flex: none;
+    display: block;
+    color: var(--accent);
+  }
+  /* The same wordmark, reused small inside the diagram: it takes the box's own
+     type size rather than the header's, and its own colour. */
+  .wordmark.mini { font-size: inherit; gap: 0.25rem; color: inherit; }
+  /* The GitHub link, quietly: a bordered pill, the Octocat mark from GitHub's
+     octicons, one word. No count — a count would mean fetching from
+     github.com. */
+  .star {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.3rem 0.65rem;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--text);
+    font-size: 0.82rem;
+    font-weight: 600;
+    line-height: 1.2;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  .star:hover { border-color: var(--text-dim); }
+  .star svg { width: 14px; height: 14px; flex: none; display: block; }
+
+  /* --------------------------------------------------------------- hero */
+  h1 {
+    font-size: clamp(1.4rem, 5.6vw, 2.05rem);
+    line-height: 1.3;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    text-align: center;
+    margin: 2.5rem 0 0;
+  }
+  h1 .line { display: block; }
+  /* The bracketed word never breaks away from its brackets or its full stop,
+     however narrow the screen gets. */
+  h1 .grp { white-space: nowrap; }
+  .brk { color: var(--text-dim); font-weight: 400; }
+
+  /* A word spinner: a clipping box holding the words stacked, rolled by one
+     height every three seconds. Both slots run the same keyframes on the same
+     duration with no delay, so the pairs stay matched: laptop/phone,
+     desktop/phone, phone/laptop, desktop/iPad. The fifth word in each stack is
+     a copy of the first, so the wrap at the end of the cycle is invisible. */
+  .slot {
+    display: inline-block;
+    overflow: hidden;
+    vertical-align: middle;
+    height: 1.35em;
+    font-family: var(--font-mono);
+    font-size: 0.88em;
+    color: var(--accent-text);
+    text-align: center;
+  }
+  .slot-a { min-width: 7.2ch; }
+  .slot-b { min-width: 6.4ch; }
+  .roll { display: block; animation: wordroll 12s cubic-bezier(0.7, 0, 0.3, 1) infinite; }
+  .roll span { display: block; height: 1.35em; line-height: 1.35em; }
+  @keyframes wordroll {
+    0%, 18%  { transform: translateY(0); }
+    25%, 43% { transform: translateY(-20%); }
+    50%, 68% { transform: translateY(-40%); }
+    75%, 93% { transform: translateY(-60%); }
+    100%     { transform: translateY(-80%); }
+  }
+
+  .jump { text-align: center; margin: 1.4rem 0 0; }
+  .cta {
+    display: inline-block;
+    padding: 0.55rem 1.5rem;
+    border: 1px solid var(--accent);
+    border-radius: 999px;
+    background: var(--accent);
+    color: var(--accent-on);
+    font-size: 0.95rem;
+    font-weight: 600;
+    line-height: 1.3;
+    text-decoration: none;
+  }
+  .cta:hover { filter: brightness(1.1); }
+
+  /* The one photograph on the page: Foray itself, running in a browser. The
+     width and height attributes on the tag hold the space while it loads, so
+     nothing below it jumps.
+
+     It breaks out of the 42rem text measure on purpose. Squeezed to the
+     measure, a 1440px-wide app halves every glyph and the terminal text
+     becomes unreadable — the picture stops being evidence. Prose stays at
+     42rem where it belongs; only this escapes. `left: 50%` plus a negative
+     half-width margin rather than a transform, which can land on a half
+     pixel and blur the very thing we widened it to show. The 2.5rem gutter
+     in the calc also absorbs a desktop scrollbar, so 100vw cannot overflow. */
+  .shot {
+    --shot-w: min(68rem, calc(100vw - 2.5rem));
+    display: block;
+    width: var(--shot-w);
+    height: auto;
+    position: relative;
+    left: 50%;
+    margin: 2rem 0 0 calc(var(--shot-w) * -0.5);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+  }
+  /* <picture> is an inline wrapper by default, and a block-level image inside
+     an inline box splits it and leaves a stray line box behind. Block, so the
+     wrapper is exactly the image and the breakout measures off the same
+     containing block it always did. */
+  picture { display: block; }
+
+  /* Below this width the <picture> switches to the phone screenshot, which is
+     720x1485 — taller than it is wide. The 68rem breakout is right for a
+     1344px-wide desktop shot and absurd for this one: on a 700px viewport it
+     would draw the phone 660px wide and some 1360px tall. Phone-sized and
+     centred instead; every line above is derived from --shot-w, so redefining
+     that one value is the whole change. This breakpoint is the same string as
+     the <source media> in the markup, and a test asserts they match — if they
+     ever drift, one image gets the other's box. */
+  @media (max-width: 47rem) {
+    .shot { --shot-w: min(22rem, calc(100vw - 2.5rem)); }
+  }
+
+  /* ----------------------------------------------------------- sections */
+  /* One heading treatment for the whole page: big, bold, the strongest text
+     colour there is. No uppercase labels. */
+  h2 {
+    font-size: clamp(1.2rem, 4.2vw, 1.5rem);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.3;
+    color: var(--text-strong);
+    margin: 3.25rem 0 1rem;
+  }
+  /* The opening block: five short lines, each its own paragraph, with air
+     between them so it reads as separated lines rather than a wall. It is the
+     one place on the page allowed to run long. */
+  .intro { margin: 0 0 0.6rem; }
+  .intro p { margin: 0 0 0.9rem; }
+  .intro p:last-child { margin: 0; }
+  /* The signature under that block: smaller and dimmer than the copy it signs,
+     sitting close under the last line. It is a signature, not a heading — no
+     rule, no box, no avatar. It carries the 1.75rem the intro used to hold, so
+     the air before the diagrams is unchanged. */
+  .byline {
+    margin: 0 0 1.75rem;
+    font-size: 0.85rem;
+    color: var(--text-dim);
+  }
+  h3 {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-dim);
+    margin: 0 0 0.75rem;
+  }
+
+  /* ------------------------------------------------------- the diagrams */
+  .diagrams {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.75rem;
+  }
+  @media (max-width: 34rem) {
+    .diagrams { grid-template-columns: 1fr; gap: 2.25rem; }
+  }
+  .box {
+    border: 1px solid var(--line-strong);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    padding: 0.4rem 0.25rem;
+    text-align: center;
+  }
+  .row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.4rem; }
+  .hub { font-weight: 600; }
+
+  /* Connectors are drawn with borders, never images: a 2px stem, and a head —
+     a border triangle — on whichever end points somewhere. Every line in a
+     diagram is painted with that diagram's --wire, so recolouring a whole
+     diagram is one declaration. */
+  .dgram { --wire: var(--line-strong); }
+  .conn { display: flex; flex-direction: column; align-items: center; }
+  .stem { width: 0; height: 18px; border-left: 2px solid var(--wire); }
+  .head {
+    width: 0; height: 0;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+  }
+  .head.up { border-bottom: 6px solid var(--wire); }
+  .head.down { border-top: 6px solid var(--wire); }
+  /* The outer two lean inward, pivoting on the device end, so the three
+     connectors gather under the box above them. */
+  .fan .l { transform: rotate(12deg); transform-origin: bottom center; }
+  .fan .r { transform: rotate(-12deg); transform-origin: bottom center; }
+
+  /* The usual setup pushes *and* pulls, so every connector there carries a
+     head at each end. The Foray diagram is the opposite picture: one arrow
+     down into Foray, because Foray runs on that machine, and then plain lines
+     to the devices, because a device and the server are simply joined and the
+     direction is nobody's business. Those lines, that arrow and the device
+     boxes all take the accent, so the pair reads at a glance as grey friction
+     against one green system. --accent is redefined for the dark scheme, so
+     the green follows the page either way. */
+  .dgram.foray { --wire: var(--accent); }
+  .dgram.foray .dev { border-color: var(--accent); }
+  /* The tier-2 arrow is shorter than the device connectors: the extra tier
+     costs height, and this is the cheapest place to give some back. */
+  .drop .stem { height: 12px; }
+  /* The one branded box on the page. The tint is mixed from the accent and the
+     page background, so it follows the scheme switch like everything else; the
+     flat --surface before it is what a browser without color-mix() gets. */
+  .brand {
+    border-color: var(--accent);
+    background: var(--surface);
+    background: color-mix(in srgb, var(--accent) 14%, var(--bg));
+    color: var(--accent-text);
+    font-weight: 600;
+  }
+
+  /* Side by side, the two diagrams have to end on the same line or the lists
+     under them start at different heights — and the Foray diagram is a tier
+     taller. Subgrid measures it rather than reserving a guessed number: the
+     section's three rows (label, diagram, list) become the grid's own rows, so
+     the diagram row is as tall as the taller diagram and the shorter one
+     bottom-aligns inside it — its slack sits above the GitHub box, not as a
+     hole under it. Row gap goes to zero because those rows are now inside the
+     sections; the stacked layout below 34rem keeps its gap between them. */
+  @media (min-width: 34.01rem) {
+    .dgram { display: flex; flex-direction: column; justify-content: flex-end; }
+    @supports (grid-template-rows: subgrid) {
+      .diagrams { grid-template-rows: auto auto auto; row-gap: 0; }
+      .diagrams > section { display: grid; grid-template-rows: subgrid; grid-row: span 3; }
+    }
+    /* No subgrid: fall back to a measured floor, the Foray diagram's own
+       height, which both diagrams then reserve. */
+    @supports not (grid-template-rows: subgrid) {
+      .dgram { min-height: 9rem; }
+    }
+  }
+  .marks { list-style: none; margin: 1rem 0 0; padding: 0; font-size: 0.9rem; }
+  .marks li { display: flex; gap: 0.5rem; margin-bottom: 0.35rem; line-height: 1.45; }
+  .marks .m { flex: none; font-family: var(--font-mono); }
+  .bad .m { color: var(--bad); }
+  .good .m { color: var(--accent); }
+
+  /* ------------------------------------------------------------ install */
+  pre {
+    position: relative;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.8rem 0.9rem;
+    margin: 0 0 0.75rem;
+    /* The whole block is one selection: click or tap anywhere in it and the
+       command is selected, ready for the system copy. */
+    -webkit-user-select: all;
+    user-select: all;
+  }
+  pre code {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    color: var(--accent-text);
+    /* Wrap rather than scroll: a scrolling block hides the end of the command
+       on a phone. Soft wrapping adds no characters. */
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    /* Room at the right edge for the copy button, so no line ever runs under
+       it, at 360px or anywhere else: the button is 26px wide and sits 4px in
+       from the edge, and this clears it. */
+    padding-right: 2.2rem;
+    -webkit-user-select: all;
+    user-select: all;
+  }
+  /* The copy button. It ships with the `hidden` attribute and the script at
+     the foot of the page reveals it as its first act, so a visitor with
+     script blocked never sees a button that cannot work — the block still
+     selects whole on a click, which is what this page did before there was
+     any script at all. Deliberately no `display` here: the UA rule for
+     [hidden] is what must win, and an author `display` would beat it. It is
+     left out of the block's selection. */
+  .copy {
+    position: absolute;
+    top: 0.35rem;
+    right: 0.25rem;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--text-dim);
+    opacity: 0.75;
+    cursor: pointer;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  .copy svg { width: 14px; height: 14px; display: block; margin: 0 auto; }
+  .copy:hover { opacity: 1; }
+  .copy.done { color: var(--accent); opacity: 1; }
+  /* The live region that says "Copied". Empty until the script fills it, so
+     there is nothing to hide and nothing to lay out; it paints the block's
+     own background, so on a narrow screen it covers the wrapped command for
+     its two seconds rather than colliding with it. */
+  .said {
+    position: absolute;
+    top: 0.78rem;
+    right: 2.1rem;
+    font-size: 0.7rem;
+    line-height: 1;
+    color: var(--accent);
+    background: var(--surface);
+    padding: 0 0.25rem;
+    pointer-events: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  pre.plain code { color: var(--text); }
+  .or { font-size: 0.9rem; color: var(--text-dim); margin: 0 0 0.5rem; }
+  .fineprint { font-size: 0.9rem; color: var(--text-dim); margin: 0; }
+
+  /* ----------------------------------------------------------- features */
+  /* A plain list: no boxes, no icons, no grid. One bold lead phrase and one
+     short sentence after it, which is the whole item. The sentence is dimmed
+     so the lead phrases are what you get scanning down the left edge. */
+  .features { list-style: none; margin: 0; padding: 0; }
+  .features li { margin: 0 0 0.85rem; line-height: 1.55; }
+  .features li:last-child { margin-bottom: 0; }
+  .features b { color: var(--text-strong); font-weight: 700; }
+  .features .say { color: var(--text-dim); }
+
+  /* ----------------------------------------------------- don't use this */
+  .alts { display: grid; grid-template-columns: 1fr 1fr; gap: 0.9rem; }
+  @media (max-width: 34rem) {
+    .alts { grid-template-columns: 1fr; }
+  }
+  .alt {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    padding: 0.9rem 1rem;
+  }
+  .alt p { margin: 0; }
+  .alt .sit { font-size: 0.98rem; font-weight: 700; color: var(--text-strong); line-height: 1.4; }
+  .alt .why { font-size: 0.86rem; color: var(--text-dim); margin-top: 0.45rem; }
+  .alt ul { margin: 0.55rem 0 0; padding-left: 1.15rem; font-size: 0.88rem; }
+  .alt li { margin-bottom: 0.2rem; line-height: 1.5; overflow-wrap: anywhere; }
+  .alt li::marker { color: var(--text-dim); }
+
+  footer {
+    margin-top: 3.5rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--border);
+    font-size: 0.9rem;
+    color: var(--text-dim);
+  }
+
+  /* Reduced motion: every animation off. The word spinners are the only moving
+     thing on the page, and they stop on their first frame — the first word
+     pair showing — rather than mid-roll. */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation: none !important;
+      transition: none !important;
+    }
+  }
+</style>
+</head>
+<body>
+<main>
+
+  <header>
+    <p class="wordmark"><svg class="mark" viewBox="6 4 12 16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>foray</p>
+    <a class="star" href="https://github.com/cushmachine/foray-terminal" aria-label="Foray on GitHub"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>GitHub</a>
+  </header>
+
+  <h1>
+    <span class="line">Start vibecoding on your <span class="grp"><span class="brk">[</span><span class="slot slot-a"><span class="roll"><span>laptop</span><span>desktop</span><span>phone</span><span>desktop</span><span>laptop</span></span></span><span class="brk">]</span>.</span></span>
+    <span class="line">Keep going on your <span class="grp"><span class="brk">[</span><span class="slot slot-b"><span class="roll"><span>phone</span><span>phone</span><span>laptop</span><span>iPad</span><span>phone</span></span></span><span class="brk">]</span>.</span></span>
+  </h1>
+  <!-- The page's only picture, and its only subresource: served by the worker
+       off this same origin, which is the one thing the CSP's img-src allows
+       besides the data: favicon. Two shots of the same app — Foray in a
+       desktop browser, 1344x795, and Foray on a phone, 720x1485 — because the
+       desktop one scaled down to a 320px phone renders 13px terminal text at
+       about 3px, which is evidence of nothing. <picture> rather than two <img>
+       tags toggled with display:none, because only the matched source is ever
+       downloaded; a hidden <img> would still be fetched. Both carry their
+       intrinsic size, including the <source>, so the layout reserves the right
+       box and nothing below shifts: 1.69:1 and 0.48:1 are not interchangeable.
+       It sits above the button: show the thing, then offer it. -->
+  <picture>
+    <source media="(max-width: 47rem)" srcset="/phone.webp" width="720" height="1485" type="image/webp">
+    <img class="shot" src="/hero.webp" width="1344" height="795" loading="eager" decoding="async"
+         alt="Foray in a browser: session sidebar, terminal and file tree.">
+  </picture>
+
+  <p class="jump"><a class="cta" href="#install">Try it</a></p>
+
+  <h2>There is a better way to vibecode.</h2>
+  <!-- Five sentences, five paragraphs: the block is meant to read as separated
+       lines, so each one gets its own space. -->
+  <div class="intro">
+    <p>I used to vibecode like everyone else: using agents locally across many machines.</p>
+    <p>But I hated the friction of syncing files and configs, and losing local conversation context.</p>
+    <p>So I created foray: a vibecoding server with a fast, ergonomic UI &mdash; a real terminal, a file tree and an editor.</p>
+    <p>It runs in the background on any Mac or Linux box, so your machine stays yours.</p>
+    <p>It turns any device into a thin client, via a browser and Tailscale.</p>
+  </div>
+  <!-- The signature for that block. It sits outside .intro on purpose: the
+       intro is five paragraphs and a test says so, and a sixth <p> in there
+       would be counted as a sixth line of the argument. The name is the only
+       link in it. -->
+  <p class="byline">&mdash; <a href="https://x.com/_wonderstorms">Charles</a> / creator of Foray</p>
+
+  <div class="diagrams">
+    <section>
+      <h3>The usual setup</h3>
+      <!-- The devices sync through GitHub — all three of them; the phone is
+           not cut off. Every connector is double-headed because the traffic
+           runs both ways: you push, and then on the next machine you pull.
+           That back-and-forth is the friction the three bullets below name. -->
+      <div class="dgram">
+        <div class="box hub">GitHub</div>
+        <div class="row3 fan">
+          <div class="conn l"><span class="head up"></span><span class="stem"></span><span class="head down"></span></div>
+          <div class="conn"><span class="head up"></span><span class="stem"></span><span class="head down"></span></div>
+          <div class="conn r"><span class="head up"></span><span class="stem"></span><span class="head down"></span></div>
+        </div>
+        <div class="row3">
+          <div class="box dev">PC</div>
+          <div class="box dev">mac</div>
+          <div class="box dev">phone</div>
+        </div>
+      </div>
+      <ul class="marks bad">
+        <li><span class="m">&#10007;</span> Git sync hell</li>
+        <li><span class="m">&#10007;</span> Skills and config drift between machines</li>
+        <li><span class="m">&#10007;</span> Conversation history trapped on one machine</li>
+      </ul>
+    </section>
+
+    <section>
+      <h3>With Foray</h3>
+      <!-- Three tiers, read downwards: a computer you already own, one arrow
+           into Foray because Foray runs on it, and then plain lines to the
+           devices — no arrowheads, because there is nothing to push or pull.
+           They are simply connected, and everything below the machine is the
+           one green system. -->
+      <div class="dgram foray">
+        <div class="box host">Your local Mac or cloud VM</div>
+        <div class="conn drop"><span class="stem"></span><span class="head down"></span></div>
+        <div class="box brand"><span class="wordmark mini"><svg class="mark" viewBox="6 4 12 16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>foray</span></div>
+        <div class="row3 fan">
+          <div class="conn l"><span class="stem"></span></div>
+          <div class="conn"><span class="stem"></span></div>
+          <div class="conn r"><span class="stem"></span></div>
+        </div>
+        <div class="row3">
+          <div class="box dev">PC</div>
+          <div class="box dev">mac</div>
+          <div class="box dev">phone</div>
+        </div>
+      </div>
+      <ul class="marks good">
+        <li><span class="m">&#10003;</span> Everything in sync, always</li>
+        <li><span class="m">&#10003;</span> Pick up any conversation where you left it</li>
+        <li><span class="m">&#10003;</span> Write a skill once, use it everywhere</li>
+        <li><span class="m">&#10003;</span> Agents sandboxed off your main machine</li>
+      </ul>
+    </section>
+  </div>
+
+  <h2 id="install">Install</h2>
+  <pre title="Click to select, then copy"><code>curl -fsSL https://foray-terminal.com/install.sh | bash</code><span class="said" role="status" aria-live="polite"></span><button type="button" class="copy" hidden aria-label="Copy the install command"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></pre>
+  <p class="or">or paste this to your agent:</p>
+  <pre class="plain" title="Click to select, then copy"><code>Install Foray on this box. Instructions at foray-terminal.com/install.sh</code><span class="said" role="status" aria-live="polite"></span><button type="button" class="copy" hidden aria-label="Copy the prompt"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></pre>
+  <p class="fineprint">
+    <a href="https://github.com/cushmachine/foray-terminal/blob/main/install.sh">Read the script</a>
+    <span class="dot">&middot;</span>
+    <a href="https://github.com/cushmachine/foray-terminal/blob/main/SECURITY.md">Security</a>
+  </p>
+
+  <h2>Features</h2>
+  <ul class="features">
+    <li><b>Sessions that outlive the tab.</b> <span class="say">Close it, lose signal, switch device. Still running.</span></li>
+    <li><b>Dictate instead of typing.</b> <span class="say">Talk into the input bar, no ghost characters.</span></li>
+    <li><b>Keys a phone keyboard lacks.</b> <span class="say">Esc, Ctrl, Tab and arrows, one tap away.</span></li>
+    <li><b>Past Claude Code sessions in the sidebar.</b> <span class="say">Tap one to resume it, where it ran.</span></li>
+    <li><b>A file tree and Markdown editor.</b> <span class="say">Side by side with the terminal.</span></li>
+    <li><b>Images from camera roll, clipboard or drag.</b> <span class="say">Uploaded, then typed at the prompt.</span></li>
+    <li><b>Add to Home Screen.</b> <span class="say">It opens like an app.</span></li>
+  </ul>
+
+  <h2>Don&rsquo;t use Foray if...</h2>
+  <div class="alts">
+    <div class="alt">
+      <p class="sit">You just want to talk to the agent.</p>
+      <p class="why">Foray bundles a real terminal, conversation manager and
+        file editor into one app. If you just want to talk to your agent,
+        try:</p>
+      <ul>
+        <li><a href="https://github.com/slopus/happy">Happy</a></li>
+        <li><a href="https://claude.ai">Claude app</a></li>
+      </ul>
+    </div>
+    <div class="alt">
+      <p class="sit">You want a real SSH client.</p>
+      <p class="why">Foray serves one box in a browser, built around agent
+        sessions. For many servers, port forwards and key management,
+        try:</p>
+      <ul>
+        <li><a href="https://termius.com">Termius</a></li>
+        <li><a href="https://blink.sh">Blink</a></li>
+      </ul>
+    </div>
+    <div class="alt">
+      <p class="sit">You just want to reach the computer you already use.</p>
+      <p class="why">Foray is a box you live on, reachable from anything with a
+        browser. To get back to the machine you already sit at, try:</p>
+      <ul>
+        <li><a href="https://vibetunnel.sh">VibeTunnel</a></li>
+        <li><a href="https://code.claude.com/docs/en/remote-control">Claude Remote Control</a></li>
+      </ul>
+    </div>
+    <div class="alt">
+      <p class="sit">You only ever code at one computer.</p>
+      <p class="why">Foray earns its keep when you move between devices. If you
+        never leave that computer, a native terminal is better. Try:</p>
+      <ul>
+        <li><a href="https://ghostty.org">Ghostty</a></li>
+        <li><a href="https://github.com/manaflow-ai/cmux">cmux</a></li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- THE "WHY I BUILT IT" LETTER GOES HERE: the owner is writing it in his
+       own words. It is the one part of the page meant to run long, and it
+       sits between "Don't use Foray if" and the footer when it lands. -->
+
+  <footer>
+    <a href="https://github.com/cushmachine/foray-terminal">GitHub</a>
+    <span class="dot">&middot;</span>
+    <a href="https://github.com/cushmachine/foray-terminal/blob/main/LICENSE">AGPL-3.0</a>
+    <!-- TOUR LINK GOES HERE: a 2-minute tour, once that page exists. Nothing
+         links to an FAQ until there is one. -->
+  </footer>
+
+</main>
+
+<script>
+// The page's only script: it reveals the copy buttons, then wires them. Its
+// sha256 is pinned as the whole of script-src in src/index.js. Edit one side
+// alone and the browser silently refuses the script, so the buttons never
+// appear; the check "the CSP hash is the sha256 of the inline script" in
+// test/e2e.mjs fails the moment the two drift.
+for (const btn of document.querySelectorAll('button.copy')) {
+  const pre = btn.closest('pre');
+  const code = pre.querySelector('code');
+  const said = pre.querySelector('.said');
+  let timer;
+  btn.hidden = false;
+  btn.addEventListener('click', () => {
+    // No clipboard API, no permission, no secure context: select the command
+    // so the system copy is one keystroke away. Never a success state.
+    const select = () => {
+      const range = document.createRange();
+      range.selectNodeContents(code);
+      const sel = getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    };
+    const copied = () => {
+      btn.classList.add('done');
+      said.textContent = 'Copied';
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        btn.classList.remove('done');
+        said.textContent = '';
+      }, 2000);
+    };
+    try {
+      navigator.clipboard.writeText(code.textContent.trim()).then(copied, select);
+    } catch {
+      select();
+    }
+  });
+}
+</script>
+</body>
+</html>

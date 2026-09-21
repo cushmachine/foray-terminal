@@ -1,0 +1,5 @@
+# Wrangler's local state and build output (created by `wrangler dev`/`deploy`).
+.wrangler/
+dist/
+node_modules/
+wrangler.preview.toml

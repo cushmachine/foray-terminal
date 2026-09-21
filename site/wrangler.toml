@@ -1,0 +1,55 @@
+# foray-terminal.com — a single Cloudflare Worker (not Pages).
+#
+# Deploy from this directory:
+#
+#     cd site && npx wrangler deploy
+#
+# The account id is NOT in this file. Wrangler takes it from
+# CLOUDFLARE_ACCOUNT_ID in the environment (and the API token from
+# CLOUDFLARE_API_TOKEN) at deploy time.
+#
+# DNS: the two `custom_domain = true` routes below make wrangler create the
+# records for foray-terminal.com and www.foray-terminal.com itself — proxied
+# CNAMEs pointing at this worker. If a record already exists for either name,
+# wrangler asks before overwriting it. Check the zone first.
+
+name = "foray-terminal-site"
+main = "src/index.js"
+compatibility_date = "2026-09-11"
+
+# The site answers on its own domain only; no *.workers.dev copy of it.
+workers_dev = false
+preview_urls = false
+
+routes = [
+  { pattern = "foray-terminal.com", custom_domain = true },
+  { pattern = "www.foray-terminal.com", custom_domain = true },
+]
+
+# src/landing.html is bundled into the worker as a string by wrangler's
+# default Text module rule for **/*.html — no extra config needed.
+
+# src/hero.webp and src/phone.webp are bundled as binary modules. Wrangler has
+# no default rule for **/*.webp, so they need this one; `type = "Data"` hands
+# the worker an ArrayBuffer, which is what a Response body wants. One glob
+# covers every screenshot: a new .webp in src/ needs no second rule.
+# `fallthrough` keeps wrangler's own default rules (the Text one for **/*.html
+# above) in play.
+[[rules]]
+type = "Data"
+globs = ["**/*.webp"]
+fallthrough = true
+
+[observability]
+enabled = true
+
+# The installer is fetched from
+# https://raw.githubusercontent.com/cushmachine/foray-terminal/main/install.sh
+# (the constant UPSTREAM_URL in src/install.js). Setting INSTALL_UPSTREAM_URL
+# here overrides it — to pin the site to a tag instead of `main`, for example:
+#
+# [vars]
+# INSTALL_UPSTREAM_URL = "https://raw.githubusercontent.com/cushmachine/foray-terminal/v0.1.0/install.sh"
+#
+# The local tests use the same variable to point the worker at a fixture
+# server; see test/e2e.mjs.
