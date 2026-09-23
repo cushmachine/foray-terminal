@@ -53,7 +53,7 @@ function offlinePage() {
   html { background: #0a0a0c; color: #d4d4d8; font: 15px -apple-system, system-ui, sans-serif; }
   body { margin: 0; min-height: 100vh; display: grid; place-items: center; text-align: center; }
   h1 { color: #3db8a9; font: 700 20px/1.2 ui-monospace, monospace; letter-spacing: .04em; margin: 0 0 8px; }
-  p { color: #636370; margin: 0 0 20px; }
+  p { color: #8a8a97; margin: 0 0 20px; }
   button { background: #1a2e2b; color: #3db8a9; border: 1px solid #3db8a9; border-radius: 8px;
     padding: 12px 22px; font: 600 14px ui-monospace, monospace; min-height: 44px; }
 </style>

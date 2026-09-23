@@ -240,7 +240,7 @@ export function Sidebar({
         fontWeight: 600,
         textTransform: 'uppercase',
         letterSpacing: '0.1em',
-        color: 'var(--text-faint)',
+        color: 'var(--text-dim)',
       }}>
         Sessions
       </div>
@@ -428,11 +428,11 @@ export function Sidebar({
             fontWeight: 600,
             textTransform: 'uppercase',
             letterSpacing: '0.1em',
-            color: 'var(--text-faint)',
+            color: 'var(--text-dim)',
           }}>
             Past sessions{pastSessions && pastSessions.length > 0 ? ` · ${pastSessions.length}` : ''}
           </span>
-          <span aria-hidden style={{ fontSize: 11, color: 'var(--text-faint)' }}>{pastOpen ? '▾' : '▸'}</span>
+          <span aria-hidden style={{ fontSize: 11, color: 'var(--text-dim)' }}>{pastOpen ? '▾' : '▸'}</span>
         </button>
         <button
           className="btn-ghost"
@@ -483,6 +483,9 @@ export function Sidebar({
                         marginBottom: 2,
                         textAlign: 'left',
                         whiteSpace: 'normal',
+                        // The dimmed title already says "not clickable"; the
+                        // disabled half-opacity on top made it unreadable.
+                        opacity: 1,
                       }}
                     >
                       <div style={{ flex: 1, minWidth: 0 }}>
@@ -562,6 +565,7 @@ export function Sidebar({
             padding: '8px',
             minHeight: isMobile ? 'var(--hit)' : undefined,
             borderStyle: 'dashed',
+            borderColor: 'var(--text-faint)',
           }}
         >
           + new session

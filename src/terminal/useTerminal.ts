@@ -227,7 +227,7 @@ export function useTerminal({
           container.style.setProperty('--xterm-full-h', `${fullH}px`)
         }
       }
-      controller.maybeScrollToBottom()
+      controller.onScrollResize()
     })
     scrollObserver.observe(scrollEl)
 

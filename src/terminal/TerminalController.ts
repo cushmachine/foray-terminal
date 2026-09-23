@@ -152,6 +152,15 @@ export class TerminalController {
   /** The inset as of the last pin, focus change or output; handleScroll reads this. */
   private inset = 0
   private run: ScrollRun | null = null
+  /**
+   * The container is display:none (an inactive tab, or the files view on
+   * a phone). Hiding throws away the element's scroll position, and the
+   * scroll events around it read 0, so while hidden they are ignored and
+   * the pin and position from before are put back on show.
+   */
+  private hidden = false
+  /** scrollTop as of the last scroll event while shown. */
+  private lastTop = 0
   private lastStatus: SocketStatus | null = null
   private disposed = false
 
@@ -282,7 +291,10 @@ export class TerminalController {
   handleScroll(): void {
     const el = this.scroll
     if (!el) return
+    if (el.clientHeight === 0) this.hidden = true
+    if (this.hidden) return
     const top = el.scrollTop
+    this.lastTop = top
     const run = this.run
     if (run) {
       const left = Math.abs(top - run.to)
@@ -306,6 +318,27 @@ export class TerminalController {
     this.run = null
     // The reader moved on their own: the next prompt jump starts over at the latest.
     this.promptCursor = null
+  }
+
+  /**
+   * The scroll container changed size (useTerminal's ResizeObserver). Zero
+   * means it was hidden; a size again means it is back, at scrollTop 0,
+   * so the view goes back where the reader left it: the bottom if pinned,
+   * otherwise the same offset. Without this a tab could reopen at the top.
+   */
+  onScrollResize(): void {
+    const el = this.scroll
+    if (!el || this.disposed) return
+    if (el.clientHeight === 0) {
+      this.hidden = true
+      return
+    }
+    if (this.hidden) {
+      this.hidden = false
+      this.run = null
+      if (!this.stick) el.scrollTop = this.lastTop
+    }
+    this.maybeScrollToBottom()
   }
 
   // -- prompt jump ------------------------------------------------------------
@@ -452,7 +485,8 @@ export class TerminalController {
 
   /** Content-relative scroll position before a history swap. Null when pinned: the bottom follows on its own. */
   private captureAnchor(): ScrollAnchor | null {
-    if (this.stick || !this.scroll || !this.history) return null
+    // Hidden, every rect is zero: nothing to anchor to, and lastTop stands.
+    if (this.stick || this.hidden || !this.scroll || !this.history) return null
     const top = this.scroll.scrollTop
     const rows = this.history.rows
     // First history row whose bottom edge is below the viewport top.

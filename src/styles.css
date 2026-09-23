@@ -11,8 +11,8 @@
   --border: #232330;
   --border-subtle: #1a1a24;
   --text: #d4d4d8;
-  --text-dim: #636370;
-  --text-faint: #3e3e4a;
+  --text-dim: #8a8a97;
+  --text-faint: #5d5d6b;
   --accent: #3db8a9;
   --accent-dim: #1a2e2b;
   --accent-text: #5cd4c4;
@@ -37,7 +37,7 @@
   --ansi-magenta: #b07cd8;
   --ansi-cyan: var(--accent);
   --ansi-white: var(--text);
-  --ansi-bright-black: var(--text-dim);
+  --ansi-bright-black: #636370;
   --ansi-bright-red: #e8796a;
   --ansi-bright-green: var(--accent-text);
   --ansi-bright-yellow: #f0b45c;

@@ -348,6 +348,62 @@ test('pin: a focus change while scrolled up leaves the view alone', () => {
   assert.equal(scroll.scrollTop, 100)
 })
 
+/** display:none on the scroll container, then back: the browser zeroes scrollTop and may fire a scroll event on the way. */
+function hideAndShow(controller: TerminalController, el: ScrollLike & { clientHeight: number }, height: number): void {
+  el.clientHeight = 0
+  el.scrollTop = 0
+  controller.onScrollResize()
+  controller.handleScroll()
+  el.clientHeight = height
+  controller.handleScroll()
+  controller.onScrollResize()
+}
+
+test('hide: a pinned tab shown again goes back to the bottom, even after a scroll event at the top', () => {
+  const scroll = fakeScroll(1000, 400) as ReturnType<typeof fakeScroll> & { clientHeight: number }
+  const { frames, controller, bringUp } = setup({ scroll })
+  bringUp()
+  controller.handle(output('x'))
+  frames.flush()
+  assert.equal(scroll.scrollTop, 600)
+
+  hideAndShow(controller, scroll, 400)
+  assert.equal(controller.stick, true, 'the scroll events around the hide did not unpin')
+  frames.flush()
+  assert.equal(scroll.scrollTop, 600)
+})
+
+test('hide: a scrolled-up tab shown again keeps its place', () => {
+  const scroll = fakeScroll(1000, 400) as ReturnType<typeof fakeScroll> & { clientHeight: number }
+  const { frames, controller, bringUp } = setup({ scroll })
+  bringUp()
+  scrolled(controller, scroll, 250)
+
+  hideAndShow(controller, scroll, 400)
+  frames.flush()
+  assert.equal(controller.stick, false)
+  assert.equal(scroll.scrollTop, 250)
+})
+
+test('hide: a history reset while hidden does not anchor to zeroed rects', () => {
+  const scroll = fakeScroll(1000, 400) as ReturnType<typeof fakeScroll> & { clientHeight: number }
+  const history = fakeHistory(20, scroll)
+  const { frames, controller, bringUp } = setup({ scroll, history })
+  bringUp()
+  controller.handle({ type: 'terminal:history', windowId: WINDOW, lines: Array.from({ length: 50 }, (_, i) => `l${i}`), reset: true })
+  frames.flush()
+  scrolled(controller, scroll, 300)
+
+  scroll.clientHeight = 0
+  scroll.scrollTop = 0
+  controller.onScrollResize()
+  controller.handle({ type: 'terminal:history', windowId: WINDOW, lines: Array.from({ length: 50 }, (_, i) => `l${i}`), reset: true })
+  scroll.clientHeight = 400
+  controller.onScrollResize()
+  frames.flush()
+  assert.equal(scroll.scrollTop, 300)
+})
+
 // -- history ----------------------------------------------------------------------
 
 test('history: appends accumulate and the oldest rows go once the cap is passed', () => {
