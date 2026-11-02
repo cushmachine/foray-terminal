@@ -76,6 +76,7 @@ export default defineConfig({
     screenshot: 'only-on-failure',
     // Software WebGL so the xterm WebGL renderer can load headless.
     launchOptions: {
+      chromiumSandbox: true,
       args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'],
     },
   },

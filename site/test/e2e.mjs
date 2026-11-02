@@ -408,7 +408,7 @@ async function browserChecks() {
     'curl -fsSL https://foray-terminal.com/install.sh | bash',
     'Install Foray on this box. Instructions at foray-terminal.com/install.sh',
   ];
-  const browser = await chromium.launch();
+  const browser = await chromium.launch({ chromiumSandbox: true });
   try {
     const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
     await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: BASE });
