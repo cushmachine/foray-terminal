@@ -22,6 +22,7 @@
     "start": "NODE_ENV=production tsx src/server/index.ts",
     "deploy": "bash scripts/deploy.sh",
     "token": "bash scripts/token.sh",
+    "postinstall": "node scripts/fix-pty-perms.mjs",
     "test": "npx tsx --test src/__tests__/*.test.ts src/server/__tests__/*.test.ts",
     "test:e2e": "FORAY_TMUX_SOCKET=foray-test npx tsx src/e2e/e2e.test.ts",
     "test:keys": "FORAY_TMUX_SOCKET=foray-test npx tsx src/e2e/keys.e2e.test.ts",
@@ -59,5 +60,10 @@
     "tsx": "^4.19.0",
     "typescript": "^7.0.2",
     "vite": "^8.2.2"
+  },
+  "allowScripts": {
+    "node-pty": true,
+    "esbuild": true,
+    "fsevents": true
   }
 }

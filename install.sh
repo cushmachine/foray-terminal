@@ -285,8 +285,30 @@ cd "$FORAY_DIR"
 
 # ---------- npm install ----------
 
-info "Installing npm dependencies (includes compiling node-pty)..."
+# node-pty ships prebuilt binaries for macOS but none for Linux, so on Linux
+# npm compiles it with node-gyp, which needs a compiler, make and python3.
+# The apt step above installs them; check here so a missing tool fails with
+# the exact package to install, not an opaque node-gyp error.
+if [ "$OS" = Linux ]; then
+  for tool in g++ make python3; do
+    command -v "$tool" >/dev/null 2>&1 \
+      || die "node-pty compiles from source on Linux and '$tool' is missing." \
+             "Install the build tools: sudo apt-get install -y build-essential python3"
+  done
+fi
+
+# npm 11.20+ skips dependency install scripts unless package.json's
+# allowScripts approves them (node-pty, esbuild, fsevents; already listed
+# there). The postinstall hook then restores the exec bit on node-pty's
+# prebuilt spawn-helper (scripts/fix-pty-perms.mjs).
+info "Installing npm dependencies (macOS: node-pty prebuilt; Linux: compiles it)..."
 npm install 2>&1 | tail -5
+
+# `npm install` can succeed with node-pty's scripts skipped, leaving a
+# Foray that cannot open a terminal (posix_spawnp failed). Prove it works.
+node -e "const p=require('node-pty');const t=p.spawn('/bin/echo',['ok']);t.onExit(()=>process.exit(0))" >/dev/null 2>&1 \
+  || die "node-pty cannot spawn a terminal after npm install." \
+         "Check that package.json's allowScripts approves node-pty, then run: npm rebuild node-pty"
 
 # Foray's tmux config lives in scripts/foray.tmux.conf (applied by
 # scripts/tmux-server.sh) — nothing to do here; this never touches ~/.tmux.conf.
