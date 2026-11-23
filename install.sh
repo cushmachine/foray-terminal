@@ -266,6 +266,8 @@ esac
 if [ "$CURRENT_MAJOR" -lt "$NODE_MAJOR" ]; then
   if [ ! -s "$NVM_DIR/nvm.sh" ]; then
     info "Installing nvm..."
+    # nvm's installer aborts when NVM_DIR is set but missing (and XDG_CONFIG_HOME is set).
+    mkdir -p "$NVM_DIR"
     curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
     # shellcheck source=/dev/null
     . "$NVM_DIR/nvm.sh"
@@ -303,10 +305,14 @@ cd "$FORAY_DIR"
 # The port is whatever ecosystem.config.cjs says, which already folds in this
 # machine's untracked ecosystem.local.cjs, so ask it instead of repeating a
 # number here that goes stale the moment someone overrides it. Anything that
-# is not a plain number (no node, a broken override file) keeps the default.
-CONFIGURED_PORT="$(node -e "console.log(require('./ecosystem.config.cjs').apps[0].env.PORT)" 2>/dev/null || true)"
+# is not a positive whole number keeps the default. It is read the way the
+# server reads PORT (parseInt, finite), so ' 3001 ' means 3001 here too.
+CONFIGURED_PORT="$(node -e "
+  const p = parseInt(String(require('./ecosystem.config.cjs').apps[0].env.PORT), 10)
+  if (Number.isFinite(p) && p > 0) console.log(p)
+" 2>/dev/null)" || CONFIGURED_PORT=""
 case "$CONFIGURED_PORT" in
-  '' | *[!0-9]*) ;;
+  '' | *[!0-9]*) warn "Could not read the port from ecosystem.config.cjs; assuming $FORAY_PORT." ;;
   *) FORAY_PORT="$CONFIGURED_PORT" ;;
 esac
 
@@ -422,16 +428,25 @@ else
     # the systemd unit get its absolute path either way. Both dirs npm -g
     # writes to must be writable, since /usr/local itself often is while
     # /usr/local/lib/node_modules is not.
+    # A dir that does not exist yet is judged by its nearest existing
+    # ancestor, since npm would create it there.
+    can_create() {
+      d="$1"
+      while [ ! -e "$d" ]; do d="$(dirname "$d")"; done
+      [ -d "$d" ] && [ -w "$d" ]
+    }
     NPM_PREFIX="$(npm prefix -g)"
-    NPM_LIB="$NPM_PREFIX/lib/node_modules"
-    [ -d "$NPM_LIB" ] || NPM_LIB="$NPM_PREFIX/lib"
-    if [ -w "$NPM_PREFIX" ] && [ -w "$NPM_LIB" ]; then
+    if can_create "$NPM_PREFIX/bin" && can_create "$NPM_PREFIX/lib/node_modules"; then
       info "Installing pm2..."
-      npm install -g pm2 2>&1 | tail -1
+      PM2_OUT="$(npm install -g pm2 2>&1)" \
+        || die "npm install -g pm2 failed:" "$(printf '%s\n' "$PM2_OUT" | tail -20)" "Fix npm's global prefix (npm prefix -g) or install pm2 yourself, then re-run."
+      printf '%s\n' "$PM2_OUT" | tail -1
     else
       info "npm's global prefix ($NPM_PREFIX) is not writable by you; installing pm2 into $HOME/.local instead (no sudo)."
       info "Add $HOME/.local/bin to your PATH to run pm2 from your own shell."
-      npm install -g --prefix "$HOME/.local" pm2 2>&1 | tail -1
+      PM2_OUT="$(npm install -g --prefix "$HOME/.local" pm2 2>&1)" \
+        || die "npm install -g --prefix $HOME/.local pm2 failed:" "$(printf '%s\n' "$PM2_OUT" | tail -20)" "Check your network and that $HOME/.local is writable, then re-run."
+      printf '%s\n' "$PM2_OUT" | tail -1
       export PATH="$HOME/.local/bin:$PATH"
     fi
   fi
@@ -468,7 +483,7 @@ else
   <key>AbandonProcessGroup</key><true/>
   <key>EnvironmentVariables</key>
   <dict>
-    <key>PATH</key><string>$(dirname "$(command -v node)"):/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>PATH</key><string>$(dirname "$(command -v node)"):$(dirname "$(command -v pm2)"):/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
     <key>HOME</key><string>$HOME</string>
   </dict>
   <key>StandardOutPath</key><string>$HOME/Library/Logs/foray-pm2.log</string>
