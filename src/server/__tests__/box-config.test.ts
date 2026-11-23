@@ -6,7 +6,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import {
-  PALETTE_KEYS, applyBoxConfigToHtml, applyBoxConfigToManifest, loadBoxConfig, parseBoxConfig, shortNameFor, isSafeColor,
+  PALETTE_KEYS, applyBoxConfigToHtml, applyBoxConfigToManifest, loadBoxConfig, parseBoxConfig, isSafeColor,
 } from '../boxConfig.ts'
 import { startTestServer, tmpDir } from './helpers.ts'
 
@@ -107,8 +107,8 @@ test('manifest: names and theme colour; short name fits 12 or falls back to the 
   const base = { name: 'Foray', short_name: 'Foray', theme_color: '#0a0a0c', icons: [] }
   const m = applyBoxConfigToManifest(base, parse({ label: 'Studio', palette: { accent: '#d4a72c' } }).config)
   assert.deepEqual(m, { name: 'Foray · Studio', short_name: 'Foray Studio', theme_color: '#d4a72c', icons: [] })
-  assert.equal(shortNameFor('Mac Studio Box'), 'Mac Studio Box')
-  assert.equal(shortNameFor('Nest'), 'Foray Nest')
+  assert.equal(applyBoxConfigToManifest(base, parse({ label: 'Mac Studio Box' }).config).short_name, 'Mac Studio Box')
+  assert.equal(applyBoxConfigToManifest(base, parse({ label: 'Nest' }).config).short_name, 'Foray Nest')
   assert.equal(applyBoxConfigToManifest(base, parse({ palette: { text: '#fff' } }).config).name, 'Foray')
 })
 

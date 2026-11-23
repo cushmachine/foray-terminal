@@ -17,12 +17,12 @@ import { applyTmuxServerOptions, listWindows, mirrorTitles, type TmuxExecutor } 
 import type { PtySpawner } from './pty-bridge.ts'
 import { handleConnection, type Connection } from './ws-handler.ts'
 import { PastSessions } from './pastSessions.ts'
-import { applyBoxConfigToHtml, applyBoxConfigToManifest, boxConfigPath, loadBoxConfig, type BoxConfig } from './boxConfig.ts'
+import { applyBoxConfigToHtml, applyBoxConfigToManifest, loadBoxConfig, type BoxConfig } from './boxConfig.ts'
 import { providersFromEnv } from './agents/index.ts'
 import type { AgentProvider } from './agents/types.ts'
 import { describeCheckout, readServedClientBuild } from './build.ts'
 import {
-  Auth, clientAddress, loadToken, originAllowed, isSecureRequest, parseCookies, requestHosts, SESSION_COOKIE, type AuthOptions,
+  Auth, FORAY_DIR, clientAddress, loadToken, originAllowed, isSecureRequest, parseCookies, requestHosts, SESSION_COOKIE, type AuthOptions,
 } from './auth.ts'
 import { SILENT, scopedLog, type Logger } from './log.ts'
 import {
@@ -375,37 +375,33 @@ export function createApp(
 
   const clientDist = servedClientDist(options)
   if (clientDist && existsSync(clientDist)) {
-    const box = options.boxConfig ?? null
+    const box = options.boxConfig
     const indexFile = path.join(clientDist, 'index.html')
-    // The labelled pages are built per request from the built files, with
-    // no-cache so neither the browser nor the service worker's network-first
-    // fetch is handed a copy from before the label changed.
     if (box) {
-      app.get('/manifest.json', (_req, res, next) => {
-        try {
-          const manifest = JSON.parse(readFileSync(path.join(clientDist, 'manifest.json'), 'utf8'))
-          res.set('Cache-Control', 'no-cache').type('application/manifest+json').send(JSON.stringify(applyBoxConfigToManifest(manifest, box)))
-        } catch {
-          next()
-        }
+      // Labelled pages are built once from the built files (the config is
+      // read once at startup), with no-cache so neither the browser nor the
+      // service worker's network-first fetch is handed a copy from before
+      // the label changed.
+      const html = applyBoxConfigToHtml(readFileSync(indexFile, 'utf8'), box)
+      const manifest = JSON.stringify(applyBoxConfigToManifest(JSON.parse(readFileSync(path.join(clientDist, 'manifest.json'), 'utf8')), box))
+      app.get('/manifest.json', (_req, res) => {
+        res.set('Cache-Control', 'no-cache').type('application/manifest+json').send(manifest)
+      })
+      app.use(express.static(clientDist, { index: false }))
+      app.use((req, res, next) => {
+        if (req.method !== 'GET') return next()
+        res.set('Cache-Control', 'no-cache').type('html').send(html)
+      })
+    } else {
+      app.use(express.static(clientDist))
+      // SPA fallback: any unmatched route serves index.html. Registered as
+      // plain middleware (not a route pattern) to stay clear of Express 5's
+      // stricter wildcard route syntax.
+      app.use((req, res, next) => {
+        if (req.method !== 'GET') return next()
+        res.sendFile(indexFile)
       })
     }
-    app.use(express.static(clientDist, { index: box ? false : 'index.html' }))
-    // SPA fallback: any unmatched route serves index.html. Registered as
-    // plain middleware (not a route pattern) to stay clear of Express 5's
-    // stricter wildcard route syntax.
-    app.use((req, res, next) => {
-      if (req.method !== 'GET') return next()
-      if (box) {
-        try {
-          res.set('Cache-Control', 'no-cache').type('html').send(applyBoxConfigToHtml(readFileSync(indexFile, 'utf8'), box))
-          return
-        } catch {
-          // fall through to the plain file
-        }
-      }
-      res.sendFile(indexFile)
-    })
   }
 
   return app
@@ -738,7 +734,7 @@ if (isMain) {
     process.exit(1)
   }
   const allowedHosts = (process.env.FORAY_ALLOWED_HOSTS ?? '').split(',').map((h) => h.trim()).filter(Boolean)
-  const boxConfig = loadBoxConfig(boxConfigPath(), console)
+  const boxConfig = loadBoxConfig(process.env['FORAY_CONFIG'] || path.join(FORAY_DIR, 'config.json'), console)
   startServer(port, { host, auth: authOff ? false : undefined, allowedHosts, boxConfig }).catch((err) => {
     console.error('Failed to start server:', err instanceof Error ? err.message : err)
     process.exit(1)

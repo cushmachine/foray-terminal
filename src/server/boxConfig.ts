@@ -11,11 +11,8 @@
 // start; `pm2 restart foray` applies a change.
 
 import { readFileSync } from 'node:fs'
-import os from 'node:os'
-import path from 'node:path'
+import { escapeHtml } from '../ansi.ts'
 import type { Logger } from './log.ts'
-
-export const MAX_LABEL_LENGTH = 24
 
 /** Colour tokens of styles.css :root a box may override. */
 export const PALETTE_KEYS: readonly string[] = [
@@ -48,14 +45,14 @@ export function isSafeColor(value: unknown): value is string {
 
 type Rgb = [number, number, number]
 
-function toRgb(color: string): Rgb | null {
+function toRgb(color: string): Rgb {
   if (color.startsWith('#')) {
     let h = color.slice(1)
     if (h.length <= 4) h = [...h].map((c) => c + c).join('')
     return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16)) as Rgb
   }
-  const m = color.match(/\d+/g)
-  return m ? ([Number(m[0]), Number(m[1]), Number(m[2])] as Rgb) : null
+  const m = color.match(/\d+/g)!
+  return [Number(m[0]), Number(m[1]), Number(m[2])]
 }
 
 const hex2 = (n: number) => Math.round(Math.max(0, Math.min(255, n))).toString(16).padStart(2, '0')
@@ -71,9 +68,9 @@ const DEFAULT_BG: Rgb = [0x0a, 0x0a, 0x0c]
  * accent, selection is the accent at 20% alpha.
  */
 function deriveAccent(palette: Record<string, string>): void {
-  const accent = palette['accent'] && toRgb(palette['accent'])
-  if (!accent) return
-  const bg = (palette['bg'] && toRgb(palette['bg'])) || DEFAULT_BG
+  if (!palette['accent']) return
+  const accent = toRgb(palette['accent'])
+  const bg = palette['bg'] ? toRgb(palette['bg']) : DEFAULT_BG
   palette['accent-dim'] ??= toHex(mix(bg, accent, 0.2))
   palette['accent-text'] ??= toHex(mix(accent, [255, 255, 255], 0.2))
   palette['term-selection'] ??= `${toHex(accent)}33`
@@ -81,11 +78,11 @@ function deriveAccent(palette: Record<string, string>): void {
 
 function cleanLabel(raw: string): string {
   // eslint-disable-next-line no-control-regex
-  return raw.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, MAX_LABEL_LENGTH).trim()
+  return raw.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, 24).trim()
 }
 
 /** Validate parsed JSON into a BoxConfig, warning (never throwing) about what it drops. */
-export function parseBoxConfig(data: unknown, warn: (msg: string) => void = () => {}): BoxConfig {
+export function parseBoxConfig(data: unknown, warn: (msg: string) => void): BoxConfig {
   const config: BoxConfig = { palette: {} }
   if (typeof data !== 'object' || data === null || Array.isArray(data)) {
     warn('config must be a JSON object; ignoring it')
@@ -118,11 +115,6 @@ export function parseBoxConfig(data: unknown, warn: (msg: string) => void = () =
   return config
 }
 
-/** Where the config lives: FORAY_CONFIG, else ~/.foray/config.json. */
-export function boxConfigPath(env: NodeJS.ProcessEnv = process.env): string {
-  return env['FORAY_CONFIG'] || path.join(os.homedir(), '.foray', 'config.json')
-}
-
 /**
  * Read the config file. A missing file is `null` (today's behaviour,
  * silently); an unreadable or malformed one warns and is also `null`.
@@ -148,10 +140,6 @@ export function loadBoxConfig(file: string, logger?: Pick<Logger, 'log'>): BoxCo
   return config
 }
 
-export function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;')
-}
-
 /** The page title for a labelled box. */
 export function titleFor(config: BoxConfig): string {
   return config.label ? `Foray · ${config.label}` : 'Foray'
@@ -174,7 +162,7 @@ export function applyBoxConfigToHtml(html: string, config: BoxConfig): string {
 }
 
 /** Short name for the home screen: "Foray <label>" if it fits in 12, else the label. */
-export function shortNameFor(label: string): string {
+function shortNameFor(label: string): string {
   const joined = `Foray ${label}`
   return joined.length <= 12 ? joined : label
 }

@@ -2,7 +2,7 @@ import { displayName } from './sessionState'
 import type { Session } from './sessionState'
 import type { MobileView } from './mobile'
 import type { CSSProperties } from 'react'
-import { boxLabel } from './boxLabel'
+import { BOX_LABEL } from './version'
 
 interface TopBarProps {
   isMobile: boolean
@@ -102,7 +102,7 @@ export function TopBar({
         </span>
       </div>
 
-      {boxLabel() && (
+      {BOX_LABEL && (
         <span
           data-testid="box-label"
           title="This box"
@@ -120,7 +120,7 @@ export function TopBar({
             padding: '1px 6px',
           }}
         >
-          {boxLabel()}
+          {BOX_LABEL}
         </span>
       )}
 
