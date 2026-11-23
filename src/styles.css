@@ -29,21 +29,23 @@
      the live xterm screen and the scrollback history above it. */
   --term-cursor: var(--accent);
   --term-selection: #3db8a933;
+  /* ANSI green/cyan are literal teal, not the accent: a box's custom accent
+     recolours the chrome, never the terminal's output. */
   --ansi-black: #1a1a21;
   --ansi-red: var(--danger);
-  --ansi-green: var(--accent);
+  --ansi-green: #3db8a9;
   --ansi-yellow: var(--warning);
   --ansi-blue: #5e6ad2;
   --ansi-magenta: #b07cd8;
-  --ansi-cyan: var(--accent);
+  --ansi-cyan: #3db8a9;
   --ansi-white: var(--text);
   --ansi-bright-black: #636370;
   --ansi-bright-red: #e8796a;
-  --ansi-bright-green: var(--accent-text);
+  --ansi-bright-green: #5cd4c4;
   --ansi-bright-yellow: #f0b45c;
   --ansi-bright-blue: #8b93e8;
   --ansi-bright-magenta: #c99de8;
-  --ansi-bright-cyan: var(--accent-text);
+  --ansi-bright-cyan: #5cd4c4;
   --ansi-bright-white: #fafafa;
 
   --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;

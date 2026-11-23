@@ -409,6 +409,17 @@ test('ptyEnv keeps Foray variables out of the shells it spawns', () => {
   assert.deepEqual(env, { PATH: '/bin', HOME: '/root' })
 })
 
+test('ptyEnv strips the server config and pm2 vars but keeps what a shell needs', () => {
+  const shell = { PATH: '/bin', HOME: '/h', LANG: 'en_US.UTF-8', SHELL: '/bin/zsh', USER: 'u', TERM: 'xterm', LOGNAME: 'u', TMPDIR: '/t' }
+  const pm2 = {
+    NODE_ENV: 'production', PORT: '3900', HOST: '127.0.0.1', pm_id: '0', pm_cwd: '/x', PM2_HOME: '/p',
+    PM2_USAGE: 'CLI', NODE_APP_INSTANCE: '0', NODE_CHANNEL_FD: '3', name: 'foray', status: 'online', watch: 'false',
+  }
+  assert.deepEqual(ptyEnv({ ...shell, ...pm2, FORAY_TOKEN: 's' }), shell)
+  // Without pm2 around, generic lowercase names are the user's own.
+  assert.deepEqual(ptyEnv({ ...shell, NODE_ENV: 'x', name: 'mine' }), { ...shell, name: 'mine' })
+})
+
 test('isLoopback knows the addresses only this machine can reach', () => {
   assert.equal(isLoopback('127.0.0.1'), true)
   assert.equal(isLoopback('127.1.2.3'), true)

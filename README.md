@@ -126,6 +126,24 @@ key use `Ctrl+Shift` with the same keys, and `Ctrl+Shift+,` to cycle back.
 **Settings.** The gear in the sidebar sets the terminal's text size, for that
 device only.
 
+**Telling boxes apart.** With more than one Foray server, give each a label
+and colour in `~/.foray/config.json` (set `FORAY_CONFIG` to use another
+path). The file is optional and holds nothing secret:
+
+```json
+{ "label": "Studio", "palette": { "accent": "#d4a72c" } }
+```
+
+The label (up to 24 characters) goes in the tab title, the home-screen name
+and a badge in the top bar. `palette` keys are the colour tokens in
+`src/styles.css` without the `--` (`bg`, `surface`, `text`, `accent`,
+`danger`, `ansi-*`, ...), with values as `#rgb`, `#rrggbb`, `#rrggbbaa` or
+`rgb()`/`rgba()`. Setting `accent` alone also derives `accent-dim`,
+`accent-text` and `term-selection`; terminal green and cyan stay teal.
+Unknown keys and bad values are ignored with a line in the server log. The
+file is read at start: `pm2 restart foray` applies a change (reload the
+page, and re-add the home-screen icon to pick up a new name).
+
 ## Security
 
 Foray is a shell on the machine it runs on: anyone holding the access token
