@@ -9,11 +9,12 @@ import express from 'express'
 import multer from 'multer'
 import http from 'node:http'
 import path from 'node:path'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
 import { pathToFileURL } from 'node:url'
 import { WebSocketServer, type WebSocket } from 'ws'
 import type { ServerMessage, TmuxWindow } from '../shared/protocol.ts'
-import { applyTmuxServerOptions, listWindows, mirrorTitles, type TmuxExecutor } from './tmux.ts'
+import { applyTmuxServerOptions, listWindows, mirrorTitles, scrubTmuxGlobalEnv, type TmuxExecutor } from './tmux.ts'
 import type { PtySpawner } from './pty-bridge.ts'
 import { handleConnection, type Connection } from './ws-handler.ts'
 import { PastSessions } from './pastSessions.ts'
@@ -378,19 +379,25 @@ export function createApp(
     const box = options.boxConfig
     const indexFile = path.join(clientDist, 'index.html')
     if (box) {
-      // Labelled pages are built once from the built files (the config is
-      // read once at startup), with no-cache so neither the browser nor the
-      // service worker's network-first fetch is handed a copy from before
-      // the label changed.
-      const html = applyBoxConfigToHtml(readFileSync(indexFile, 'utf8'), box)
-      const manifest = JSON.stringify(applyBoxConfigToManifest(JSON.parse(readFileSync(path.join(clientDist, 'manifest.json'), 'utf8')), box))
-      app.get('/manifest.json', (_req, res) => {
-        res.set('Cache-Control', 'no-cache').type('application/manifest+json').send(manifest)
-      })
+      // Labelled pages are rendered per request from the built files (the
+      // config is read once at startup, the build can change under us), with
+      // no-cache so neither the browser nor the service worker's
+      // network-first fetch is handed a copy from before a change. A
+      // missing file fails that request only, as sendFile would.
+      const labelled = (file: string, type: string, render: (text: string) => string): express.RequestHandler =>
+        (_req, res, next) => {
+          readFile(path.join(clientDist, file), 'utf8').then((text) => {
+            res.set('Cache-Control', 'no-cache').type(type).send(render(text))
+          }).catch((err: NodeJS.ErrnoException) => next(err.code === 'ENOENT' ? Object.assign(err, { status: 404 }) : err))
+        }
+      const page = labelled('index.html', 'html', (t) => applyBoxConfigToHtml(t, box))
+      app.get('/manifest.json', labelled('manifest.json', 'application/manifest+json',
+        (t) => JSON.stringify(applyBoxConfigToManifest(JSON.parse(t), box))))
+      app.get('/index.html', page)
       app.use(express.static(clientDist, { index: false }))
       app.use((req, res, next) => {
         if (req.method !== 'GET') return next()
-        res.set('Cache-Control', 'no-cache').type('html').send(html)
+        page(req, res, next)
       })
     } else {
       app.use(express.static(clientDist))
@@ -491,6 +498,9 @@ export function startServer(
     serverOptionsSet = await applyTmuxServerOptions(tmuxExec)
   }
   void ensureServerOptions()
+  // Once per start: a tmux server that predates the env scrub still hands
+  // its old global environment to new sessions (see env.ts).
+  void scrubTmuxGlobalEnv(tmuxExec)
 
   // Live refresh. Only changes made through Foray (create/kill/rename) reach
   // us as messages. A `cd` in the shell, or a program retitling its

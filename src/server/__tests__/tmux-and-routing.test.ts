@@ -16,6 +16,7 @@ import {
   paneHistoryState,
   captureHistoryLines,
   applyTmuxServerOptions,
+  scrubTmuxGlobalEnv,
   sessionNameFor,
   tmuxSocketArgs,
   SEP,
@@ -619,4 +620,31 @@ test('sessionNameFor trims the name and refuses one with nothing in it', () => {
   for (const name of ['', '   ', '\t\n']) {
     assert.throws(() => sessionNameFor(name), ClientError, JSON.stringify(name))
   }
+})
+
+test('scrubTmuxGlobalEnv unsets what sessionEnv strips from tmux\'s global environment, and only that', async () => {
+  const calls: string[][] = []
+  const exec: TmuxExecutor = async (_cmd, args) => {
+    calls.push(args)
+    if (args[0] === 'show-environment') {
+      return { stdout: 'HOST=127\nPORT=3900\nNODE_ENV=production\nPATH=/bin\nPM2_HOME=/p\nPM2_USAGE=CLI\nFORAY_TOKEN=s\n-DISPLAY\nHOME=/h\n', stderr: '' }
+    }
+    return { stdout: '', stderr: '' }
+  }
+  await scrubTmuxGlobalEnv(exec)
+  const unset = calls.filter((a) => a[0] === 'set-environment').map((a) => a.join(' '))
+  assert.deepEqual(unset, [
+    'set-environment -g -u HOST', 'set-environment -g -u PORT', 'set-environment -g -u NODE_ENV',
+    'set-environment -g -u PM2_USAGE', 'set-environment -g -u FORAY_TOKEN',
+  ])
+})
+
+test('scrubTmuxGlobalEnv does nothing when no tmux server answers', async () => {
+  const calls: string[][] = []
+  const exec: TmuxExecutor = async (_cmd, args) => {
+    calls.push(args)
+    throw new Error('no server running on /tmp/tmux-1/foray')
+  }
+  await scrubTmuxGlobalEnv(exec)
+  assert.deepEqual(calls, [['show-environment', '-g']])
 })

@@ -141,7 +141,7 @@ and a badge in the top bar. `palette` keys are the colour tokens in
 `rgb()`/`rgba()`. Setting `accent` alone also derives `accent-dim`,
 `accent-text` and `term-selection`; terminal green and cyan stay teal.
 Unknown keys and bad values are ignored with a line in the server log. The
-file is read at start: `pm2 restart foray` applies a change (reload the
+file is read at start: `npm run deploy` applies a change (reload the
 page, and re-add the home-screen icon to pick up a new name).
 
 ## Security

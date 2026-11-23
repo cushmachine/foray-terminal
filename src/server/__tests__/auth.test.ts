@@ -415,7 +415,8 @@ test('ptyEnv strips the server config and pm2 vars but keeps what a shell needs'
     NODE_ENV: 'production', PORT: '3900', HOST: '127.0.0.1', pm_id: '0', pm_cwd: '/x', PM2_HOME: '/p',
     PM2_USAGE: 'CLI', NODE_APP_INSTANCE: '0', NODE_CHANNEL_FD: '3', name: 'foray', status: 'online', watch: 'false',
   }
-  assert.deepEqual(ptyEnv({ ...shell, ...pm2, FORAY_TOKEN: 's' }), shell)
+  // PM2_HOME stays: pm2 run from inside a session needs its daemon.
+  assert.deepEqual(ptyEnv({ ...shell, ...pm2, FORAY_TOKEN: 's' }), { ...shell, PM2_HOME: '/p' })
   // Without pm2 around, generic lowercase names are the user's own.
   assert.deepEqual(ptyEnv({ ...shell, NODE_ENV: 'x', name: 'mine' }), { ...shell, name: 'mine' })
 })

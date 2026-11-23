@@ -54,6 +54,8 @@ test('colour validation is strict', () => {
 test('label: plain text, capped, control characters removed, non-strings ignored', () => {
   assert.equal(parse({ label: 'a'.repeat(60) }).config.label?.length, 24)
   assert.equal(parse({ label: 'a\nb\u0000c' }).config.label, 'a b c')
+  assert.equal(Array.from(parse({ label: '😀'.repeat(30) }).config.label!).length, 24)
+  assert.equal(parse({ label: '😀'.repeat(30) }).config.label, '😀'.repeat(24))
   assert.equal(parse({ label: '   ' }).config.label, undefined)
   assert.equal(parse({ label: 7 }).config.label, undefined)
   assert.equal(parse(['x']).config.label, undefined)
@@ -110,6 +112,10 @@ test('manifest: names and theme colour; short name fits 12 or falls back to the 
   assert.equal(applyBoxConfigToManifest(base, parse({ label: 'Mac Studio Box' }).config).short_name, 'Mac Studio Box')
   assert.equal(applyBoxConfigToManifest(base, parse({ label: 'Nest' }).config).short_name, 'Foray Nest')
   assert.equal(applyBoxConfigToManifest(base, parse({ palette: { text: '#fff' } }).config).name, 'Foray')
+  const bg = applyBoxConfigToManifest(base, parse({ palette: { bg: '#101820' } }).config)
+  assert.equal(bg['background_color'], '#101820')
+  assert.equal(bg['theme_color'], '#101820', 'bg is the theme colour when there is no accent')
+  assert.equal(applyBoxConfigToManifest(base, parse({ palette: { bg: '#101820', accent: '#d4a72c' } }).config)['theme_color'], '#d4a72c')
 })
 
 test('every palette key is a colour token in styles.css, and every colour token is listed', async () => {
@@ -147,6 +153,30 @@ test('the server serves the labelled index and manifest, and the plain ones with
   } finally {
     await labelled.close()
     await plain.close()
+    await fs.rm(root, { recursive: true, force: true })
+  }
+})
+
+test('the labelled pages are read per request, also by name, and a missing file fails only that request', async () => {
+  const root = await tmpDir('foray-box-fresh-')
+  const dist = path.join(root, 'dist')
+  await fs.mkdir(dist, { recursive: true })
+  // Starting with neither file present must not crash.
+  const config = parse({ label: 'Studio' }).config
+  config.file = '/x/config.json'
+  const srv = await startTestServer({ clientDist: dist, boxConfig: config })
+  try {
+    assert.equal((await fetch(`${srv.url}/`)).status, 404)
+    assert.equal((await fetch(`${srv.url}/manifest.json`)).status, 404)
+    await fs.writeFile(path.join(dist, 'index.html'), HTML.replace('assets/a.js', 'assets/new.js'))
+    await fs.writeFile(path.join(dist, 'manifest.json'), '{not json')
+    const idx = await (await fetch(`${srv.url}/index.html`)).text()
+    assert.match(idx, /<title>Foray · Studio<\/title>/)
+    assert.match(idx, /<meta name="foray-config" content="\/x\/config.json" \/>/)
+    assert.equal((await fetch(`${srv.url}/manifest.json`)).status, 500, 'bad manifest fails that request')
+    assert.equal((await fetch(`${srv.url}/`)).status, 200, 'the server is still up')
+  } finally {
+    await srv.close()
     await fs.rm(root, { recursive: true, force: true })
   }
 })
