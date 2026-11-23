@@ -16,6 +16,8 @@ import type { PaneHistoryState } from './history.ts'
 
 const promisedExecFile = promisify(_execFile)
 
+const SESSION_ENV = sessionEnv(process.env)
+
 /** Signature for the tmux command executor, injectable for testing. */
 export type TmuxExecutor = (
   cmd: string,
@@ -44,7 +46,7 @@ export function tmuxSocketArgs(): string[] {
 // environment every session inherits (env.ts). The socket flag goes first;
 // tmux only recognises -L before the subcommand.
 const defaultExec: TmuxExecutor = (cmd, args) =>
-  promisedExecFile(cmd, [...tmuxSocketArgs(), ...args], { env: sessionEnv(process.env) })
+  promisedExecFile(cmd, [...tmuxSocketArgs(), ...args], { env: SESSION_ENV })
 
 /** Session names Foray writes today. */
 const PREFIX = 'foray_'

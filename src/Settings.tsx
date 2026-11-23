@@ -7,7 +7,7 @@
 
 import type { CSSProperties } from 'react'
 import { useEscape } from './hooks/useEscape'
-import { boxLabel } from './boxLabel'
+import { BOX_LABEL } from './version'
 import { MAX_FONT_SIZE, MIN_FONT_SIZE } from './mobile'
 
 interface SettingsProps {
@@ -137,8 +137,8 @@ export function Settings({ open, onClose, isMobile, fontSize, onFontSizeChange }
           data-testid="box-config-line"
           style={{ padding: '0 12px 12px', fontSize: 11, color: 'var(--text-dim)' }}
         >
-          {boxLabel()
-            ? `This box: ${boxLabel()} — colours and label from ~/.foray/config.json`
+          {BOX_LABEL
+            ? `This box: ${BOX_LABEL} — colours and label from ~/.foray/config.json`
             : 'No box config — see ~/.foray/config.json'}
         </div>
       </div>

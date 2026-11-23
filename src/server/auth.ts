@@ -31,7 +31,9 @@ import type http from 'node:http'
 export const TOKEN_ENV = 'FORAY_TOKEN'
 /** Moves the token file; scripts/token.sh reads the same variable. */
 export const TOKEN_FILE_ENV = 'FORAY_TOKEN_FILE'
-export const DEFAULT_TOKEN_FILE = path.join(os.homedir(), '.foray', 'token')
+/** Per-user state (token, box config) lives here. */
+export const FORAY_DIR = path.join(os.homedir(), '.foray')
+export const DEFAULT_TOKEN_FILE = path.join(FORAY_DIR, 'token')
 export const SESSION_COOKIE = 'foray_session'
 /** How long a login lasts before the browser must present the token again. */
 export const DEFAULT_SESSION_MAX_AGE_S = 30 * 24 * 60 * 60

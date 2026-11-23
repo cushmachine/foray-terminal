@@ -7,6 +7,9 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
+import { execFile } from 'node:child_process'
+import { pathToFileURL } from 'node:url'
+import { promisify } from 'node:util'
 import {
   createWindow,
   listWindows,
@@ -167,17 +170,16 @@ test('defaultExec really composes -L foray onto a real tmux invocation', async (
     )
     await fs.chmod(stub, 0o755)
 
-    const prevPath = process.env.PATH
-    const prevSocket = process.env.FORAY_TMUX_SOCKET
-    delete process.env.FORAY_TMUX_SOCKET // unset -> tmuxSocketArgs() must lead with -L foray
-    process.env.PATH = `${dir}${path.delimiter}${prevPath ?? ''}`
-    try {
-      await listWindowSessions() // no executor passed: takes tmux.ts's own default, defaultExec
-    } finally {
-      process.env.PATH = prevPath
-      if (prevSocket === undefined) delete process.env.FORAY_TMUX_SOCKET
-      else process.env.FORAY_TMUX_SOCKET = prevSocket
-    }
+    // A child process, because tmux.ts snapshots its scrubbed env (PATH
+    // included) once at module load.
+    const env: NodeJS.ProcessEnv = { ...process.env, PATH: `${dir}${path.delimiter}${process.env.PATH ?? ''}` }
+    delete env.FORAY_TMUX_SOCKET // unset -> tmuxSocketArgs() must lead with -L foray
+    const tmuxModule = pathToFileURL(path.join(import.meta.dirname, '../tmux.ts')).href
+    await promisify(execFile)(
+      process.execPath,
+      ['--import', 'tsx', '-e', `import(${JSON.stringify(tmuxModule)}).then((m) => m.listWindowSessions())`],
+      { env, cwd: process.cwd() },
+    ) // no executor passed: takes tmux.ts's own default, defaultExec
 
     const logged = (await fs.readFile(log, 'utf8')).trim()
     assert.ok(logged.length > 0, 'expected the PATH-shadowed tmux stub to have been invoked at all')

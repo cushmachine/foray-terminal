@@ -95,13 +95,24 @@ export function holdsSyncSession(window: Pick<TmuxWindow, 'name'>): boolean {
   return window.name === SYNC_SESSION
 }
 
-/** Build id stamped into the current page, or null (dev server, tests). */
-export function readPageBuild(
+/** Content of the page's `<meta name="...">`, or null if absent or empty. */
+function readMeta(
+  name: string,
   doc: Pick<Document, 'querySelector'> | undefined = typeof document === 'undefined' ? undefined : document,
 ): string | null {
-  const meta = doc?.querySelector(`meta[name="${BUILD_META_NAME}"]`)
-  return meta?.getAttribute('content') || null
+  return doc?.querySelector(`meta[name="${name}"]`)?.getAttribute('content')?.trim() || null
 }
+
+/** Build id stamped into the current page, or null (dev server, tests). */
+export function readPageBuild(doc?: Pick<Document, 'querySelector'>): string | null {
+  return readMeta(BUILD_META_NAME, doc)
+}
+
+/**
+ * The box's label, set by the server in a <meta name="foray-label"> when
+ * ~/.foray/config.json has one (server/boxConfig.ts). Read once per page load.
+ */
+export const BOX_LABEL = readMeta('foray-label')
 
 /**
  * Compare this page's build with the server's `server:hello`. Pure, so it
