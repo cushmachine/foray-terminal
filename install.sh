@@ -17,7 +17,8 @@
 #   1. Installs system deps (tmux, build tools for node-pty): apt on
 #      Linux, Homebrew plus the Xcode command-line tools on macOS
 #   2. Installs Node.js 24 via nvm, but only when Node is missing or older
-#      than that (package.json's engines says ">=24", so newer is fine)
+#      than that (package.json's engines says ">=24", so newer is fine);
+#      nvm itself is only installed in that case too
 #   3. Uses whatever is already in FORAY_DIR, or clones the repo there
 #   4. Runs npm install (dev deps included: prod runs with tsx and vite)
 #   5. Checks for Tailscale — refuses to continue without it unless told
@@ -43,8 +44,11 @@
 #   FORAY_ALLOW_NO_TAILSCALE — set to 1 to install without Tailscale present
 #   FORAY_ALLOW_ROOT — set to 1 to install as root with no terminal to confirm
 #
-# The port is 3000, set in ecosystem.config.cjs; Foray binds it to 127.0.0.1
-# only, so Tailscale (or your own HTTPS proxy) is what makes it reachable.
+# The port is 3000 unless this machine overrides it: ecosystem.config.cjs sets
+# PORT (and an untracked ecosystem.local.cjs can change it), and this script
+# reads the effective value from there once the repo is in place. Foray binds
+# it to 127.0.0.1 only, so Tailscale (or your own HTTPS proxy) is what makes
+# it reachable.
 
 # ---------- this is bash, and only bash ----------
 
@@ -74,6 +78,8 @@ fi
 
 set -euo pipefail
 
+# Fallback only: the real port is read from ecosystem.config.cjs after the
+# repo is in place (see "the port" below).
 FORAY_PORT=3000
 NODE_MAJOR="24"
 
@@ -232,13 +238,16 @@ fi
 
 export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
 
-if [ ! -s "$NVM_DIR/nvm.sh" ]; then
-  info "Installing nvm..."
-  curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
+# nvm is a means of getting Node, not a requirement of Foray, so it is only
+# installed when Node needs installing (below). A machine whose Node is
+# already new enough — the official nodejs.org .pkg on a Mac, Homebrew, a
+# distro package — should not grow a ~/.nvm and a shell-profile edit it
+# never asked for. But an nvm that is already here is sourced first, as it
+# always was, so its default Node is the one tested below and wins on PATH.
+if [ -s "$NVM_DIR/nvm.sh" ]; then
+  # shellcheck source=/dev/null
+  . "$NVM_DIR/nvm.sh"
 fi
-
-# shellcheck source=/dev/null
-. "$NVM_DIR/nvm.sh"
 
 # NODE_MAJOR is a floor, not a target: package.json's engines says ">=24",
 # so 25 and later are supported too. An exact-major test here would see the
@@ -255,6 +264,12 @@ case "$CURRENT_MAJOR" in
   '' | *[!0-9]*) CURRENT_MAJOR=0 ;;
 esac
 if [ "$CURRENT_MAJOR" -lt "$NODE_MAJOR" ]; then
+  if [ ! -s "$NVM_DIR/nvm.sh" ]; then
+    info "Installing nvm..."
+    curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
+    # shellcheck source=/dev/null
+    . "$NVM_DIR/nvm.sh"
+  fi
   info "Installing Node.js ${NODE_MAJOR}..."
   nvm install "$NODE_MAJOR"
   nvm alias default "$NODE_MAJOR"
@@ -282,6 +297,18 @@ else
 fi
 
 cd "$FORAY_DIR"
+
+# ---------- the port ----------
+
+# The port is whatever ecosystem.config.cjs says, which already folds in this
+# machine's untracked ecosystem.local.cjs, so ask it instead of repeating a
+# number here that goes stale the moment someone overrides it. Anything that
+# is not a plain number (no node, a broken override file) keeps the default.
+CONFIGURED_PORT="$(node -e "console.log(require('./ecosystem.config.cjs').apps[0].env.PORT)" 2>/dev/null || true)"
+case "$CONFIGURED_PORT" in
+  '' | *[!0-9]*) ;;
+  *) FORAY_PORT="$CONFIGURED_PORT" ;;
+esac
 
 # ---------- npm install ----------
 
@@ -387,8 +414,26 @@ if [ "${FORAY_SKIP_SERVICE:-0}" = "1" ]; then
   info "Start Foray yourself with: npm run deploy"
 else
   if ! command -v pm2 >/dev/null 2>&1; then
-    info "Installing pm2..."
-    npm install -g pm2 2>&1 | tail -1
+    # The official nodejs.org .pkg puts npm's global prefix in root-owned
+    # /usr/local, where `npm install -g` fails with EACCES. Never reach for
+    # sudo to fix that: install under ~/.local instead (npm makes the bin/
+    # and lib/ it needs) and put its bin on PATH for the rest of this run.
+    # Everything below finds pm2 through `command -v`, so the LaunchAgent and
+    # the systemd unit get its absolute path either way. Both dirs npm -g
+    # writes to must be writable, since /usr/local itself often is while
+    # /usr/local/lib/node_modules is not.
+    NPM_PREFIX="$(npm prefix -g)"
+    NPM_LIB="$NPM_PREFIX/lib/node_modules"
+    [ -d "$NPM_LIB" ] || NPM_LIB="$NPM_PREFIX/lib"
+    if [ -w "$NPM_PREFIX" ] && [ -w "$NPM_LIB" ]; then
+      info "Installing pm2..."
+      npm install -g pm2 2>&1 | tail -1
+    else
+      info "npm's global prefix ($NPM_PREFIX) is not writable by you; installing pm2 into $HOME/.local instead (no sudo)."
+      info "Add $HOME/.local/bin to your PATH to run pm2 from your own shell."
+      npm install -g --prefix "$HOME/.local" pm2 2>&1 | tail -1
+      export PATH="$HOME/.local/bin:$PATH"
+    fi
   fi
 
   # Typechecks, then starts Foray from ecosystem.config.cjs; pm2 runs
