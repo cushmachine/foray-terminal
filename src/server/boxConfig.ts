@@ -8,7 +8,7 @@
 // leading `--`. Everything here is validated strictly because the values
 // end up in an inline <style> and in HTML: a bad entry is dropped with a
 // one-line warning, never a crash and never emitted. Read once at server
-// start; `pm2 restart foray` applies a change.
+// start; `npm run deploy` applies a change.
 
 import { readFileSync } from 'node:fs'
 import { escapeHtml } from '../ansi.ts'
@@ -29,6 +29,8 @@ export const PALETTE_KEYS: readonly string[] = [
 
 export interface BoxConfig {
   label?: string
+  /** The file it was read from, surfaced to the page for Settings. */
+  file?: string
   /** Validated colours (plus derived ones), keyed without `--`. */
   palette: Record<string, string>
 }
@@ -78,7 +80,9 @@ function deriveAccent(palette: Record<string, string>): void {
 
 function cleanLabel(raw: string): string {
   // eslint-disable-next-line no-control-regex
-  return raw.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, 24).trim()
+  const clean = raw.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim()
+  // By code points, so an emoji is never cut in half.
+  return Array.from(clean).slice(0, 24).join('').trim()
 }
 
 /** Validate parsed JSON into a BoxConfig, warning (never throwing) about what it drops. */
@@ -136,6 +140,7 @@ export function loadBoxConfig(file: string, logger?: Pick<Logger, 'log'>): BoxCo
     return null
   }
   const config = parseBoxConfig(data, warn)
+  config.file = file
   if (!config.label && Object.keys(config.palette).length === 0) return null
   return config
 }
@@ -148,12 +153,13 @@ export function titleFor(config: BoxConfig): string {
 /** index.html with the box's title, theme colour, palette overrides and label meta applied. */
 export function applyBoxConfigToHtml(html: string, config: BoxConfig): string {
   const title = escapeHtml(titleFor(config))
-  const accent = config.palette['accent']
+  const themeColor = config.palette['accent'] ?? config.palette['bg']
   let out = html.replace(/<title>[^<]*<\/title>/, () => `<title>${title}</title>`)
   out = out.replace(/(<meta name="apple-mobile-web-app-title" content=")[^"]*(")/, (_m, a, b) => `${a}${escapeHtml(config.label ? `Foray ${config.label}` : 'Foray')}${b}`)
-  if (accent) out = out.replace(/(<meta name="theme-color" content=")[^"]*(")/, (_m, a, b) => `${a}${accent}${b}`)
+  if (themeColor) out = out.replace(/(<meta name="theme-color" content=")[^"]*(")/, (_m, a, b) => `${a}${themeColor}${b}`)
   const decls = Object.entries(config.palette).map(([k, v]) => `--${k}:${v};`).join('')
   const extra = [
+    config.file ? `<meta name="foray-config" content="${escapeHtml(config.file)}" />` : '',
     config.label ? `<meta name="foray-label" content="${escapeHtml(config.label)}" />` : '',
     decls ? `<style id="foray-box-palette">:root{${decls}}</style>` : '',
   ].filter(Boolean).join('\n    ')
@@ -167,13 +173,15 @@ function shortNameFor(label: string): string {
   return joined.length <= 12 ? joined : label
 }
 
-/** manifest.json with the box's name, short name and theme colour applied. */
+/** manifest.json with the box's name, short name, theme and background colours applied. */
 export function applyBoxConfigToManifest(manifest: Record<string, unknown>, config: BoxConfig): Record<string, unknown> {
   const out = { ...manifest }
   if (config.label) {
     out['name'] = titleFor(config)
     out['short_name'] = shortNameFor(config.label)
   }
-  if (config.palette['accent']) out['theme_color'] = config.palette['accent']
+  const themeColor = config.palette['accent'] ?? config.palette['bg']
+  if (themeColor) out['theme_color'] = themeColor
+  if (config.palette['bg']) out['background_color'] = config.palette['bg']
   return out
 }

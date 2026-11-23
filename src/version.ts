@@ -114,6 +114,9 @@ export function readPageBuild(doc?: Pick<Document, 'querySelector'>): string | n
  */
 export const BOX_LABEL = readMeta('foray-label')
 
+/** Path of the box config the server applied (<meta name="foray-config">), or null when there is none. */
+export const BOX_CONFIG_PATH = readMeta('foray-config')
+
 /**
  * Compare this page's build with the server's `server:hello`. Pure, so it
  * can be tested without a DOM.

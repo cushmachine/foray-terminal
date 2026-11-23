@@ -11,7 +11,7 @@ import os from 'node:os'
 import { promisify } from 'node:util'
 import type { TmuxWindow } from '../shared/protocol.ts'
 import { ClientError } from './errors.ts'
-import { sessionEnv } from './env.ts'
+import { isStrippedEnvName, runsUnderPm2, sessionEnv } from './env.ts'
 import type { PaneHistoryState } from './history.ts'
 
 const promisedExecFile = promisify(_execFile)
@@ -371,6 +371,32 @@ export async function applyTmuxServerOptions(exec: TmuxExecutor = defaultExec): 
     return true
   } catch {
     return false
+  }
+}
+
+/**
+ * Remove from tmux's global environment every variable sessionEnv would
+ * strip. A tmux server keeps the environment it was started with and hands
+ * it to every new session, so one started before the scrub (or by an older
+ * Foray) still leaks HOST, PORT, NODE_ENV and pm2's variables. Existing
+ * sessions keep theirs; new ones are clean. Does nothing when no tmux
+ * server is running (never starts one), and never restarts it.
+ */
+export async function scrubTmuxGlobalEnv(exec: TmuxExecutor = defaultExec): Promise<void> {
+  let stdout: string
+  try {
+    ;({ stdout } = await exec('tmux', ['show-environment', '-g']))
+  } catch {
+    return
+  }
+  const underPm2 = runsUnderPm2(process.env)
+  for (const line of stdout.split('\n')) {
+    // `NAME=value`, or `-NAME` for a variable tmux marks as removed.
+    const name = line.replace(/^-/, '').split('=')[0]!
+    if (!name || !isStrippedEnvName(name, underPm2)) continue
+    try {
+      await exec('tmux', ['set-environment', '-g', '-u', name])
+    } catch { /* gone already, or the server exited */ }
   }
 }
 
