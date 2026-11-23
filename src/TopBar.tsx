@@ -2,6 +2,7 @@ import { displayName } from './sessionState'
 import type { Session } from './sessionState'
 import type { MobileView } from './mobile'
 import type { CSSProperties } from 'react'
+import { boxLabel } from './boxLabel'
 
 interface TopBarProps {
   isMobile: boolean
@@ -100,6 +101,28 @@ export function TopBar({
           {activeSessionData?.cwd}
         </span>
       </div>
+
+      {boxLabel() && (
+        <span
+          data-testid="box-label"
+          title="This box"
+          style={{
+            flexShrink: 0,
+            maxWidth: isMobile ? 80 : 160,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            fontSize: isMobile ? 10 : 11,
+            fontWeight: 600,
+            color: 'var(--accent)',
+            border: '1px solid var(--accent)',
+            borderRadius: 'var(--radius-sm)',
+            padding: '1px 6px',
+          }}
+        >
+          {boxLabel()}
+        </span>
+      )}
 
       {/* Mobile view switch: terminal or files, one pressed at a time */}
       {isMobile && (
